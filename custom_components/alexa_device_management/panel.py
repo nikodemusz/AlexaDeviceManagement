@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from homeassistant.components import panel_custom
+from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN, PANEL_ICON, PANEL_NAME, PANEL_URL_PATH
 
 
-async def async_register_panel(hass) -> None:
+async def async_register_panel(hass: HomeAssistant) -> None:
     """Register the custom panel."""
     panel_custom.async_register_panel(
         hass=hass,
