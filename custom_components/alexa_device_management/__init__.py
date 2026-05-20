@@ -8,9 +8,8 @@ from .const import DOMAIN
 from .panel import async_register_panel
 
 
-async def async_setup(hass, config) -> bool:
+async def async_setup(hass, _config) -> bool:
     """Set up integration from YAML (not used)."""
-    del config
     hass.data.setdefault(DOMAIN, {})
     return True
 

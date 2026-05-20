@@ -10,7 +10,6 @@ class AlexaDeviceManager:
         """Return a placeholder list of devices."""
         return []
 
-    async def async_delete_device(self, device_id: str) -> bool:
+    async def async_delete_device(self, _device_id: str) -> bool:
         """Delete a device by id (placeholder)."""
-        del device_id
         return False

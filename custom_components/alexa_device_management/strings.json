@@ -3,11 +3,11 @@
     "step": {
       "user": {
         "title": "Alexa Device Management",
-        "description": "Erstellt einen Eintrag für die Alexa-Geräteverwaltung."
+        "description": "Create an entry for Alexa device management."
       }
     },
     "abort": {
-      "already_configured": "Integration ist bereits konfiguriert."
+      "already_configured": "Integration is already configured."
     }
   }
 }

@@ -1,11 +1,11 @@
 list_devices:
-  name: Liste Alexa-Geräte
-  description: Listet alle verfügbaren Alexa-Geräte.
+  name: List Alexa devices
+  description: Lists all available Alexa devices.
   fields: {}
 
 delete_device:
-  name: Alexa-Gerät löschen
-  description: Löscht ein Alexa-Gerät anhand der Device-ID.
+  name: Delete Alexa device
+  description: Deletes an Alexa device by device ID.
   fields:
     device_id:
       required: true
