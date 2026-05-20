@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Alexa Device Management",
+        "description": "Create an entry for Alexa device management."
+      }
+    },
+    "abort": {
+      "already_configured": "Integration is already configured."
+    }
+  }
+}
