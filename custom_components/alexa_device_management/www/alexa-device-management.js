@@ -21,7 +21,7 @@ class AlexaDeviceManagementPanel extends HTMLElement {
       </style>
       <div class="card">
         <h2>Alexa Device Management</h2>
-        <p>Grundgerüst aktiv. Hier können später Alexa-Geräte geladen und gelöscht werden.</p>
+        <p>Scaffold active. Alexa devices can later be loaded and deleted here.</p>
       </div>
     `;
   }

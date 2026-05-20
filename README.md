@@ -1,8 +1,8 @@
 # AlexaDeviceManagement
 
-Grundgerüst einer Home-Assistant-Integration, um Amazon-Alexa-Geräte über eine eigene GUI zu verwalten.
+Starter scaffold for a Home Assistant integration to manage Amazon Alexa devices through a dedicated GUI.
 
-## Struktur
+## Structure
 
 ```text
 custom_components/alexa_device_management/
@@ -17,16 +17,16 @@ custom_components/alexa_device_management/
     └── alexa-device-management.js
 ```
 
-## Enthalten
+## Included
 
 - Home-Assistant Custom Integration (`alexa_device_management`)
-- Konfigurationsfluss (UI)
-- Platzhalter-Service-Definitionen für Geräte auflisten/löschen
-- Eigenes Panel mit einfacher GUI als Web Component
+- Configuration flow (UI)
+- Placeholder service definitions for listing/deleting devices
+- Custom panel with basic GUI web component
 
-## Nächste Schritte
+## Next Steps
 
-- Alexa API-Anbindung in `manager.py` implementieren (OAuth/Token-Handling)
-- Service-Handler registrieren und mit `manager.py` verbinden
-- GUI erweitern (Geräteliste, Lösch-Dialog, Statusmeldungen)
-- Optional: Tests für Service- und API-Logik ergänzen
+- Implement Alexa API integration in `manager.py` (OAuth/token handling)
+- Register service handlers and connect them to `manager.py`
+- Extend GUI (device list, delete dialog, status messages)
+- Optionally add tests for service and API logic
