@@ -1,0 +1,16 @@
+{
+  "domain": "alexa_device_management",
+  "name": "Alexa Device Management",
+  "version": "0.1.0",
+  "documentation": "https://github.com/nikodemusz/AlexaDeviceManagement",
+  "codeowners": [
+    "@nikodemusz"
+  ],
+  "requirements": [],
+  "config_flow": true,
+  "dependencies": [
+    "panel_custom",
+    "http"
+  ],
+  "iot_class": "cloud_polling"
+}
