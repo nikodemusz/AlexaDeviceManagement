@@ -1,5 +1,6 @@
 {
   "name": "Alexa Device Management",
+  "type": "integration",
   "domains": [
     "alexa_device_management"
   ],
