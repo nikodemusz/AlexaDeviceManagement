@@ -4,10 +4,12 @@ Serves the device management UI and proxies requests to the Amazon Alexa API.
 Configuration is read from the Home Assistant add-on options.
 """
 
+import html
 import json
 import logging
 import os
 import pathlib
+import re
 from typing import Any
 
 from aiohttp import web
@@ -101,10 +103,14 @@ def get_demo_devices() -> list[dict[str, Any]]:
 async def handle_index(request: web.Request) -> web.Response:
     """Serve the main UI page."""
     ingress_path = request.headers.get("X-Ingress-Path", "")
-    html = (STATIC_DIR / "index.html").read_text()
-    # Inject the ingress base path so the frontend can resolve API calls
-    html = html.replace("{{INGRESS_PATH}}", ingress_path)
-    return web.Response(text=html, content_type="text/html")
+    # Validate ingress path: only allow path-like strings (letters, digits, hyphens, slashes)
+    if not re.match(r"^[a-zA-Z0-9/_-]*$", ingress_path):
+        ingress_path = ""
+    html_content = (STATIC_DIR / "index.html").read_text()
+    # Safely inject the ingress base path
+    safe_path = html.escape(ingress_path, quote=True)
+    html_content = html_content.replace("{{INGRESS_PATH}}", safe_path)
+    return web.Response(text=html_content, content_type="text/html")
 
 
 async def handle_api_devices(request: web.Request) -> web.Response:
