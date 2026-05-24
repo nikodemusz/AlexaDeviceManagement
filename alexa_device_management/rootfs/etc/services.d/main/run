@@ -2,7 +2,7 @@
 set -eu
 
 SOURCE_DIR="/opt/alexa_device_management/custom_components/alexa_device_management"
-TARGET_ROOT="/homeassistant/custom_components"
+TARGET_ROOT="/config/custom_components"
 TARGET_DIR="${TARGET_ROOT}/alexa_device_management"
 
 echo "[info] Installing Alexa Device Management integration..."

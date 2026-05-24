@@ -8,7 +8,7 @@ arch:
   - aarch64
   - amd64
 map:
-  - homeassistant_config:rw
+  - config:rw
 startup: services
 boot: manual
 init: false

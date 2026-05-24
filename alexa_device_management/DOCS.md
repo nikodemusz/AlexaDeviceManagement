@@ -2,7 +2,7 @@
 
 The app copies `custom_components/alexa_device_management` from the app container to:
 
-`/homeassistant/custom_components/alexa_device_management`
+`/config/custom_components/alexa_device_management`
 
 ## Usage
 
