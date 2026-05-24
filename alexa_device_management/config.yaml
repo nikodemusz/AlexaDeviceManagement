@@ -1,0 +1,15 @@
+# https://developers.home-assistant.io/docs/apps/configuration#app-configuration
+name: Alexa Device Management Installer
+version: "0.2.0"
+slug: alexa_device_management_installer
+description: Installs the Alexa Device Management custom integration into Home Assistant.
+url: "https://github.com/nikodemusz/AlexaDeviceManagement/tree/main/alexa_device_management"
+arch:
+  - aarch64
+  - amd64
+map:
+  - config:rw
+startup: services
+boot: manual
+init: false
+apparmor: false

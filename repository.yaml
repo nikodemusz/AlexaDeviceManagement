@@ -1,4 +1,6 @@
 ---
+# https://developers.home-assistant.io/docs/apps/repository#repository-configuration
 name: Home Assistant Apps by nikodemusz
+description: Home Assistant app repository for Alexa Device Management.
 url: https://github.com/nikodemusz/AlexaDeviceManagement
 maintainer: nikodemusz
