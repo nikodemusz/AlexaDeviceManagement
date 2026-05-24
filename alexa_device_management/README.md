@@ -2,6 +2,8 @@
 
 A Home Assistant custom integration for managing Amazon Alexa devices through a dedicated panel UI — analogous to Z-Wave JS UI or Zigbee2MQTT.
 
+**Note:** For Home Assistant OS App Installer installation, use the repository install flow from the root `README.md` and run the **Alexa Device Management Installer** app once before adding the integration.
+
 Home Assistant serves as the application platform (authentication, external URL access, sidebar navigation). The integration provides a full device management experience accessible locally and remotely.
 
 ## Architecture
