@@ -3,7 +3,13 @@
     "step": {
       "user": {
         "title": "Alexa Device Management",
-        "description": "Create an entry for Alexa device management."
+        "description": "Enter your Amazon Alexa API credentials to connect.",
+        "data": {
+          "amazon_region": "Amazon Region",
+          "client_id": "Client ID",
+          "client_secret": "Client Secret",
+          "refresh_token": "Refresh Token"
+        }
       }
     },
     "abort": {

@@ -11,5 +11,5 @@ rm -rf "${TARGET_DIR}"
 cp -a "${SOURCE_DIR}" "${TARGET_DIR}"
 echo "[info] Installation complete."
 
-# Keep app running to avoid restart loops in service mode.
-exec tail -f /dev/null
+echo "[info] Starting Alexa Device Management web server..."
+exec python3 /opt/alexa_device_management/web/server.py

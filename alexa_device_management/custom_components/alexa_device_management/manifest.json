@@ -1,7 +1,7 @@
 {
   "domain": "alexa_device_management",
   "name": "Alexa Device Management",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "documentation": "https://github.com/nikodemusz/AlexaDeviceManagement",
   "codeowners": [
     "@nikodemusz"
