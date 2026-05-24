@@ -1,9 +1,0 @@
-{
-  "name": "Alexa Device Management",
-  "type": "integration",
-  "domains": [
-    "alexa_device_management"
-  ],
-  "homeassistant": "2024.1.0",
-  "render_readme": true
-}

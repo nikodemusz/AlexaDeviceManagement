@@ -1,11 +1,19 @@
 # Alexa Device Management
 
-This add-on lets you manage your Amazon Alexa devices directly from Home Assistant.
+Standalone web UI to manage your Amazon Alexa smart home devices directly from
+Home Assistant OS. This is **not** a Home Assistant integration – it is a
+standalone app that runs its own web server and is accessible via the HA sidebar.
+
+## Why?
+
+Amazon removed the web interface that allowed bulk management of Alexa devices.
+The Alexa App only lets you manage one device at a time which is tedious.
+This app provides a web-based alternative for viewing, editing, and bulk-managing
+your Alexa devices.
 
 ## Configuration
 
-Before you can use the add-on, you need to configure your Amazon Alexa API credentials
-in the add-on settings:
+Configure your Amazon credentials in the add-on settings:
 
 | Option | Description |
 |--------|-------------|
@@ -19,22 +27,10 @@ in the add-on settings:
 1. Go to the [Amazon Developer Console](https://developer.amazon.com/).
 2. Create a new Security Profile under **Apps & Services → Login with Amazon**.
 3. Note the **Client ID** and **Client Secret**.
-4. Use the Login with Amazon (LWA) OAuth2 flow to obtain a **Refresh Token** with
-   the `alexa::devices:all:geolocation:read` and `alexa::devices:all:address:full:read` scopes.
+4. Use the Login with Amazon (LWA) OAuth2 flow to obtain a **Refresh Token**.
 5. Enter all values in the add-on configuration.
 
 ## Web UI
 
-Once the add-on is started, open the **Alexa Devices** panel in the Home Assistant sidebar
-to view your registered Alexa devices.
-
-## Custom Integration
-
-The add-on also installs the `alexa_device_management` custom component into:
-
-```
-/config/custom_components/alexa_device_management
-```
-
-After the first start, restart Home Assistant and add **Alexa Device Management**
-from **Settings → Devices & Services**.
+After starting the add-on, open **Alexa Devices** from the Home Assistant sidebar.
+The UI displays all your registered Alexa devices and allows you to manage them.

@@ -10,13 +10,12 @@ COPY rootfs/opt/alexa_device_management/web/requirements.txt /tmp/requirements.t
 RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt \
     && rm /tmp/requirements.txt
 
-COPY custom_components /opt/alexa_device_management/custom_components
 COPY rootfs /
 
 LABEL \
     io.hass.name="Alexa Device Management" \
-    io.hass.description="Manage your Amazon Alexa devices from Home Assistant" \
+    io.hass.description="Standalone web UI for managing Amazon Alexa devices" \
     io.hass.type="app" \
     org.opencontainers.image.title="Home Assistant App: Alexa Device Management" \
-    org.opencontainers.image.description="Manage your Amazon Alexa devices from Home Assistant" \
+    org.opencontainers.image.description="Standalone web UI for managing Amazon Alexa smart home devices – a replacement for Amazon's removed bulk-management interface" \
     org.opencontainers.image.source="https://github.com/nikodemusz/AlexaDeviceManagement"
