@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Alexa Device Management</title>
+  <link rel="stylesheet" href="{{INGRESS_PATH}}/static/style.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="toolbar">
+      <h1>
+        <svg class="alexa-icon" viewBox="0 0 24 24"><path d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4M12,6A6,6 0 0,1 18,12A6,6 0 0,1 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6Z" fill="currentColor"/></svg>
+        Alexa Device Management
+      </h1>
+      <div class="toolbar-actions">
+        <span id="config-status" class="status-badge"></span>
+        <button id="btn-refresh" class="btn btn-secondary" title="Geräteliste aktualisieren">↻ Aktualisieren</button>
+      </div>
+    </header>
+
+    <div id="alert-box" class="alert hidden"></div>
+
+    <main id="device-container" class="device-grid">
+      <div class="loading">Lade Geräte...</div>
+    </main>
+  </div>
+
+  <script>
+    const INGRESS_PATH = "{{INGRESS_PATH}}";
+
+    async function fetchDevices() {
+      try {
+        const resp = await fetch(`${INGRESS_PATH}/api/devices`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        renderDevices(data.devices || []);
+      } catch (err) {
+        showAlert("Fehler beim Laden der Geräte: " + err.message, "error");
+      }
+    }
+
+    async function fetchConfigStatus() {
+      try {
+        const resp = await fetch(`${INGRESS_PATH}/api/config-status`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const badge = document.getElementById("config-status");
+        if (data.configured) {
+          badge.textContent = `✓ Konfiguriert (${data.region.toUpperCase()})`;
+          badge.className = "status-badge status-ok";
+        } else {
+          badge.textContent = "⚠ Nicht konfiguriert";
+          badge.className = "status-badge status-warn";
+          showAlert(
+            "Amazon-Zugangsdaten sind noch nicht konfiguriert. Bitte tragen Sie Client-ID, Client-Secret und Refresh-Token in den Add-on-Einstellungen ein.",
+            "warning"
+          );
+        }
+      } catch (_) {}
+    }
+
+    function renderDevices(devices) {
+      const container = document.getElementById("device-container");
+      if (devices.length === 0) {
+        container.innerHTML = `<div class="empty-state"><p>Keine Geräte gefunden.</p></div>`;
+        return;
+      }
+      container.innerHTML = devices.map(d => `
+        <div class="device-card">
+          <div class="online-indicator ${d.online ? 'online' : 'offline'}" title="${d.online ? 'Online' : 'Offline'}"></div>
+          <div class="device-name">${esc(d.name)}</div>
+          <div class="device-type">${esc(d.type.replace(/_/g, ' '))}</div>
+          <div class="device-meta">
+            <span class="device-room">📍 ${esc(d.room || '—')}</span>
+            <span class="device-serial">SN: ${esc(d.serial)}</span>
+          </div>
+          <div class="capabilities">
+            ${(d.capabilities || []).map(c => `<span class="chip">${esc(c)}</span>`).join('')}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function showAlert(message, type) {
+      const box = document.getElementById("alert-box");
+      box.textContent = message;
+      box.className = `alert alert-${type}`;
+    }
+
+    function esc(str) {
+      const d = document.createElement("div");
+      d.textContent = str || "";
+      return d.innerHTML;
+    }
+
+    // Init
+    document.getElementById("btn-refresh").addEventListener("click", fetchDevices);
+    fetchConfigStatus();
+    fetchDevices();
+  </script>
+</body>
+</html>

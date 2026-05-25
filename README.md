@@ -10,14 +10,12 @@ Apps documentation: <https://developers.home-assistant.io/docs/apps>
 
 | App | Description |
 |-----|-------------|
-| [Alexa Device Management Installer](./alexa_device_management/) | Installs/updates the Alexa Device Management custom integration into Home Assistant |
+| [Alexa Device Management](./alexa_device_management/) | Standalone web UI for managing Amazon Alexa smart home devices |
 
 ## Installation (HA OS App Installer)
 
 1. Open **Settings → Add-ons → Add-on Store** in Home Assistant OS.
 2. Open the menu (⋮) and choose **Repositories**.
 3. Add this repository URL: `https://github.com/nikodemusz/AlexaDeviceManagement`.
-4. Open **Alexa Device Management Installer** and click **Install**.
-5. Start the app once to copy the integration files.
-6. Restart Home Assistant.
-7. Add **Alexa Device Management** via **Settings → Devices & Services → Add Integration**.
+4. Install **Alexa Device Management** and start it.
+5. Open **Alexa Devices** from the HA sidebar.

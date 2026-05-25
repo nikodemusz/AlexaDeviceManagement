@@ -1,15 +1,5 @@
 #!/usr/bin/with-contenv sh
 set -eu
 
-SOURCE_DIR="/opt/alexa_device_management/custom_components/alexa_device_management"
-TARGET_ROOT="/config/custom_components"
-TARGET_DIR="${TARGET_ROOT}/alexa_device_management"
-
-echo "[info] Installing Alexa Device Management integration..."
-mkdir -p "${TARGET_ROOT}"
-rm -rf "${TARGET_DIR}"
-cp -a "${SOURCE_DIR}" "${TARGET_DIR}"
-echo "[info] Installation complete."
-
-# Keep app running to avoid restart loops in service mode.
-exec tail -f /dev/null
+echo "[info] Starting Alexa Device Management web server..."
+exec python3 /opt/alexa_device_management/web/server.py
