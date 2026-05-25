@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.3
+
+- **Bugfix**: OAuth redirect_uri war nur ein relativer Pfad (z.B.
+  `/api/hassio_ingress/.../auth/callback`) statt einer vollständigen absoluten
+  URL (`https://domain.de/api/hassio_ingress/.../auth/callback`). Amazon LWA
+  verlangt eine absolute URL und lehnte die relative URI mit dem Fehler
+  "lwa-invalid-parameter-bad-redirect-uri-vendor" (400 Bad Request) ab.
+  Die redirect_uri wird nun korrekt aus den Proxy-Headern (X-Forwarded-Proto,
+  X-Forwarded-Host) zusammengesetzt.
+
 ## 0.6.2
 
 - **Bugfix**: OAuth-Scope korrigiert – `alexa::all` (doppelter Doppelpunkt) war kein

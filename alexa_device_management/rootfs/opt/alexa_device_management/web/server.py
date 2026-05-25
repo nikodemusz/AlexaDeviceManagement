@@ -491,9 +491,18 @@ async def handle_auth_login(request: web.Request) -> web.Response:
     if not re.match(r"^[a-zA-Z0-9/_-]*$", ingress_path):
         ingress_path = ""
 
-    # Build the redirect_uri – this must match what's registered in Amazon Developer Console
-    # For HA ingress, the URL is relative to the HA instance
-    redirect_uri = f"{ingress_path}/auth/callback"
+    # Build the redirect_uri – Amazon LWA requires a full absolute URL
+    # Derive the external base URL from proxy headers set by Home Assistant ingress
+    scheme = request.headers.get("X-Forwarded-Proto", "https")
+    host = request.headers.get("X-Forwarded-Host") or request.headers.get("Host", "")
+    if not host:
+        return web.json_response(
+            {"error": "Externe URL konnte nicht ermittelt werden. "
+                      "Bitte stelle sicher, dass eine externe URL in Home Assistant konfiguriert ist "
+                      "(Einstellungen → System → Netzwerk → Internet-URL)."},
+            status=400,
+        )
+    redirect_uri = f"{scheme}://{host}{ingress_path}/auth/callback"
 
     # Generate CSRF state token
     state = secrets.token_urlsafe(32)
