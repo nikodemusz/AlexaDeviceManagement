@@ -11,27 +11,50 @@ sich direkt mit dem eigenen Amazon-Konto (E-Mail + Passwort) anzumelden.
 ```
 ┌──────────────┐         ┌───────────────────────┐        ┌─────────────┐
 │  Benutzer    │         │  Amazon Developer      │        │  Amazon     │
-│  (Add-on     │         │  Console / LWA         │        │  Alexa API  │
-│   Config)    │         │  OAuth2 Server         │        │             │
+│  (Browser /  │         │  Console / LWA         │        │  Alexa API  │
+│   Add-on UI) │         │  OAuth2 Server         │        │             │
 └──────┬───────┘         └───────────┬───────────┘        └──────┬──────┘
        │                             │                            │
-       │ 1. Client-ID, Secret,       │                            │
-       │    Refresh-Token eintragen  │                            │
-       │    (Add-on Einstellungen)   │                            │
+       │ 1. Client-ID, Secret        │                            │
+       │    in Add-on eintragen      │                            │
+       │    + Redirect-URI in        │                            │
+       │    Developer Console        │                            │
+       │                             │                            │
+       │ 2. "Mit Amazon anmelden"    │                            │
+       │    klicken in der App       │                            │
+       ├────────────────────────────►│                            │
+       │◄────────────────────────────┤ Amazon Login-Seite         │
+       │                             │                            │
+       │ 3. Bei Amazon einloggen     │                            │
+       │    + Berechtigungen erteilen│                            │
        ├────────────────────────────►│                            │
        │                             │                            │
-       │ 2. Add-on tauscht           │                            │
-       │    Refresh-Token gegen      │                            │
-       │    Access-Token             │                            │
-       │    (POST /auth/o2/token)    │                            │
-       ├────────────────────────────►│                            │
-       │◄────────────────────────────┤ Access-Token               │
+       │ 4. Redirect zurück zum      │                            │
+       │    Add-on mit Auth-Code     │                            │
+       │◄────────────────────────────┤                            │
        │                             │                            │
-       │ 3. API-Aufruf mit           │                            │
+       │ 5. Add-on tauscht Code      │                            │
+       │    gegen Tokens             │                            │
+       │    (automatisch im          │                            │
+       │     Hintergrund)            │                            │
+       ├────────────────────────────►│                            │
+       │◄────────────────────────────┤ Access + Refresh Token     │
+       │                             │                            │
+       │ 6. Refresh-Token wird       │                            │
+       │    persistent gespeichert   │                            │
+       │    (/data/oauth_tokens.json)│                            │
+       │                             │                            │
+       │ 7. API-Aufruf mit           │                            │
        │    Access-Token             │                            │
        ├─────────────────────────────┼───────────────────────────►│
        │◄────────────────────────────┼────────────────────────────┤
        │          Gerätedaten        │                            │
+       │                             │                            │
+       │ 8. Background-Refresh       │                            │
+       │    erneuert Token auto-     │                            │
+       │    matisch vor Ablauf       │                            │
+       ├────────────────────────────►│                            │
+       │◄────────────────────────────┤ Neuer Access-Token         │
 ```
 
 ### Konfigurationsparameter
@@ -41,15 +64,15 @@ sich direkt mit dem eigenen Amazon-Konto (E-Mail + Passwort) anzumelden.
 | `amazon_region`  | Amazon-Region (`eu`, `na`, `fe`). Standard: `eu`              |
 | `client_id`      | OAuth2 Client-ID aus der Amazon Developer Console             |
 | `client_secret`  | OAuth2 Client-Secret aus der Amazon Developer Console         |
-| `refresh_token`  | OAuth2 Refresh-Token, erhalten über den LWA-Auth-Flow         |
+| `refresh_token`  | *(Optional)* Manuell eingetragener Refresh-Token (Fallback)   |
 
-### Schritte zum Erhalt der Credentials
+### Schritte zur Einrichtung
 
 1. Bei der [Amazon Developer Console](https://developer.amazon.com/) anmelden.
 2. Unter **Apps & Services → Login with Amazon** ein neues Security Profile anlegen.
-3. **Client ID** und **Client Secret** notieren.
-4. Den Login-with-Amazon-OAuth2-Flow durchführen, um einen **Refresh Token** zu erhalten.
-5. Alle Werte in der Add-on-Konfiguration eintragen.
+3. **Client ID** und **Client Secret** notieren und in den Add-on-Einstellungen eintragen.
+4. Die **Redirect-URI** aus der App-UI kopieren und unter "Web Settings → Allowed Return URLs" im Security Profile registrieren.
+5. In der App auf **"Mit Amazon anmelden"** klicken – der Rest passiert automatisch!
 
 ## Warum kann man sich nicht direkt mit dem Amazon-Konto anmelden?
 
@@ -74,10 +97,11 @@ Amazon (LWA)** – ein OAuth2-System. Das bedeutet:
 - Das Access-Token hat eine kurze Lebensdauer (~60 Minuten) und wird bei Bedarf
   über das Refresh-Token erneuert.
 
-Dieses Add-on kann **keinen** interaktiven Browser-Login durchführen, da es ein
-Headless-Backend ist. Daher muss der Benutzer den OAuth2-Flow **einmalig extern**
-durchführen und den resultierenden Refresh-Token manuell in die Konfiguration
-eintragen.
+Dieses Add-on implementiert den vollständigen OAuth2 Authorization Code Flow
+**direkt in der App**. Der Benutzer klickt auf "Mit Amazon anmelden", wird zur
+Amazon Login-Seite weitergeleitet, meldet sich dort an (inkl. MFA falls aktiv),
+und wird automatisch zurück zur App geleitet. Der Refresh-Token wird im
+Hintergrund gespeichert und automatisch erneuert.
 
 ### 3. Multi-Faktor-Authentifizierung (MFA)
 
@@ -122,8 +146,11 @@ Die OAuth2-Kommunikation mit Amazon ist implementiert:
 - ✅ Persistenter Token-Cache (überlebt Add-on-Neustart, gespeichert in `/data/token_cache.json`)
 - ✅ Automatischer Background-Refresh alle 60 Sekunden, erneuert Token 5 Minuten vor Ablauf
 - ✅ Token-Refresh-Status-Endpoint (`GET /api/token-refresh-status`)
+- ✅ Integrierter OAuth2-Flow über Ingress (Browser-Redirect → Amazon Login → Callback)
+- ✅ Refresh-Token wird automatisch in `/data/oauth_tokens.json` gespeichert
+- ✅ Login/Logout UI mit CSRF-Schutz (State-Parameter)
+- ✅ Redirect-URI Anzeige in der UI für einfache Registrierung in der Developer Console
 
 ## Zukünftige Verbesserungen
 
-- [ ] Integrierter OAuth2-Flow über Ingress (Browser-Redirect → Amazon Login → Callback)
 - [ ] Validierung der Credentials beim Speichern der Konfiguration

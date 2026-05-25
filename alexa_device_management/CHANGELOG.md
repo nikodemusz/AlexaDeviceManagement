@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.0
+
+- **Feature**: Integrierter OAuth2-Login direkt in der App – kein manuelles Kopieren
+  eines Refresh-Tokens mehr nötig! Der Benutzer klickt "Mit Amazon anmelden",
+  wird zu Amazon weitergeleitet, meldet sich dort an, und der Refresh-Token wird
+  automatisch in der App gespeichert.
+- **Feature**: Login/Logout UI mit Anleitung zur Einrichtung (Redirect-URI Anzeige).
+- **Feature**: OAuth-Tokens werden persistent in `/data/oauth_tokens.json` gespeichert
+  (unabhängig von der Add-on-Konfiguration).
+- **Feature**: Callback-Seite mit Erfolgs-/Fehlermeldung nach Amazon-Login.
+- **Verbesserung**: `refresh_token` in der Add-on-Konfiguration ist nun optional –
+  der in-App Login-Flow wird bevorzugt.
+- **Verbesserung**: CSRF-Schutz im OAuth-Flow via State-Parameter.
+
 ## 0.5.0
 
 - **Feature**: Automatischer OAuth Token-Refresh im Hintergrund – das Access-Token
