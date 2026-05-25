@@ -58,7 +58,7 @@ ALEXA_API_URLS: dict[str, str] = {
 }
 
 # OAuth2 scopes needed for Alexa device management
-OAUTH_SCOPES = "alexa::devices:all:read alexa::devices:all:write"
+OAUTH_SCOPES = "alexa::all"
 
 # ---------------------------------------------------------------------------
 # Token cache (persistent + in-memory)

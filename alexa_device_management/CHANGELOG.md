@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.1
+
+- **Bugfix**: OAuth-Scope korrigiert – `alexa::devices:all:read alexa::devices:all:write`
+  war kein gültiger Amazon LWA Scope und führte zu einem 400 Bad Request Fehler.
+  Ersetzt durch den korrekten Scope `alexa::all`.
+
 ## 0.6.0
 
 - **Feature**: Integrierter OAuth2-Login direkt in der App – kein manuelles Kopieren
