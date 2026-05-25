@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0
+
+- **Feature**: Automatischer OAuth Token-Refresh im Hintergrund – das Access-Token
+  wird automatisch 5 Minuten vor Ablauf erneuert, ohne dass ein API-Aufruf nötig ist.
+- **Feature**: Persistenter Token-Cache – überlebt Add-on-Neustarts (gespeichert in `/data/token_cache.json`).
+- **Feature**: Neuer API-Endpoint `GET /api/token-refresh-status` zeigt den Status des
+  automatischen Refresh-Prozesses (aktiv, nächster Refresh, Fehler).
+- **Feature**: UI-Statusanzeige für den automatischen Token-Refresh in der Toolbar.
+
 ## 0.4.0
 
 - **Breaking**: Removed HA custom integration (`custom_components`). This is now a

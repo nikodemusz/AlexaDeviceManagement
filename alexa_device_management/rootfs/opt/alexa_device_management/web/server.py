@@ -4,6 +4,7 @@ Serves the device management UI and proxies requests to the Amazon Alexa API.
 Configuration is read from the Home Assistant add-on options.
 """
 
+import asyncio
 import html
 import json
 import logging
@@ -20,7 +21,12 @@ logging.basicConfig(level=logging.INFO)
 _LOGGER = logging.getLogger(__name__)
 
 OPTIONS_PATH = pathlib.Path("/data/options.json")
+TOKEN_CACHE_PATH = pathlib.Path("/data/token_cache.json")
 STATIC_DIR = pathlib.Path(__file__).parent / "static"
+
+# Background refresh interval: refresh 5 minutes before expiry, check every 60s
+_REFRESH_CHECK_INTERVAL = 60  # seconds between checks
+_REFRESH_BUFFER = 300  # refresh 5 minutes before expiry
 
 # Amazon OAuth2 / LWA endpoints per region
 AMAZON_TOKEN_URLS: dict[str, str] = {
@@ -36,13 +42,44 @@ ALEXA_API_URLS: dict[str, str] = {
 }
 
 # ---------------------------------------------------------------------------
-# Token cache (in-memory, lives as long as the process)
+# Token cache (persistent + in-memory)
 # ---------------------------------------------------------------------------
 
 _token_cache: dict[str, Any] = {
     "access_token": None,
     "expires_at": 0,
+    "last_refresh": 0,
+    "last_refresh_error": None,
+    "refresh_count": 0,
 }
+
+
+def _load_token_cache() -> None:
+    """Load token cache from persistent storage."""
+    if TOKEN_CACHE_PATH.exists():
+        try:
+            data = json.loads(TOKEN_CACHE_PATH.read_text())
+            _token_cache["access_token"] = data.get("access_token")
+            _token_cache["expires_at"] = data.get("expires_at", 0)
+            _token_cache["last_refresh"] = data.get("last_refresh", 0)
+            _token_cache["refresh_count"] = data.get("refresh_count", 0)
+            _LOGGER.info("Token cache loaded from persistent storage")
+        except (json.JSONDecodeError, OSError) as exc:
+            _LOGGER.warning("Could not load token cache: %s", exc)
+
+
+def _save_token_cache() -> None:
+    """Persist token cache to disk."""
+    try:
+        data = {
+            "access_token": _token_cache["access_token"],
+            "expires_at": _token_cache["expires_at"],
+            "last_refresh": _token_cache["last_refresh"],
+            "refresh_count": _token_cache["refresh_count"],
+        }
+        TOKEN_CACHE_PATH.write_text(json.dumps(data))
+    except OSError as exc:
+        _LOGGER.warning("Could not save token cache: %s", exc)
 
 
 def load_options() -> dict[str, Any]:
@@ -104,8 +141,8 @@ async def get_valid_access_token(app: web.Application) -> str | None:
     if not all([client_id, client_secret, refresh_token]):
         return None
 
-    # Check if cached token is still valid (with 60s buffer)
-    if _token_cache["access_token"] and time.time() < _token_cache["expires_at"] - 60:
+    # Check if cached token is still valid (with 5min buffer)
+    if _token_cache["access_token"] and time.time() < _token_cache["expires_at"] - _REFRESH_BUFFER:
         return _token_cache["access_token"]
 
     # Refresh the token
@@ -116,6 +153,10 @@ async def get_valid_access_token(app: web.Application) -> str | None:
 
     _token_cache["access_token"] = token_data["access_token"]
     _token_cache["expires_at"] = time.time() + token_data.get("expires_in", 3600)
+    _token_cache["last_refresh"] = time.time()
+    _token_cache["refresh_count"] = _token_cache.get("refresh_count", 0) + 1
+    _token_cache["last_refresh_error"] = None
+    _save_token_cache()
 
     _LOGGER.info("Access token refreshed successfully (region=%s)", region)
     return _token_cache["access_token"]
@@ -328,18 +369,117 @@ async def handle_api_auth_status(request: web.Request) -> web.Response:
         })
 
 
+async def handle_api_token_refresh_status(request: web.Request) -> web.Response:
+    """Return the status of the automatic token refresh process."""
+    now = time.time()
+    expires_at = _token_cache["expires_at"]
+    last_refresh = _token_cache["last_refresh"]
+    has_token = _token_cache["access_token"] is not None
+
+    # Calculate next refresh time (5 minutes before expiry)
+    next_refresh = max(0, expires_at - _REFRESH_BUFFER - now) if has_token else 0
+
+    task = request.app.get("token_refresh_task")
+    return web.json_response({
+        "auto_refresh_active": task is not None and not task.done(),
+        "has_valid_token": has_token and now < expires_at,
+        "expires_in": max(0, int(expires_at - now)) if has_token else 0,
+        "next_refresh_in": int(next_refresh),
+        "last_refresh_ago": int(now - last_refresh) if last_refresh > 0 else None,
+        "refresh_count": _token_cache["refresh_count"],
+        "last_error": _token_cache.get("last_refresh_error"),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Background Token Refresh Task
+# ---------------------------------------------------------------------------
+
+
+async def _background_token_refresh(app: web.Application) -> None:
+    """Periodically refresh the OAuth access token in the background.
+
+    This ensures the token is always fresh and API calls never fail due to
+    an expired token. Runs every 60 seconds and refreshes 5 minutes before expiry.
+    """
+    _LOGGER.info("Background token refresh task started")
+
+    while True:
+        try:
+            await asyncio.sleep(_REFRESH_CHECK_INTERVAL)
+
+            options = load_options()
+            client_id = options.get("client_id", "")
+            client_secret = options.get("client_secret", "")
+            refresh_token = options.get("refresh_token", "")
+            region = options.get("amazon_region", "eu")
+
+            if not all([client_id, client_secret, refresh_token]):
+                continue
+
+            now = time.time()
+            expires_at = _token_cache["expires_at"]
+
+            # Refresh if token is expired or will expire within the buffer period
+            if _token_cache["access_token"] and now < expires_at - _REFRESH_BUFFER:
+                continue  # Token is still valid, no refresh needed
+
+            _LOGGER.info("Background refresh: token expired or expiring soon, refreshing...")
+
+            session = app["http_session"]
+            token_data = await refresh_access_token(
+                session, client_id, client_secret, refresh_token, region
+            )
+
+            _token_cache["access_token"] = token_data["access_token"]
+            _token_cache["expires_at"] = now + token_data.get("expires_in", 3600)
+            _token_cache["last_refresh"] = now
+            _token_cache["refresh_count"] = _token_cache.get("refresh_count", 0) + 1
+            _token_cache["last_refresh_error"] = None
+            _save_token_cache()
+
+            _LOGGER.info(
+                "Background refresh successful (region=%s, expires_in=%ds, total_refreshes=%d)",
+                region,
+                token_data.get("expires_in", 3600),
+                _token_cache["refresh_count"],
+            )
+
+        except asyncio.CancelledError:
+            _LOGGER.info("Background token refresh task cancelled")
+            break
+        except RuntimeError as exc:
+            _token_cache["last_refresh_error"] = str(exc)
+            _LOGGER.error("Background token refresh failed: %s", exc)
+        except aiohttp.ClientError as exc:
+            _token_cache["last_refresh_error"] = f"Network error: {exc}"
+            _LOGGER.error("Background token refresh – network error: %s", exc)
+        except Exception as exc:  # noqa: BLE001
+            _token_cache["last_refresh_error"] = f"{type(exc).__name__}: {exc}"
+            _LOGGER.exception("Background token refresh – unexpected error")
+
+
 # ---------------------------------------------------------------------------
 # Application lifecycle
 # ---------------------------------------------------------------------------
 
 
 async def on_startup(app: web.Application) -> None:
-    """Create the shared HTTP client session on startup."""
+    """Create the shared HTTP client session and start background tasks."""
     app["http_session"] = aiohttp.ClientSession()
+    _load_token_cache()
+    app["token_refresh_task"] = asyncio.create_task(_background_token_refresh(app))
 
 
 async def on_cleanup(app: web.Application) -> None:
-    """Close the shared HTTP client session on shutdown."""
+    """Stop background tasks and close the shared HTTP client session."""
+    task = app.get("token_refresh_task")
+    if task and not task.done():
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
     await app["http_session"].close()
 
 
@@ -357,6 +497,7 @@ def create_app() -> web.Application:
     app.router.add_get("/api/devices", handle_api_devices)
     app.router.add_get("/api/config-status", handle_api_config_status)
     app.router.add_get("/api/auth-status", handle_api_auth_status)
+    app.router.add_get("/api/token-refresh-status", handle_api_token_refresh_status)
     # Serve static assets (CSS, JS)
     if STATIC_DIR.exists():
         app.router.add_static("/static", STATIC_DIR, show_index=False)

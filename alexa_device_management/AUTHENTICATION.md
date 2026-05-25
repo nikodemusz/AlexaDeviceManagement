@@ -119,9 +119,11 @@ Die OAuth2-Kommunikation mit Amazon ist implementiert:
 - ✅ Geräteabruf über die Alexa Smart Home API (`GET /v2/appliances`)
 - ✅ In-Memory Token-Cache mit automatischer Erneuerung vor Ablauf
 - ✅ Regionsspezifische Endpoints (EU, NA, FE)
+- ✅ Persistenter Token-Cache (überlebt Add-on-Neustart, gespeichert in `/data/token_cache.json`)
+- ✅ Automatischer Background-Refresh alle 60 Sekunden, erneuert Token 5 Minuten vor Ablauf
+- ✅ Token-Refresh-Status-Endpoint (`GET /api/token-refresh-status`)
 
 ## Zukünftige Verbesserungen
 
 - [ ] Integrierter OAuth2-Flow über Ingress (Browser-Redirect → Amazon Login → Callback)
 - [ ] Validierung der Credentials beim Speichern der Konfiguration
-- [ ] Persistenter Token-Cache (überlebt Add-on-Neustart)

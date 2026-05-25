@@ -15,6 +15,7 @@
       </h1>
       <div class="toolbar-actions">
         <span id="config-status" class="status-badge"></span>
+        <span id="refresh-status" class="status-badge hidden" title="Automatischer Token-Refresh"></span>
         <button id="btn-auth-check" class="btn btn-secondary" title="Authentifizierungsstatus prüfen">🔑 Auth prüfen</button>
         <button id="btn-refresh" class="btn btn-secondary" title="Geräteliste aktualisieren">↻ Aktualisieren</button>
       </div>
@@ -100,6 +101,33 @@
     document.getElementById("btn-auth-check").addEventListener("click", checkAuthStatus);
     fetchConfigStatus();
     fetchDevices();
+    fetchTokenRefreshStatus();
+    setInterval(fetchTokenRefreshStatus, 30000); // Update every 30s
+
+    async function fetchTokenRefreshStatus() {
+      try {
+        const resp = await fetch(`${INGRESS_PATH}/api/token-refresh-status`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const badge = document.getElementById("refresh-status");
+        badge.classList.remove("hidden");
+
+        if (data.auto_refresh_active && data.has_valid_token) {
+          const mins = Math.floor(data.next_refresh_in / 60);
+          badge.textContent = `🔄 Auto-Refresh aktiv (nächster in ${mins}min)`;
+          badge.className = "status-badge status-ok";
+        } else if (data.auto_refresh_active && !data.has_valid_token) {
+          badge.textContent = "🔄 Auto-Refresh wartet auf Credentials";
+          badge.className = "status-badge status-warn";
+        } else if (data.last_error) {
+          badge.textContent = "⚠ Refresh-Fehler";
+          badge.className = "status-badge status-warn";
+          badge.title = data.last_error;
+        } else {
+          badge.classList.add("hidden");
+        }
+      } catch (_) {}
+    }
 
     async function checkAuthStatus() {
       const badge = document.getElementById("config-status");
