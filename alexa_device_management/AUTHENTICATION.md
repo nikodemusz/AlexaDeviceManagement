@@ -112,13 +112,16 @@ Kontosperrung führen.
 
 ## Aktueller Implementierungsstand
 
-> ⚠️ Die tatsächliche OAuth2-Kommunikation mit Amazon ist noch **nicht
-> implementiert** (siehe `server.py`, Zeile 119–123). Aktuell werden
-> Demo-Geräte angezeigt. Die Konfigurationsfelder existieren bereits, die
-> Token-Erneuerung und der API-Aufruf sind als nächster Schritt geplant.
+Die OAuth2-Kommunikation mit Amazon ist implementiert:
+
+- ✅ Automatischer Token-Refresh im Backend (`POST https://api.amazon.com/auth/o2/token`)
+- ✅ Auth-Status-Endpoint (`GET /api/auth-status`) zur Prüfung der Authentifizierung
+- ✅ Geräteabruf über die Alexa Smart Home API (`GET /v2/appliances`)
+- ✅ In-Memory Token-Cache mit automatischer Erneuerung vor Ablauf
+- ✅ Regionsspezifische Endpoints (EU, NA, FE)
 
 ## Zukünftige Verbesserungen
 
-- [ ] Automatischer Token-Refresh im Backend (`POST https://api.amazon.com/auth/o2/token`)
 - [ ] Integrierter OAuth2-Flow über Ingress (Browser-Redirect → Amazon Login → Callback)
 - [ ] Validierung der Credentials beim Speichern der Konfiguration
+- [ ] Persistenter Token-Cache (überlebt Add-on-Neustart)

@@ -15,6 +15,7 @@
       </h1>
       <div class="toolbar-actions">
         <span id="config-status" class="status-badge"></span>
+        <button id="btn-auth-check" class="btn btn-secondary" title="Authentifizierungsstatus prüfen">🔑 Auth prüfen</button>
         <button id="btn-refresh" class="btn btn-secondary" title="Geräteliste aktualisieren">↻ Aktualisieren</button>
       </div>
     </header>
@@ -96,8 +97,33 @@
 
     // Init
     document.getElementById("btn-refresh").addEventListener("click", fetchDevices);
+    document.getElementById("btn-auth-check").addEventListener("click", checkAuthStatus);
     fetchConfigStatus();
     fetchDevices();
+
+    async function checkAuthStatus() {
+      const badge = document.getElementById("config-status");
+      badge.textContent = "⏳ Prüfe...";
+      badge.className = "status-badge";
+      try {
+        const resp = await fetch(`${INGRESS_PATH}/api/auth-status`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        if (data.authenticated) {
+          badge.textContent = `✓ Authentifiziert (${data.expires_in}s)`;
+          badge.className = "status-badge status-ok";
+          showAlert(data.message, "success");
+        } else {
+          badge.textContent = "✗ Nicht authentifiziert";
+          badge.className = "status-badge status-warn";
+          showAlert(data.message, "warning");
+        }
+      } catch (err) {
+        badge.textContent = "✗ Fehler";
+        badge.className = "status-badge status-warn";
+        showAlert("Fehler bei der Authentifizierungsprüfung: " + err.message, "error");
+      }
+    }
   </script>
 </body>
 </html>
