@@ -15,12 +15,39 @@
       </h1>
       <div class="toolbar-actions">
         <span id="config-status" class="status-badge"></span>
-        <button id="btn-auth-check" class="btn btn-secondary" title="Authentifizierungsstatus prüfen">🔑 Auth prüfen</button>
+        <span id="refresh-status" class="status-badge hidden" title="Automatischer Token-Refresh"></span>
+        <button id="btn-login" class="btn btn-primary hidden" title="Mit Amazon anmelden">🔑 Mit Amazon anmelden</button>
+        <button id="btn-logout" class="btn btn-danger hidden" title="Abmelden">⏏ Abmelden</button>
         <button id="btn-refresh" class="btn btn-secondary" title="Geräteliste aktualisieren">↻ Aktualisieren</button>
       </div>
     </header>
 
     <div id="alert-box" class="alert hidden"></div>
+
+    <!-- Login setup section (shown when not authenticated) -->
+    <div id="login-section" class="login-section hidden">
+      <div class="login-card">
+        <h2>🔑 Amazon Anmeldung</h2>
+        <p>Um Ihre Alexa-Geräte zu verwalten, müssen Sie sich einmalig mit Ihrem Amazon-Konto anmelden.</p>
+        <div class="login-steps">
+          <h3>Voraussetzungen:</h3>
+          <ol>
+            <li>In der <a href="https://developer.amazon.com/" target="_blank">Amazon Developer Console</a> ein Security Profile anlegen.</li>
+            <li><strong>Client-ID</strong> und <strong>Client-Secret</strong> in den Add-on-Einstellungen eintragen.</li>
+            <li>Die <strong>Redirect-URI</strong> (wird unten angezeigt) in den "Web Settings" des Security Profiles registrieren.</li>
+          </ol>
+        </div>
+        <div id="redirect-uri-info" class="redirect-uri-info hidden">
+          <label>Redirect-URI für Amazon Developer Console:</label>
+          <code id="redirect-uri-value"></code>
+          <small>Diese URI muss unter "Allowed Return URLs" im Security Profile registriert werden.</small>
+        </div>
+        <button id="btn-start-login" class="btn btn-primary btn-large" disabled>
+          🔑 Mit Amazon anmelden
+        </button>
+        <p id="login-hint" class="login-hint">Bitte zuerst Client-ID und Client-Secret in den Add-on-Einstellungen konfigurieren.</p>
+      </div>
+    </div>
 
     <main id="device-container" class="device-grid">
       <div class="loading">Lade Geräte...</div>
@@ -47,18 +74,83 @@
         if (!resp.ok) return;
         const data = await resp.json();
         const badge = document.getElementById("config-status");
+        const loginSection = document.getElementById("login-section");
+        const deviceContainer = document.getElementById("device-container");
+        const btnLogin = document.getElementById("btn-login");
+        const btnLogout = document.getElementById("btn-logout");
+        const btnStartLogin = document.getElementById("btn-start-login");
+        const loginHint = document.getElementById("login-hint");
+
         if (data.configured) {
-          badge.textContent = `✓ Konfiguriert (${data.region.toUpperCase()})`;
+          badge.textContent = `✓ Verbunden (${data.region.toUpperCase()})`;
           badge.className = "status-badge status-ok";
+          loginSection.classList.add("hidden");
+          deviceContainer.classList.remove("hidden");
+          btnLogin.classList.add("hidden");
+          btnLogout.classList.remove("hidden");
+        } else if (data.login_available) {
+          badge.textContent = "⚠ Nicht angemeldet";
+          badge.className = "status-badge status-warn";
+          loginSection.classList.remove("hidden");
+          btnLogin.classList.remove("hidden");
+          btnLogout.classList.add("hidden");
+          btnStartLogin.disabled = false;
+          loginHint.textContent = "Klicken Sie auf den Button um sich bei Amazon anzumelden.";
+          // Show redirect URI info
+          showRedirectUri();
         } else {
           badge.textContent = "⚠ Nicht konfiguriert";
           badge.className = "status-badge status-warn";
+          loginSection.classList.remove("hidden");
+          btnLogin.classList.add("hidden");
+          btnLogout.classList.add("hidden");
+          btnStartLogin.disabled = true;
+          loginHint.textContent = "Bitte zuerst Client-ID und Client-Secret in den Add-on-Einstellungen konfigurieren.";
           showAlert(
-            "Amazon-Zugangsdaten sind noch nicht konfiguriert. Bitte tragen Sie Client-ID, Client-Secret und Refresh-Token in den Add-on-Einstellungen ein.",
+            "Bitte Client-ID und Client-Secret in den Add-on-Einstellungen eintragen, dann hier mit Amazon anmelden.",
             "warning"
           );
         }
       } catch (_) {}
+    }
+
+    function showRedirectUri() {
+      const info = document.getElementById("redirect-uri-info");
+      const value = document.getElementById("redirect-uri-value");
+      // The redirect URI is the current page origin + ingress path + /auth/callback
+      const redirectUri = `${window.location.origin}${INGRESS_PATH}/auth/callback`;
+      value.textContent = redirectUri;
+      info.classList.remove("hidden");
+    }
+
+    async function startLogin() {
+      try {
+        const resp = await fetch(`${INGRESS_PATH}/auth/login`);
+        if (!resp.ok) {
+          const data = await resp.json();
+          showAlert(data.error || "Login-Fehler", "error");
+          return;
+        }
+        const data = await resp.json();
+        // Open Amazon login in same window
+        window.location.href = data.auth_url;
+      } catch (err) {
+        showAlert("Fehler beim Starten der Anmeldung: " + err.message, "error");
+      }
+    }
+
+    async function logout() {
+      if (!confirm("Möchten Sie sich wirklich abmelden? Der gespeicherte Token wird gelöscht.")) {
+        return;
+      }
+      try {
+        const resp = await fetch(`${INGRESS_PATH}/auth/logout`, { method: "POST" });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        showAlert("Erfolgreich abgemeldet.", "success");
+        fetchConfigStatus();
+      } catch (err) {
+        showAlert("Fehler beim Abmelden: " + err.message, "error");
+      }
     }
 
     function renderDevices(devices) {
@@ -97,32 +189,47 @@
 
     // Init
     document.getElementById("btn-refresh").addEventListener("click", fetchDevices);
-    document.getElementById("btn-auth-check").addEventListener("click", checkAuthStatus);
+    document.getElementById("btn-login").addEventListener("click", startLogin);
+    document.getElementById("btn-start-login").addEventListener("click", startLogin);
+    document.getElementById("btn-logout").addEventListener("click", logout);
     fetchConfigStatus();
     fetchDevices();
+    fetchTokenRefreshStatus();
+    setInterval(fetchTokenRefreshStatus, 30000);
 
-    async function checkAuthStatus() {
-      const badge = document.getElementById("config-status");
-      badge.textContent = "⏳ Prüfe...";
-      badge.className = "status-badge";
-      try {
-        const resp = await fetch(`${INGRESS_PATH}/api/auth-status`);
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const data = await resp.json();
-        if (data.authenticated) {
-          badge.textContent = `✓ Authentifiziert (${data.expires_in}s)`;
-          badge.className = "status-badge status-ok";
-          showAlert(data.message, "success");
-        } else {
-          badge.textContent = "✗ Nicht authentifiziert";
-          badge.className = "status-badge status-warn";
-          showAlert(data.message, "warning");
+    // Listen for OAuth callback message from popup
+    window.addEventListener("message", (event) => {
+      if (event.data && event.data.type === "oauth_callback") {
+        fetchConfigStatus();
+        if (event.data.success) {
+          fetchDevices();
         }
-      } catch (err) {
-        badge.textContent = "✗ Fehler";
-        badge.className = "status-badge status-warn";
-        showAlert("Fehler bei der Authentifizierungsprüfung: " + err.message, "error");
       }
+    });
+
+    async function fetchTokenRefreshStatus() {
+      try {
+        const resp = await fetch(`${INGRESS_PATH}/api/token-refresh-status`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const badge = document.getElementById("refresh-status");
+        badge.classList.remove("hidden");
+
+        if (data.auto_refresh_active && data.has_valid_token) {
+          const mins = Math.floor(data.next_refresh_in / 60);
+          badge.textContent = `🔄 Auto-Refresh aktiv (nächster in ${mins}min)`;
+          badge.className = "status-badge status-ok";
+        } else if (data.auto_refresh_active && !data.has_valid_token) {
+          badge.textContent = "🔄 Auto-Refresh wartet";
+          badge.className = "status-badge status-warn";
+        } else if (data.last_error) {
+          badge.textContent = "⚠ Refresh-Fehler";
+          badge.className = "status-badge status-warn";
+          badge.title = data.last_error;
+        } else {
+          badge.classList.add("hidden");
+        }
+      } catch (_) {}
     }
   </script>
 </body>
