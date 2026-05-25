@@ -72,7 +72,8 @@ sich direkt mit dem eigenen Amazon-Konto (E-Mail + Passwort) anzumelden.
 2. Unter **Apps & Services → Login with Amazon** ein neues Security Profile anlegen.
 3. **Client ID** und **Client Secret** notieren und in den Add-on-Einstellungen eintragen.
 4. Die **Redirect-URI** aus der App-UI kopieren und unter "Web Settings → Allowed Return URLs" im Security Profile registrieren.
-5. In der App auf **"Mit Amazon anmelden"** klicken – der Rest passiert automatisch!
+5. Im Security Profile unter **"Allowed Scopes"** den Scope `alexa:all` hinzufügen/aktivieren.
+6. In der App auf **"Mit Amazon anmelden"** klicken – der Rest passiert automatisch!
 
 ## Warum kann man sich nicht direkt mit dem Amazon-Konto anmelden?
 

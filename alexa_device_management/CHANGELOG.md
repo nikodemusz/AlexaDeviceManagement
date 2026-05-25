@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.2
+
+- **Bugfix**: OAuth-Scope korrigiert – `alexa::all` (doppelter Doppelpunkt) war kein
+  gültiger Amazon LWA Scope und führte zu einem 400 Bad Request Fehler
+  ("lwa-invalid-parameter-bad-scope"). Korrekter Scope ist `alexa:all` (einfacher
+  Doppelpunkt). Dieser Scope muss im Amazon Developer Console Security Profile
+  unter "Allowed Scopes" aktiviert sein.
+
 ## 0.6.1
 
 - **Bugfix**: OAuth-Scope korrigiert – `alexa::devices:all:read alexa::devices:all:write`
