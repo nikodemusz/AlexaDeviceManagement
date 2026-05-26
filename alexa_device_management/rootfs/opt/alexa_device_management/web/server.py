@@ -40,7 +40,7 @@ _REFRESH_BUFFER = 300  # refresh 5 minutes before expiry
 
 # Amazon OAuth2 / LWA endpoints per region
 AMAZON_AUTH_URLS: dict[str, str] = {
-    "eu": "https://www.amazon.co.uk/ap/oa",
+    "eu": "https://eu.account.amazon.com/ap/oa",
     "na": "https://www.amazon.com/ap/oa",
     "fe": "https://www.amazon.co.jp/ap/oa",
 }
