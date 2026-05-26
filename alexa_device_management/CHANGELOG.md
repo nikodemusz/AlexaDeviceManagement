@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.4
+
+- **Bugfix**: OAuth redirect_uri verwendete das Schema aus dem `X-Forwarded-Proto`
+  Header, welcher in manchen Konfigurationen `http` statt `https` lieferte.
+  Die redirect_uri wird nun immer mit `https://` generiert, da Amazon LWA
+  ausschließlich HTTPS-URLs akzeptiert.
+
 ## 0.6.3
 
 - **Bugfix**: OAuth redirect_uri war nur ein relativer Pfad (z.B.
