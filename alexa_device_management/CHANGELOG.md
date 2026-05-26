@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.5
+
+- **Bugfix**: EU OAuth-Autorisierungs-Endpoint aktualisiert. Amazon leitet
+  `www.amazon.co.uk/ap/oa` nun auf `eu.account.amazon.com` weiter, welches
+  die Verbindung ablehnte. Der Endpoint wurde direkt auf
+  `https://eu.account.amazon.com/ap/oa` geändert.
+
 ## 0.6.4
 
 - **Bugfix**: OAuth redirect_uri verwendete das Schema aus dem `X-Forwarded-Proto`
