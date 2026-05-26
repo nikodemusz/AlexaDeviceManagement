@@ -493,7 +493,8 @@ async def handle_auth_login(request: web.Request) -> web.Response:
 
     # Build the redirect_uri – Amazon LWA requires a full absolute URL
     # Derive the external base URL from proxy headers set by Home Assistant ingress
-    scheme = request.headers.get("X-Forwarded-Proto", "https")
+    # Always use https – Amazon LWA requires it and HA external URLs must be https
+    scheme = "https"
     host = request.headers.get("X-Forwarded-Host") or request.headers.get("Host", "")
     if not host:
         return web.json_response(
