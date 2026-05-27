@@ -138,9 +138,24 @@
         }
         const data = await resp.json();
         const popup = window.open(data.auth_url, "_blank");
-        const popupBlocked = !popup || popup.closed || typeof popup.closed === "undefined";
+        const popupBlocked = !popup || typeof popup.closed === "undefined";
         if (!popupBlocked) {
-          popup.focus();
+          if (typeof popup.focus === "function") {
+            try {
+              popup.focus();
+            } catch (_) {}
+          }
+
+          window.setTimeout(() => {
+            if (popup.closed) {
+              showLoginFallback(data.auth_url);
+              showAlert(
+                "Der neue Tab wurde direkt wieder geschlossen oder blockiert. Bitte öffnen Sie die Amazon-Anmeldeseite über den Link unten.",
+                "warning"
+              );
+            }
+          }, 500);
+
           showAlert(
             "Die Amazon-Anmeldeseite wurde in einem neuen Tab geöffnet. Bitte melden Sie sich dort an und kehren Sie danach zu dieser Seite zurück.",
             "success"
