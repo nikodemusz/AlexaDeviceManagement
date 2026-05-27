@@ -336,6 +336,15 @@ body {
   margin-top: 8px;
 }
 
+.login-fallback {
+  margin-top: 16px;
+  text-align: center;
+}
+
+.login-fallback p {
+  margin-bottom: 10px;
+}
+
 .hidden {
   display: none !important;
 }

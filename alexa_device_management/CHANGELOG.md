@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.6
+
+- **Bugfix**: Amazon Login wird im Home Assistant Ingress nicht mehr im Iframe
+  geöffnet, sondern in einem neuen Tab. Dadurch greift `X-Frame-Options: DENY`
+  der Amazon-Loginseite nicht mehr.
+- **Verbesserung**: Popup-Blocker-Erkennung mit klickbarem Fallback-Link ergänzt.
+- **Verbesserung**: Hinweis für Benutzer ergänzt, dass die Amazon-Anmeldeseite in
+  einem neuen Tab geöffnet wurde.
+
 ## 0.6.5
 
 - **Bugfix**: EU OAuth-Autorisierungs-Endpoint aktualisiert. Amazon leitet
