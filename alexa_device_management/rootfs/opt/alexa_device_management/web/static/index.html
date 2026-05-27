@@ -46,6 +46,10 @@
           🔑 Mit Amazon anmelden
         </button>
         <p id="login-hint" class="login-hint">Bitte zuerst Client-ID und Client-Secret in den Add-on-Einstellungen konfigurieren.</p>
+        <div id="login-fallback" class="login-fallback hidden">
+          <p>Falls sich kein neuer Tab geöffnet hat, klicken Sie bitte hier:</p>
+          <a id="login-fallback-link" class="btn btn-secondary" target="_blank">Amazon-Anmeldeseite öffnen</a>
+        </div>
       </div>
     </div>
 
@@ -125,6 +129,7 @@
 
     async function startLogin() {
       try {
+        hideLoginFallback();
         const resp = await fetch(`${INGRESS_PATH}/auth/login`);
         if (!resp.ok) {
           const data = await resp.json();
@@ -132,11 +137,38 @@
           return;
         }
         const data = await resp.json();
-        // Open Amazon login in same window
-        window.location.href = data.auth_url;
+        const popup = window.open(data.auth_url, "_blank");
+        if (popup) {
+          popup.focus();
+          showAlert(
+            "Die Amazon-Anmeldeseite wurde in einem neuen Tab geöffnet. Bitte schließen Sie diesen Tab nach der Anmeldung wieder.",
+            "success"
+          );
+          return;
+        }
+
+        showLoginFallback(data.auth_url);
+        showAlert(
+          "Ihr Browser hat das Öffnen eines neuen Tabs blockiert. Bitte öffnen Sie die Amazon-Anmeldeseite über den Link unten.",
+          "warning"
+        );
       } catch (err) {
         showAlert("Fehler beim Starten der Anmeldung: " + err.message, "error");
       }
+    }
+
+    function showLoginFallback(authUrl) {
+      const fallback = document.getElementById("login-fallback");
+      const link = document.getElementById("login-fallback-link");
+      link.href = authUrl;
+      fallback.classList.remove("hidden");
+    }
+
+    function hideLoginFallback() {
+      const fallback = document.getElementById("login-fallback");
+      const link = document.getElementById("login-fallback-link");
+      link.removeAttribute("href");
+      fallback.classList.add("hidden");
     }
 
     async function logout() {
