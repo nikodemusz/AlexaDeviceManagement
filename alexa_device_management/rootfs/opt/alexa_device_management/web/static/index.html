@@ -138,7 +138,7 @@
         }
         const data = await resp.json();
         const popup = window.open(data.auth_url, "_blank");
-        const popupBlocked = !popup || typeof popup.closed === "undefined";
+        const popupBlocked = !popup;
         if (!popupBlocked) {
           if (typeof popup.focus === "function") {
             try {
@@ -182,8 +182,6 @@
 
     function hideLoginFallback() {
       const fallback = document.getElementById("login-fallback");
-      const link = document.getElementById("login-fallback-link");
-      link.removeAttribute("href");
       fallback.classList.add("hidden");
     }
 
