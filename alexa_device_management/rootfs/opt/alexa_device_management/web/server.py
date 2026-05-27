@@ -366,7 +366,9 @@ async def fetch_alexa_devices(
             items = _extract_items(data) if isinstance(data, dict) else []
             for item in items:
                 device = _normalize_device(item)
-                key = device["id"] or f"{endpoint_path}:{len(devices_by_id)}"
+                key = device["id"] or (
+                    f"{endpoint_path}:{device['serial']}:{device['name']}:{len(devices_by_id)}"
+                )
                 devices_by_id[key] = device
 
             next_token = data.get("nextToken") if isinstance(data, dict) else None
