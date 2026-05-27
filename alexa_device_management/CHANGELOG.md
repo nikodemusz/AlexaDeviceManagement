@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.8
+
+- **Bugfix**: Geräteabruf robuster gemacht, damit im Amazon-Konto registrierte
+  Homeautomation-Geräte zuverlässig geladen werden. Es werden jetzt beide Alexa
+  Endpoints (`GET /v2/devices` und `GET /v2/appliances`) abgefragt.
+- **Verbesserung**: Geräte-Normalisierung erweitert, damit unterschiedliche
+  Antwortformate der Alexa API (z.B. `appliances`/`devices`, `actions`/`capabilities`)
+  korrekt in der UI dargestellt werden.
+
 ## 0.6.7
 
 - **Feature**: Vollständige Auflistung der Homeautomation-Geräte über die Alexa

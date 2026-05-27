@@ -232,83 +232,157 @@ async def fetch_alexa_devices(
 ) -> list[dict[str, Any]]:
     """Fetch all Alexa home automation devices from the Amazon API."""
     base_url = _get_alexa_api_url(region)
-    url = f"{base_url}/v2/appliances"
     headers = {
-        "Authorization": f"Bearer {access_token}",
+        "Authorization": "Bearer " + access_token,
         "Accept": "application/json",
     }
 
-    devices: list[dict[str, Any]] = []
-    next_token: str | None = None
-    seen_tokens: set[str] = set()
-    page_count = 0
+    def _extract_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
+        for key in ("appliances", "devices"):
+            items = payload.get(key)
+            if isinstance(items, list):
+                return [item for item in items if isinstance(item, dict)]
+        nested = payload.get("payload")
+        if isinstance(nested, dict):
+            for key in ("appliances", "devices"):
+                items = nested.get(key)
+                if isinstance(items, list):
+                    return [item for item in items if isinstance(item, dict)]
+        return []
 
-    while True:
-        page_count += 1
-        if page_count > _MAX_APPLIANCE_PAGES:
-            raise RuntimeError(
-                f"Alexa API pagination exceeded safe page limit ({_MAX_APPLIANCE_PAGES})"
+    def _normalize_capability(value: Any) -> str | None:
+        if isinstance(value, str) and value:
+            return value
+        if isinstance(value, dict):
+            for key in ("name", "interface", "type"):
+                capability = value.get(key)
+                if isinstance(capability, str) and capability:
+                    return capability
+        return None
+
+    def _normalize_device(raw: dict[str, Any]) -> dict[str, Any]:
+        details = raw.get("additionalApplianceDetails")
+        if not isinstance(details, dict):
+            details = {}
+
+        appliance_types = raw.get("applianceTypes")
+        if not isinstance(appliance_types, list):
+            appliance_types = []
+
+        raw_capabilities = raw.get("actions")
+        if not isinstance(raw_capabilities, list):
+            raw_capabilities = raw.get("capabilities")
+        if not isinstance(raw_capabilities, list):
+            raw_capabilities = []
+
+        name = (
+            raw.get("friendlyName")
+            or raw.get("accountName")
+            or raw.get("name")
+            or raw.get("modelName")
+            or raw.get("applianceId")
+            or "Unbekanntes Gerät"
+        )
+        device_type = (
+            appliance_types[0]
+            if appliance_types
+            else raw.get("deviceType")
+            or raw.get("modelName")
+            or "UNKNOWN"
+        )
+        device_id = (
+            raw.get("applianceId")
+            or raw.get("id")
+            or details.get("applianceId")
+            or details.get("deviceSerialNumber")
+            or ""
+        )
+        serial = (
+            details.get("serialNumber")
+            or details.get("applianceSerialNumber")
+            or details.get("deviceSerialNumber")
+            or raw.get("serialNumber")
+            or raw.get("deviceSerialNumber")
+            or device_id
+        )
+        room = (
+            details.get("roomName")
+            or details.get("location")
+            or details.get("groupName")
+            or raw.get("roomName")
+            or raw.get("location")
+            or ""
+        )
+        capabilities = [
+            capability
+            for capability in (
+                _normalize_capability(entry) for entry in raw_capabilities
             )
+            if capability
+        ]
 
-        params = {"nextToken": next_token} if next_token else None
-        async with session.get(url, headers=headers, params=params) as resp:
-            if resp.status != 200:
-                text = await resp.text()
+        return {
+            "id": str(device_id),
+            "name": str(name),
+            "type": str(device_type),
+            "family": str(raw.get("manufacturerName") or raw.get("deviceFamily") or "UNKNOWN"),
+            "online": bool(raw.get("isReachable", raw.get("connected", raw.get("online", False)))),
+            "serial": str(serial),
+            "firmware": str(raw.get("version") or raw.get("softwareVersion") or ""),
+            "capabilities": capabilities,
+            "room": str(room),
+        }
+
+    endpoint_paths = ("/v2/devices", "/v2/appliances")
+    devices_by_id: dict[str, dict[str, Any]] = {}
+    endpoint_errors: list[str] = []
+
+    for endpoint_path in endpoint_paths:
+        next_token: str | None = None
+        seen_tokens: set[str] = set()
+        page_count = 0
+
+        while True:
+            page_count += 1
+            if page_count > _MAX_APPLIANCE_PAGES:
                 raise RuntimeError(
-                    f"Alexa API request failed ({resp.status}): {text[:200]}"
+                    f"Alexa API pagination exceeded safe page limit ({_MAX_APPLIANCE_PAGES})"
                 )
-            data = await resp.json()
 
-        for appliance in data.get("appliances", []):
-            if not isinstance(appliance, dict):
-                continue
+            params = {"nextToken": next_token} if next_token else None
+            url = f"{base_url}{endpoint_path}"
 
-            details = appliance.get("additionalApplianceDetails") or {}
-            actions = appliance.get("actions") or []
-            appliance_types = appliance.get("applianceTypes") or []
+            async with session.get(url, headers=headers, params=params) as resp:
+                if resp.status == 404:
+                    break
+                if resp.status != 200:
+                    text = await resp.text()
+                    endpoint_errors.append(
+                        f"{endpoint_path} failed ({resp.status}): {text[:120]}"
+                    )
+                    break
+                data = await resp.json(content_type=None)
 
-            name = (
-                appliance.get("friendlyName")
-                or appliance.get("modelName")
-                or appliance.get("applianceId")
-                or "Unbekanntes Gerät"
-            )
-            device_type = (
-                appliance_types[0]
-                if appliance_types
-                else appliance.get("modelName", "UNKNOWN")
-            )
-            serial = (
-                details.get("serialNumber")
-                or details.get("applianceSerialNumber")
-                or details.get("deviceSerialNumber")
-                or appliance.get("applianceId", "")
-            )
-            room = (
-                details.get("roomName")
-                or details.get("location")
-                or details.get("groupName")
-                or ""
-            )
+            items = _extract_items(data) if isinstance(data, dict) else []
+            for item in items:
+                device = _normalize_device(item)
+                key = device["id"] or f"{endpoint_path}:{len(devices_by_id)}"
+                devices_by_id[key] = device
 
-            devices.append({
-                "id": appliance.get("applianceId", ""),
-                "name": str(name),
-                "type": str(device_type),
-                "family": appliance.get("manufacturerName", "UNKNOWN"),
-                "online": bool(appliance.get("isReachable", False)),
-                "serial": str(serial),
-                "firmware": appliance.get("version", ""),
-                "capabilities": [str(action) for action in actions if action],
-                "room": str(room),
-            })
+            next_token = data.get("nextToken") if isinstance(data, dict) else None
+            if not next_token and isinstance(data, dict):
+                nested = data.get("payload")
+                if isinstance(nested, dict):
+                    next_token = nested.get("nextToken")
+            if not next_token or next_token in seen_tokens:
+                break
+            seen_tokens.add(next_token)
 
-        next_token = data.get("nextToken")
-        if not next_token or next_token in seen_tokens:
-            break
-        seen_tokens.add(next_token)
-
-    return devices
+    if devices_by_id:
+        return list(devices_by_id.values())
+    if endpoint_errors:
+        raise RuntimeError("; ".join(endpoint_errors))
+    return []
 
 
 def get_demo_devices() -> list[dict[str, Any]]:
