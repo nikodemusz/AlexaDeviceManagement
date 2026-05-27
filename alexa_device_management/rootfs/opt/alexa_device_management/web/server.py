@@ -37,6 +37,7 @@ STATIC_DIR = pathlib.Path(__file__).parent / "static"
 # Background refresh interval: refresh 5 minutes before expiry, check every 60s
 _REFRESH_CHECK_INTERVAL = 60  # seconds between checks
 _REFRESH_BUFFER = 300  # refresh 5 minutes before expiry
+_MAX_APPLIANCE_PAGES = 100
 
 # Amazon OAuth2 / LWA endpoints per region
 AMAZON_AUTH_URLS: dict[str, str] = {
@@ -229,7 +230,7 @@ async def get_valid_access_token(app: web.Application) -> str | None:
 async def fetch_alexa_devices(
     session: aiohttp.ClientSession, access_token: str, region: str
 ) -> list[dict[str, Any]]:
-    """Fetch the list of Alexa devices from the Amazon API."""
+    """Fetch all Alexa home automation devices from the Amazon API."""
     base_url = _get_alexa_api_url(region)
     url = f"{base_url}/v2/appliances"
     headers = {
@@ -237,14 +238,77 @@ async def fetch_alexa_devices(
         "Accept": "application/json",
     }
 
-    async with session.get(url, headers=headers) as resp:
-        if resp.status != 200:
-            text = await resp.text()
+    devices: list[dict[str, Any]] = []
+    next_token: str | None = None
+    seen_tokens: set[str] = set()
+    page_count = 0
+
+    while True:
+        page_count += 1
+        if page_count > _MAX_APPLIANCE_PAGES:
             raise RuntimeError(
-                f"Alexa API request failed ({resp.status}): {text[:200]}"
+                f"Alexa API pagination exceeded safe page limit ({_MAX_APPLIANCE_PAGES})"
             )
-        data = await resp.json()
-        return data.get("appliances", [])
+
+        params = {"nextToken": next_token} if next_token else None
+        async with session.get(url, headers=headers, params=params) as resp:
+            if resp.status != 200:
+                text = await resp.text()
+                raise RuntimeError(
+                    f"Alexa API request failed ({resp.status}): {text[:200]}"
+                )
+            data = await resp.json()
+
+        for appliance in data.get("appliances", []):
+            if not isinstance(appliance, dict):
+                continue
+
+            details = appliance.get("additionalApplianceDetails") or {}
+            actions = appliance.get("actions") or []
+            appliance_types = appliance.get("applianceTypes") or []
+
+            name = (
+                appliance.get("friendlyName")
+                or appliance.get("modelName")
+                or appliance.get("applianceId")
+                or "Unbekanntes Gerät"
+            )
+            device_type = (
+                appliance_types[0]
+                if appliance_types
+                else appliance.get("modelName", "UNKNOWN")
+            )
+            serial = (
+                details.get("serialNumber")
+                or details.get("applianceSerialNumber")
+                or details.get("deviceSerialNumber")
+                or appliance.get("applianceId", "")
+            )
+            room = (
+                details.get("roomName")
+                or details.get("location")
+                or details.get("groupName")
+                or ""
+            )
+
+            devices.append({
+                "id": appliance.get("applianceId", ""),
+                "name": str(name),
+                "type": str(device_type),
+                "family": appliance.get("manufacturerName", "UNKNOWN"),
+                "online": bool(appliance.get("isReachable", False)),
+                "serial": str(serial),
+                "firmware": appliance.get("version", ""),
+                "capabilities": [str(action) for action in actions if action],
+                "room": str(room),
+            })
+
+        next_token = data.get("nextToken")
+        if not next_token or next_token in seen_tokens:
+            break
+        seen_tokens.add(next_token)
+
+    return devices
 
 
 def get_demo_devices() -> list[dict[str, Any]]:
