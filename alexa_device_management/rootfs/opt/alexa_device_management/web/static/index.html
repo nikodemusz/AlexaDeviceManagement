@@ -138,10 +138,11 @@
         }
         const data = await resp.json();
         const popup = window.open(data.auth_url, "_blank");
-        if (popup) {
+        const popupBlocked = !popup || popup.closed || typeof popup.closed === "undefined";
+        if (!popupBlocked) {
           popup.focus();
           showAlert(
-            "Die Amazon-Anmeldeseite wurde in einem neuen Tab geöffnet. Bitte schließen Sie diesen Tab nach der Anmeldung wieder.",
+            "Die Amazon-Anmeldeseite wurde in einem neuen Tab geöffnet. Bitte melden Sie sich dort an und kehren Sie danach zu dieser Seite zurück.",
             "success"
           );
           return;
