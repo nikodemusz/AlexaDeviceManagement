@@ -52,8 +52,6 @@ This app brings back efficient bulk device management.
 
 ## Next Steps
 
-- [ ] Implement real Amazon Alexa API OAuth2 authentication
-- [ ] Fetch real device list from Amazon
 - [ ] Bulk delete devices
 - [ ] Bulk rename devices
 - [ ] Room management

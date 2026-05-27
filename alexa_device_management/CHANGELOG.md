@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.7
+
+- **Feature**: Vollständige Auflistung der Homeautomation-Geräte über die Alexa
+  API (`GET /v2/appliances`) mit Pagination (`nextToken`), damit alle Geräte
+  geladen werden.
+- **Verbesserung**: Amazon Appliance-Daten werden für die UI normalisiert
+  (Name, Typ, Erreichbarkeit, Raum, Fähigkeiten), damit die Geräteliste
+  konsistent dargestellt wird.
+
 ## 0.6.6
 
 - **Bugfix**: Amazon Login wird im Home Assistant Ingress nicht mehr im Iframe

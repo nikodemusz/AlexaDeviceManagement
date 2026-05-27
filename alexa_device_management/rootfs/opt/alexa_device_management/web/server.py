@@ -37,6 +37,7 @@ STATIC_DIR = pathlib.Path(__file__).parent / "static"
 # Background refresh interval: refresh 5 minutes before expiry, check every 60s
 _REFRESH_CHECK_INTERVAL = 60  # seconds between checks
 _REFRESH_BUFFER = 300  # refresh 5 minutes before expiry
+_MAX_APPLIANCE_PAGES = 100
 
 # Amazon OAuth2 / LWA endpoints per region
 AMAZON_AUTH_URLS: dict[str, str] = {
@@ -240,8 +241,15 @@ async def fetch_alexa_devices(
     devices: list[dict[str, Any]] = []
     next_token: str | None = None
     seen_tokens: set[str] = set()
+    page_count = 0
 
     while True:
+        page_count += 1
+        if page_count > _MAX_APPLIANCE_PAGES:
+            raise RuntimeError(
+                f"Alexa API pagination exceeded safe page limit ({_MAX_APPLIANCE_PAGES})"
+            )
+
         params = {"nextToken": next_token} if next_token else None
         async with session.get(url, headers=headers, params=params) as resp:
             if resp.status != 200:
@@ -287,7 +295,7 @@ async def fetch_alexa_devices(
                 "id": appliance.get("applianceId", ""),
                 "name": str(name),
                 "type": str(device_type),
-                "family": appliance.get("manufacturerName", "SMART_HOME"),
+                "family": appliance.get("manufacturerName", "UNKNOWN"),
                 "online": bool(appliance.get("isReachable", False)),
                 "serial": str(serial),
                 "firmware": appliance.get("version", ""),
