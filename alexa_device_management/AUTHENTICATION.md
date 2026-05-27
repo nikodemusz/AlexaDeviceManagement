@@ -141,7 +141,7 @@ Die OAuth2-Kommunikation mit Amazon ist implementiert:
 
 - ✅ Automatischer Token-Refresh im Backend (`POST https://api.amazon.com/auth/o2/token`)
 - ✅ Auth-Status-Endpoint (`GET /api/auth-status`) zur Prüfung der Authentifizierung
-- ✅ Geräteabruf über die Alexa Smart Home API (`GET /v2/appliances`)
+- ✅ Geräteabruf über die Alexa Smart Home API (`GET /v2/devices`, Fallback: `GET /v2/appliances`)
 - ✅ In-Memory Token-Cache mit automatischer Erneuerung vor Ablauf
 - ✅ Regionsspezifische Endpoints (EU, NA, FE)
 - ✅ Persistenter Token-Cache (überlebt Add-on-Neustart, gespeichert in `/data/token_cache.json`)
