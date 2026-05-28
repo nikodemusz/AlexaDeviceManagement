@@ -234,9 +234,9 @@ async def fetch_amazon_profile(
         if resp.status == 200:
             body = await resp.json()
             return {
-                "name": str(body.get("name", "")).strip(),
-                "email": str(body.get("email", "")).strip(),
-                "user_id": str(body.get("user_id", "")).strip(),
+                "name": (body.get("name") or "").strip(),
+                "email": (body.get("email") or "").strip(),
+                "user_id": (body.get("user_id") or "").strip(),
             }, None
 
         if resp.status in {401, 403}:
