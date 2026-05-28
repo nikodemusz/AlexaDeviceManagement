@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.0
+
+- **Feature**: Neue Info-Ansicht in der Web-UI ergänzt. Sie zeigt nun die
+  installierte App-Version, Alexa-Region, Verbindungsstatus und die Anzahl der
+  geladenen Geräte.
+- **Feature**: Der aktuell angemeldete Amazon-Benutzer wird in der Übersicht
+  angezeigt, damit sofort ersichtlich ist, welches Konto verbunden ist.
+- **Verbesserung**: Für neue Logins wird zusätzlich der Amazon-Profil-Scope
+  angefordert, damit Kontoinformationen zuverlässig geladen und gespeichert
+  werden können.
+
 ## 0.6.8
 
 - **Bugfix**: Geräteabruf robuster gemacht, damit im Amazon-Konto registrierte

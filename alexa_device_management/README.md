@@ -17,6 +17,7 @@ This app brings back efficient bulk device management.
 ## Features
 
 - View all your Amazon Alexa devices in a clean web UI
+- App overview with add-on version, Alexa region, connection status, and logged-in Amazon user
 - Accessible as a sidebar menu item in Home Assistant OS
 - Runs as a standalone Docker container (no HA integration needed)
 - Configuration via add-on settings (Amazon OAuth2 credentials)

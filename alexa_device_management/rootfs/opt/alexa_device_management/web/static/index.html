@@ -24,6 +24,34 @@
 
     <div id="alert-box" class="alert hidden"></div>
 
+    <section class="info-overview" aria-label="App- und Amazon-Informationen">
+      <div class="info-card">
+        <span class="info-label">App-Version</span>
+        <strong id="info-app-version" class="info-value">—</strong>
+        <small class="info-meta">Installierte Add-on-Version</small>
+      </div>
+      <div class="info-card">
+        <span class="info-label">Amazon-Benutzer</span>
+        <strong id="info-amazon-user" class="info-value">—</strong>
+        <small id="info-amazon-user-detail" class="info-meta">Noch keine Kontoinformationen geladen</small>
+      </div>
+      <div class="info-card">
+        <span class="info-label">Alexa-Region</span>
+        <strong id="info-region" class="info-value">—</strong>
+        <small id="info-token-source" class="info-meta">—</small>
+      </div>
+      <div class="info-card">
+        <span class="info-label">Verbindung</span>
+        <strong id="info-auth-status" class="info-value">—</strong>
+        <small id="info-auth-detail" class="info-meta">—</small>
+      </div>
+      <div class="info-card">
+        <span class="info-label">Geräte</span>
+        <strong id="info-device-count" class="info-value">—</strong>
+        <small id="info-device-detail" class="info-meta">Geräteliste wird geladen</small>
+      </div>
+    </section>
+
     <!-- Login setup section (shown when not authenticated) -->
     <div id="login-section" class="login-section hidden">
       <div class="login-card">
@@ -67,8 +95,22 @@
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
         renderDevices(data.devices || []);
+        updateDeviceInfo(data.devices || [], data.demo === true);
       } catch (err) {
+        updateDeviceInfo([], false, err.message);
         showAlert("Fehler beim Laden der Geräte: " + err.message, "error");
+      }
+    }
+
+    async function fetchAppInfo() {
+      try {
+        const resp = await fetch(`${INGRESS_PATH}/api/app-info`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        updateAppInfo(data);
+      } catch (err) {
+        document.getElementById("info-auth-status").textContent = "Fehler";
+        document.getElementById("info-auth-detail").textContent = `Info-Ansicht konnte nicht geladen werden: ${err.message}`;
       }
     }
 
@@ -194,9 +236,53 @@
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         showAlert("Erfolgreich abgemeldet.", "success");
         fetchConfigStatus();
+        fetchAppInfo();
       } catch (err) {
         showAlert("Fehler beim Abmelden: " + err.message, "error");
       }
+    }
+
+    function updateAppInfo(data) {
+      document.getElementById("info-app-version").textContent = data.app_version || "—";
+      document.getElementById("info-region").textContent = (data.region || "—").toUpperCase();
+
+      const tokenSource = data.token_source === "oauth"
+        ? "Tokenquelle: In-App-Login"
+        : "Tokenquelle: Add-on-Konfiguration";
+      document.getElementById("info-token-source").textContent = tokenSource;
+
+      const authStatus = document.getElementById("info-auth-status");
+      authStatus.textContent = data.authenticated ? "Verbunden" : "Nicht verbunden";
+      authStatus.className = "info-value" + (data.authenticated ? " status-text-ok" : " status-text-warn");
+      document.getElementById("info-auth-detail").textContent = data.auth_message || "—";
+
+      const amazonUser = data.amazon_user || {};
+      const displayUser = amazonUser.email || amazonUser.name || amazonUser.user_id || "Nicht angemeldet";
+      document.getElementById("info-amazon-user").textContent = displayUser;
+
+      const detailParts = [];
+      if (amazonUser.name && amazonUser.email && amazonUser.name !== amazonUser.email) {
+        detailParts.push(amazonUser.name);
+      }
+      if (amazonUser.user_id) {
+        detailParts.push(`User-ID: ${amazonUser.user_id}`);
+      }
+      document.getElementById("info-amazon-user-detail").textContent =
+        detailParts.join(" • ") || "Kein Amazon-Benutzer verfügbar";
+    }
+
+    function updateDeviceInfo(devices, demoMode, errorMessage) {
+      const count = Array.isArray(devices) ? devices.length : 0;
+      document.getElementById("info-device-count").textContent = `${count}`;
+
+      if (errorMessage) {
+        document.getElementById("info-device-detail").textContent = `Geräte konnten nicht geladen werden: ${errorMessage}`;
+        return;
+      }
+
+      document.getElementById("info-device-detail").textContent = demoMode
+        ? "Demo-Geräte werden angezeigt"
+        : "Geräte aus Alexa geladen";
     }
 
     function renderDevices(devices) {
@@ -239,6 +325,7 @@
     document.getElementById("btn-start-login").addEventListener("click", startLogin);
     document.getElementById("btn-logout").addEventListener("click", logout);
     fetchConfigStatus();
+    fetchAppInfo();
     fetchDevices();
     fetchTokenRefreshStatus();
     setInterval(fetchTokenRefreshStatus, 30000);
@@ -247,6 +334,7 @@
     window.addEventListener("message", (event) => {
       if (event.data && event.data.type === "oauth_callback") {
         fetchConfigStatus();
+        fetchAppInfo();
         if (event.data.success) {
           fetchDevices();
         }
