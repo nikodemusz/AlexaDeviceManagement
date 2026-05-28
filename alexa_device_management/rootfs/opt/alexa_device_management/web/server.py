@@ -33,7 +33,6 @@ OPTIONS_PATH = pathlib.Path("/data/options.json")
 TOKEN_CACHE_PATH = pathlib.Path("/data/token_cache.json")
 OAUTH_TOKENS_PATH = pathlib.Path("/data/oauth_tokens.json")
 STATIC_DIR = pathlib.Path(__file__).parent / "static"
-ADDON_CONFIG_PATH = pathlib.Path(__file__).resolve().parents[4] / "config.yaml"
 
 # Background refresh interval: refresh 5 minutes before expiry, check every 60s
 _REFRESH_CHECK_INTERVAL = 60  # seconds between checks
@@ -78,6 +77,34 @@ _token_cache: dict[str, Any] = {
 
 # OAuth state for CSRF protection during login flow
 _oauth_state: dict[str, Any] = {}
+
+
+def _find_addon_config_path() -> pathlib.Path:
+    """Locate the add-on config.yaml by walking up from this file."""
+    for parent in pathlib.Path(__file__).resolve().parents:
+        candidate = parent / "config.yaml"
+        if candidate.exists():
+            return candidate
+    return pathlib.Path("config.yaml")
+
+
+def _read_addon_version(config_path: pathlib.Path) -> str:
+    """Read the add-on version from config.yaml."""
+    if not config_path.exists():
+        return "unbekannt"
+
+    match = re.search(
+        r'^version:\s*["\']?([^"\']+)["\']?\s*$',
+        config_path.read_text(),
+        re.MULTILINE,
+    )
+    if not match:
+        return "unbekannt"
+    return match.group(1).strip()
+
+
+ADDON_CONFIG_PATH = _find_addon_config_path()
+ADDON_VERSION = _read_addon_version(ADDON_CONFIG_PATH)
 
 
 def _load_token_cache() -> None:
@@ -151,18 +178,8 @@ def load_options() -> dict[str, Any]:
 
 
 def get_addon_version() -> str:
-    """Read the add-on version from config.yaml."""
-    if not ADDON_CONFIG_PATH.exists():
-        return "unbekannt"
-
-    match = re.search(
-        r'^version:\s*["\']?([^"\']+)["\']?\s*$',
-        ADDON_CONFIG_PATH.read_text(),
-        re.MULTILINE,
-    )
-    if not match:
-        return "unbekannt"
-    return match.group(1).strip()
+    """Return the cached add-on version."""
+    return ADDON_VERSION
 
 
 def _get_token_url(region: str) -> str:
@@ -217,9 +234,9 @@ async def fetch_amazon_profile(
         if resp.status == 200:
             body = await resp.json()
             return {
-                "name": str(body.get("name") or "").strip(),
-                "email": str(body.get("email") or "").strip(),
-                "user_id": str(body.get("user_id") or "").strip(),
+                "name": str(body.get("name", "")).strip(),
+                "email": str(body.get("email", "")).strip(),
+                "user_id": str(body.get("user_id", "")).strip(),
             }, None
 
         if resp.status in {401, 403}:
@@ -618,7 +635,7 @@ async def handle_api_app_info(request: web.Request) -> web.Response:
             oauth_tokens["profile"] = profile
             oauth_tokens["profile_updated_at"] = time.time()
             _save_oauth_tokens(oauth_tokens)
-        elif oauth_tokens.get("profile"):
+        elif isinstance(oauth_tokens.get("profile"), dict):
             info["amazon_user"] = oauth_tokens["profile"]
             info["auth_message"] = profile_message or (
                 "Mit Amazon verbunden. Gespeichertes Benutzerprofil wird angezeigt."
