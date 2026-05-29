@@ -58,8 +58,10 @@ ALEXA_API_URLS: dict[str, str] = {
     "fe": "https://api.fe.amazonalexa.com",
 }
 
+AMAZON_PROFILE_URL = "https://api.amazon.com/user/profile"
+
 # OAuth2 scopes needed for Alexa device management
-OAUTH_SCOPES = "alexa:all"
+OAUTH_SCOPES = "alexa:all profile"
 
 # ---------------------------------------------------------------------------
 # Token cache (persistent + in-memory)
@@ -75,6 +77,34 @@ _token_cache: dict[str, Any] = {
 
 # OAuth state for CSRF protection during login flow
 _oauth_state: dict[str, Any] = {}
+
+
+def _find_addon_config_path() -> pathlib.Path:
+    """Locate the add-on config.yaml by walking up from this file."""
+    for parent in pathlib.Path(__file__).resolve().parents:
+        candidate = parent / "config.yaml"
+        if candidate.exists():
+            return candidate
+    return pathlib.Path("config.yaml")
+
+
+def _read_addon_version(config_path: pathlib.Path) -> str:
+    """Read the add-on version from config.yaml."""
+    if not config_path.exists():
+        return "unbekannt"
+
+    match = re.search(
+        r'^version:\s*["\']?([^"\']+)["\']?\s*$',
+        config_path.read_text(),
+        re.MULTILINE,
+    )
+    if not match:
+        return "unbekannt"
+    return match.group(1).strip()
+
+
+ADDON_CONFIG_PATH = _find_addon_config_path()
+ADDON_VERSION = _read_addon_version(ADDON_CONFIG_PATH)
 
 
 def _load_token_cache() -> None:
@@ -147,6 +177,11 @@ def load_options() -> dict[str, Any]:
     return {}
 
 
+def get_addon_version() -> str:
+    """Return the cached add-on version."""
+    return ADDON_VERSION
+
+
 def _get_token_url(region: str) -> str:
     """Return the Amazon token endpoint for a given region."""
     return AMAZON_TOKEN_URLS.get(region, AMAZON_TOKEN_URLS["eu"])
@@ -183,6 +218,37 @@ async def refresh_access_token(
             error_desc = body.get("error_description", body.get("error", "Unknown error"))
             raise RuntimeError(f"Token refresh failed ({resp.status}): {error_desc}")
         return body
+
+
+async def fetch_amazon_profile(
+    session: aiohttp.ClientSession,
+    access_token: str,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Fetch the currently logged-in Amazon profile."""
+    headers = {
+        "Authorization": "Bearer " + access_token,
+        "Accept": "application/json",
+    }
+
+    async with session.get(AMAZON_PROFILE_URL, headers=headers) as resp:
+        if resp.status == 200:
+            body = await resp.json()
+            return {
+                "name": (body.get("name") or "").strip(),
+                "email": (body.get("email") or "").strip(),
+                "user_id": (body.get("user_id") or "").strip(),
+            }, None
+
+        if resp.status in {401, 403}:
+            return None, (
+                "Amazon-Benutzerprofil konnte mit dem aktuellen Token nicht gelesen werden. "
+                "Bitte erneut anmelden, damit die Profil-Berechtigung übernommen wird."
+            )
+
+        text = await resp.text()
+        raise RuntimeError(
+            f"Amazon profile request failed ({resp.status}): {text[:300]}"
+        )
 
 
 async def get_valid_access_token(app: web.Application) -> str | None:
@@ -520,6 +586,68 @@ async def handle_api_config_status(request: web.Request) -> web.Response:
         "has_oauth_token": bool(oauth_tokens.get("refresh_token")),
         "login_available": bool(options.get("client_id") and options.get("client_secret")),
     })
+
+
+async def handle_api_app_info(request: web.Request) -> web.Response:
+    """Return app metadata and Amazon account information for the overview UI."""
+    options = load_options()
+    oauth_tokens = _load_oauth_tokens()
+    refresh_token = _get_refresh_token()
+    login_available = bool(options.get("client_id") and options.get("client_secret"))
+    configured = bool(login_available and refresh_token)
+    info: dict[str, Any] = {
+        "app_version": get_addon_version(),
+        "region": options.get("amazon_region", "eu"),
+        "configured": configured,
+        "login_available": login_available,
+        "has_oauth_token": bool(oauth_tokens.get("refresh_token")),
+        "token_source": "oauth" if oauth_tokens.get("refresh_token") else "config",
+        "authenticated": False,
+        "auth_message": (
+            "Nicht angemeldet."
+            if login_available
+            else "Client-ID und Client-Secret fehlen."
+        ),
+        "amazon_user": {
+            "name": "",
+            "email": "",
+            "user_id": "",
+        },
+    }
+
+    if not configured:
+        return web.json_response(info)
+
+    try:
+        access_token = await get_valid_access_token(request.app)
+        if not access_token:
+            return web.json_response(info)
+
+        info["authenticated"] = True
+        info["auth_message"] = "Mit Amazon verbunden."
+
+        profile, profile_message = await fetch_amazon_profile(
+            request.app["http_session"],
+            access_token,
+        )
+        if profile:
+            info["amazon_user"] = profile
+            oauth_tokens["profile"] = profile
+            oauth_tokens["profile_updated_at"] = time.time()
+            _save_oauth_tokens(oauth_tokens)
+        elif isinstance(oauth_tokens.get("profile"), dict):
+            info["amazon_user"] = oauth_tokens["profile"]
+            info["auth_message"] = profile_message or (
+                "Mit Amazon verbunden. Gespeichertes Benutzerprofil wird angezeigt."
+            )
+        elif profile_message:
+            info["auth_message"] = profile_message
+    except RuntimeError as exc:
+        info["auth_message"] = str(exc)
+    except aiohttp.ClientError as exc:
+        info["auth_message"] = f"Netzwerkfehler beim Laden der Amazon-Informationen: {exc}"
+
+    return web.json_response(info)
 
 
 async def handle_api_auth_status(request: web.Request) -> web.Response:
@@ -990,6 +1118,7 @@ def create_app() -> web.Application:
     app.on_cleanup.append(on_cleanup)
     app.router.add_get("/", handle_index)
     app.router.add_get("/api/devices", handle_api_devices)
+    app.router.add_get("/api/app-info", handle_api_app_info)
     app.router.add_get("/api/config-status", handle_api_config_status)
     app.router.add_get("/api/auth-status", handle_api_auth_status)
     app.router.add_get("/api/token-refresh-status", handle_api_token_refresh_status)
