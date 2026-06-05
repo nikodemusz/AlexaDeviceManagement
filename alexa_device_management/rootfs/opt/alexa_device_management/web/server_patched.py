@@ -7,6 +7,7 @@ Alexa web session in /data instead of requiring repeated option edits.
 
 from __future__ import annotations
 
+import urllib.parse
 import html
 import json
 import logging
@@ -20,6 +21,7 @@ import aiohttp
 from aiohttp import web
 
 import server as base
+import alexa_openhab_login
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -416,10 +418,20 @@ def _session_assistant_page(request: web.Request, message: str = "", error: str 
 
 
 async def handle_alexa_web_login(request: web.Request) -> web.Response:
-    return web.json_response({
-        "auth_url": _external_url(request, "/auth/alexa-web/session"),
-        "message": "Alexa-Web-Session-Assistent öffnen.",
-    })
+    host, _, _ = _get_alexa_web_options()
+
+    auth_url = _external_url(
+        request,
+        "/auth/alexa-openhab/start?host="
+        + urllib.parse.quote(host or "alexa.amazon.de"),
+    )
+
+    return web.json_response(
+        {
+            "auth_url": auth_url,
+            "message": "Alexa-Login-Assistent öffnen.",
+        }
+    )f
 
 
 async def handle_alexa_web_session_get(request: web.Request) -> web.Response:
@@ -548,10 +560,14 @@ base.handle_auth_logout = handle_auth_logout
 
 def create_app() -> web.Application:
     app = _original_create_app()
+
     app.router.add_get("/auth/alexa-web/session", handle_alexa_web_session_get)
     app.router.add_post("/auth/alexa-web/session", handle_alexa_web_session_post)
     app.router.add_get("/auth/alexa-web/status", handle_alexa_web_status)
     app.router.add_post("/auth/alexa-web/logout", handle_alexa_web_logout)
+
+    alexa_openhab_login.setup_routes(app)
+
     return app
 
 
