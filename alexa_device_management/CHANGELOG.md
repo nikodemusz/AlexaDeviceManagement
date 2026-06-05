@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.8.0
+- **Feature** Umsetellen auf Amazon Web Login
+
 ## 0.7.0
 
 - **Feature**: Neue Info-Ansicht in der Web-UI ergänzt. Sie zeigt nun die
