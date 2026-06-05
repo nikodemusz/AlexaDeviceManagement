@@ -1,16 +1,19 @@
 """Patched entrypoint for Alexa Device Management.
 
 Adds read-only discovery through the Alexa web endpoints used by the Alexa web app.
-This is intentionally separated from server.py for the first iteration so the
-existing OAuth flow stays untouched and easy to compare.
+Adds a small Alexa Web session assistant so the add-on can store and reuse the
+Alexa web session in /data instead of requiring repeated option edits.
 """
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 import os
+import pathlib
 import re
+import time
 from typing import Any
 
 import aiohttp
@@ -20,13 +23,26 @@ import server as base
 
 _LOGGER = logging.getLogger(__name__)
 
+ALEXA_WEB_SESSION_PATH = pathlib.Path("/data/alexa_web_session.json")
+
 _DEFAULT_ALEXA_HOST_BY_REGION: dict[str, str] = {
     "eu": "alexa.amazon.de",
     "na": "alexa.amazon.com",
     "fe": "alexa.amazon.co.jp",
 }
 
-_SECRET_FIELDS = {"alexa_cookie", "alexa_csrf", "client_secret", "refresh_token"}
+_SECRET_FIELDS = {"alexa_cookie", "alexa_csrf", "client_secret", "refresh_token", "cookie", "csrf"}
+
+_original_handle_api_devices = base.handle_api_devices
+_original_handle_api_config_status = base.handle_api_config_status
+_original_handle_api_app_info = base.handle_api_app_info
+_original_handle_auth_logout = base.handle_auth_logout
+_original_create_app = base.create_app
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
 def _safe_host(value: str) -> str:
@@ -38,28 +54,77 @@ def _safe_host(value: str) -> str:
     return host
 
 
-def _get_alexa_web_options() -> tuple[str, str, str]:
-    """Return Alexa web host, cookie and csrf from add-on options."""
+def _read_session() -> dict[str, Any]:
+    if not ALEXA_WEB_SESSION_PATH.exists():
+        return {}
+    try:
+        return json.loads(ALEXA_WEB_SESSION_PATH.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _write_session(data: dict[str, Any]) -> None:
+    ALEXA_WEB_SESSION_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+
+
+def _clear_session() -> None:
+    try:
+        if ALEXA_WEB_SESSION_PATH.exists():
+            ALEXA_WEB_SESSION_PATH.unlink()
+    except OSError:
+        pass
+
+
+def _csrf_from_cookie_header(cookie: str) -> str:
+    match = re.search(r"(?:^|;\s*)csrf=([^;]+)", cookie or "")
+    return match.group(1) if match else ""
+
+
+def _default_host() -> str:
     options = base.load_options()
     region = options.get("amazon_region", "eu")
-    host = _safe_host(options.get("alexa_host", ""))
-    if not host:
-        host = _DEFAULT_ALEXA_HOST_BY_REGION.get(region, "alexa.amazon.de")
+    return _DEFAULT_ALEXA_HOST_BY_REGION.get(region, "alexa.amazon.de")
 
-    cookie = str(options.get("alexa_cookie", "") or "").strip()
-    csrf = str(options.get("alexa_csrf", "") or "").strip()
+
+def _get_alexa_web_options() -> tuple[str, str, str]:
+    """Return Alexa web host, cookie and csrf from session storage or add-on options."""
+    session = _read_session()
+    host = _safe_host(str(session.get("host", ""))) or _default_host()
+    cookie = str(session.get("cookie", "") or "").strip()
+    csrf = str(session.get("csrf", "") or "").strip()
+
+    if not cookie:
+        options = base.load_options()
+        host = _safe_host(str(options.get("alexa_host", ""))) or host
+        cookie = str(options.get("alexa_cookie", "") or "").strip()
+        csrf = str(options.get("alexa_csrf", "") or "").strip()
 
     if cookie and not csrf:
-        match = re.search(r"(?:^|;\s*)csrf=([^;]+)", cookie)
-        if match:
-            csrf = match.group(1)
+        csrf = _csrf_from_cookie_header(cookie)
 
     return host, cookie, csrf
 
 
-def _redact_options(options: dict[str, Any]) -> dict[str, Any]:
-    """Return option metadata without exposing secrets."""
-    return {key: ("***" if key in _SECRET_FIELDS and value else value) for key, value in options.items()}
+def _ingress_path(request: web.Request) -> str:
+    ingress_path = request.headers.get("X-Ingress-Path", "")
+    if not re.match(r"^[a-zA-Z0-9/_-]*$", ingress_path):
+        return ""
+    return ingress_path
+
+
+def _external_url(request: web.Request, path: str) -> str:
+    host = request.headers.get("X-Forwarded-Host") or request.headers.get("Host", "")
+    ingress_path = _ingress_path(request).rstrip("/")
+    if not path.startswith("/"):
+        path = "/" + path
+    if host:
+        return f"https://{host}{ingress_path}{path}"
+    return f"{ingress_path}{path}"
+
+
+# ---------------------------------------------------------------------------
+# Alexa Web discovery
+# ---------------------------------------------------------------------------
 
 
 def _normalize_capabilities(raw: dict[str, Any]) -> list[str]:
@@ -113,17 +178,22 @@ def _extract_smart_home_items(payload: Any) -> list[dict[str, Any]]:
         if not isinstance(value, dict):
             return
 
+        legacy = value.get("legacyAppliance")
+        if not isinstance(legacy, dict):
+            legacy = {}
+
         entity_id = (
             value.get("entityId")
             or value.get("applianceId")
             or value.get("id")
-            or value.get("legacyAppliance", {}).get("applianceId")
+            or legacy.get("applianceId")
         )
         name = (
             value.get("friendlyName")
             or value.get("name")
             or value.get("displayName")
             or value.get("applianceName")
+            or legacy.get("friendlyName")
         )
         if entity_id and name:
             items.append(value)
@@ -136,11 +206,14 @@ def _extract_smart_home_items(payload: Any) -> list[dict[str, Any]]:
     walk(payload)
     deduped: dict[str, dict[str, Any]] = {}
     for item in items:
+        legacy = item.get("legacyAppliance")
+        if not isinstance(legacy, dict):
+            legacy = {}
         key = str(
             item.get("entityId")
             or item.get("applianceId")
             or item.get("id")
-            or item.get("legacyAppliance", {}).get("applianceId")
+            or legacy.get("applianceId")
         )
         deduped[key] = item
     return list(deduped.values())
@@ -149,6 +222,9 @@ def _extract_smart_home_items(payload: Any) -> list[dict[str, Any]]:
 def _normalize_smart_home_device(raw: dict[str, Any]) -> dict[str, Any]:
     legacy = raw.get("legacyAppliance") if isinstance(raw.get("legacyAppliance"), dict) else {}
     details = raw.get("additionalApplianceDetails") if isinstance(raw.get("additionalApplianceDetails"), dict) else {}
+    display_categories = raw.get("displayCategories")
+    category = display_categories[0] if isinstance(display_categories, list) and display_categories else None
+
     device_id = (
         raw.get("entityId")
         or raw.get("applianceId")
@@ -168,10 +244,11 @@ def _normalize_smart_home_device(raw: dict[str, Any]) -> dict[str, Any]:
     device_type = (
         raw.get("entityType")
         or raw.get("applianceType")
-        or raw.get("displayCategories", [None])[0]
-        if isinstance(raw.get("displayCategories"), list) and raw.get("displayCategories")
-        else None
-    ) or raw.get("deviceType") or legacy.get("applianceType") or "SMART_HOME"
+        or category
+        or raw.get("deviceType")
+        or legacy.get("applianceType")
+        or "SMART_HOME"
+    )
     provider = (
         raw.get("providerName")
         or raw.get("manufacturerName")
@@ -220,9 +297,9 @@ async def fetch_alexa_web_devices(
     cookie: str,
     csrf: str,
 ) -> list[dict[str, Any]]:
-    """Fetch Alexa devices via the inofficial Alexa web endpoints, read-only."""
+    """Fetch Alexa devices via the unofficial Alexa web endpoints, read-only."""
     if not cookie or not csrf:
-        raise RuntimeError("Alexa Web Cookie oder CSRF Token fehlt.")
+        raise RuntimeError("Alexa Web Session fehlt.")
 
     headers = {
         "Accept": "application/json, text/javascript, */*; q=0.01",
@@ -268,12 +345,146 @@ async def fetch_alexa_web_devices(
     return []
 
 
+# ---------------------------------------------------------------------------
+# Session assistant
+# ---------------------------------------------------------------------------
+
+
+def _session_assistant_page(request: web.Request, message: str = "", error: str = "") -> web.Response:
+    host, _, _ = _get_alexa_web_options()
+    safe_message = html.escape(message)
+    safe_error = html.escape(error)
+    safe_host = html.escape(host, quote=True)
+    ingress_path = html.escape(_ingress_path(request) or "/", quote=True)
+
+    body = f"""<!DOCTYPE html>
+<html lang=\"de\">
+<head>
+  <meta charset=\"UTF-8\" />
+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />
+  <title>Alexa Web Session</title>
+  <style>
+    body {{ font-family: system-ui, sans-serif; background:#f5f6fa; margin:0; padding:24px; }}
+    .card {{ max-width:900px; margin:0 auto; background:#fff; border-radius:14px; padding:28px; box-shadow:0 8px 30px rgba(0,0,0,.10); }}
+    textarea, input {{ width:100%; box-sizing:border-box; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }}
+    textarea {{ min-height:160px; }}
+    label {{ display:block; font-weight:700; margin-top:16px; }}
+    button, a.btn {{ display:inline-block; border:0; padding:11px 18px; border-radius:8px; background:#00a8e8; color:#fff; text-decoration:none; cursor:pointer; font-weight:700; }}
+    .danger {{ background:#d63031; }}
+    .ok {{ color:#078b3e; font-weight:700; }}
+    .err {{ color:#c0392b; font-weight:700; }}
+    code {{ background:#f1f2f6; padding:2px 5px; border-radius:4px; }}
+    ol li {{ margin-bottom:8px; }}
+    .actions {{ margin-top:20px; display:flex; gap:10px; flex-wrap:wrap; }}
+  </style>
+</head>
+<body>
+  <div class=\"card\">
+    <h1>Alexa-Web-Session verbinden</h1>
+    <p>Diese Seite speichert die Alexa-Web-Session im Add-on unter <code>/data/alexa_web_session.json</code>. Danach nutzt <code>/api/devices</code> automatisch diese Session.</p>
+    {f'<p class=\"ok\">{safe_message}</p>' if message else ''}
+    {f'<p class=\"err\">{safe_error}</p>' if error else ''}
+    <ol>
+      <li>Öffne <code>https://alexa.amazon.de/spa/index.html</code> im Browser und melde dich an.</li>
+      <li>Öffne die Entwicklerwerkzeuge, Netzwerk-Tab, lade die Seite neu.</li>
+      <li>Klicke einen Request zu <code>/api/devices-v2/device</code> an.</li>
+      <li>Kopiere den kompletten Request-Header <code>cookie</code>. Falls vorhanden, kopiere auch <code>csrf</code>.</li>
+      <li>Hier einfügen und speichern. Die App testet die Session direkt gegen Alexa.</li>
+    </ol>
+    <form method=\"post\" action=\"{html.escape(_external_url(request, '/auth/alexa-web/session'), quote=True)}\">
+      <label for=\"host\">Alexa Host</label>
+      <input id=\"host\" name=\"host\" value=\"{safe_host}\" />
+      <label for=\"cookie\">Cookie Header</label>
+      <textarea id=\"cookie\" name=\"cookie\" placeholder=\"session-id=...; ubid-acbde=...; csrf=...\"></textarea>
+      <label for=\"csrf\">CSRF Header optional</label>
+      <input id=\"csrf\" name=\"csrf\" placeholder=\"wird sonst aus csrf=... im Cookie gelesen\" />
+      <div class=\"actions\">
+        <button type=\"submit\">Session speichern und testen</button>
+        <a class=\"btn\" href=\"{ingress_path}\">Zurück</a>
+      </div>
+    </form>
+    <form method=\"post\" action=\"{html.escape(_external_url(request, '/auth/alexa-web/logout'), quote=True)}\" class=\"actions\">
+      <button class=\"danger\" type=\"submit\">Gespeicherte Alexa-Web-Session löschen</button>
+    </form>
+  </div>
+  <script>
+    if (window.opener) {{ window.opener.postMessage({{ type: 'oauth_callback', success: {str(bool(message and not error)).lower()} }}, window.location.origin); }}
+  </script>
+</body>
+</html>"""
+    return web.Response(text=body, content_type="text/html")
+
+
+async def handle_alexa_web_login(request: web.Request) -> web.Response:
+    return web.json_response({
+        "auth_url": _external_url(request, "/auth/alexa-web/session"),
+        "message": "Alexa-Web-Session-Assistent öffnen.",
+    })
+
+
+async def handle_alexa_web_session_get(request: web.Request) -> web.Response:
+    return _session_assistant_page(request)
+
+
+async def handle_alexa_web_session_post(request: web.Request) -> web.Response:
+    data = await request.post()
+    host = _safe_host(str(data.get("host", ""))) or _default_host()
+    cookie = str(data.get("cookie", "") or "").strip()
+    csrf = str(data.get("csrf", "") or "").strip() or _csrf_from_cookie_header(cookie)
+
+    if not cookie or not csrf:
+        return _session_assistant_page(request, error="Cookie oder CSRF fehlt. Der csrf-Wert kann auch als csrf=... im Cookie enthalten sein.")
+
+    try:
+        devices = await fetch_alexa_web_devices(request.app["http_session"], host, cookie, csrf)
+    except RuntimeError as exc:
+        return _session_assistant_page(request, error=f"Session-Test fehlgeschlagen: {exc}")
+
+    _write_session({
+        "host": host,
+        "cookie": cookie,
+        "csrf": csrf,
+        "createdAt": int(time.time()),
+        "lastValidatedAt": int(time.time()),
+        "lastDeviceCount": len(devices),
+    })
+    return _session_assistant_page(request, message=f"Session gespeichert. {len(devices)} Geräte/Entities gefunden.")
+
+
+async def handle_alexa_web_status(request: web.Request) -> web.Response:
+    session = _read_session()
+    return web.json_response({
+        "configured": bool(session.get("cookie") and session.get("csrf")),
+        "host": _safe_host(str(session.get("host", ""))) or _default_host(),
+        "createdAt": session.get("createdAt"),
+        "lastValidatedAt": session.get("lastValidatedAt"),
+        "lastDeviceCount": session.get("lastDeviceCount"),
+    })
+
+
+async def handle_alexa_web_logout(request: web.Request) -> web.Response:
+    _clear_session()
+    if request.method == "POST" and request.headers.get("Accept", "").find("text/html") >= 0:
+        return _session_assistant_page(request, message="Gespeicherte Alexa-Web-Session gelöscht.")
+    return web.json_response({"status": "ok", "message": "Alexa-Web-Session gelöscht."})
+
+
+# ---------------------------------------------------------------------------
+# Existing API route replacements
+# ---------------------------------------------------------------------------
+
+
 async def handle_api_devices(request: web.Request) -> web.Response:
     """Return device list as JSON, preferring Alexa Web discovery when configured."""
     host, cookie, csrf = _get_alexa_web_options()
     if cookie and csrf:
         try:
             devices = await fetch_alexa_web_devices(request.app["http_session"], host, cookie, csrf)
+            session = _read_session()
+            if session:
+                session["lastValidatedAt"] = int(time.time())
+                session["lastDeviceCount"] = len(devices)
+                _write_session(session)
             return web.json_response({"devices": devices, "source": "alexa_web"})
         except RuntimeError as exc:
             _LOGGER.error("Failed to fetch devices from Alexa Web API: %s", exc)
@@ -283,46 +494,68 @@ async def handle_api_devices(request: web.Request) -> web.Response:
                 "source": "demo",
             })
 
-    return await base.handle_api_devices(request)
+    return await _original_handle_api_devices(request)
 
 
 async def handle_api_config_status(request: web.Request) -> web.Response:
     """Return config status including Alexa Web credentials."""
-    response = await base.handle_api_config_status(request)
+    response = await _original_handle_api_config_status(request)
     try:
         data = json.loads(response.text)
     except (TypeError, json.JSONDecodeError):
-        return response
+        data = {}
     host, cookie, csrf = _get_alexa_web_options()
     data["alexa_web_configured"] = bool(cookie and csrf)
     data["alexa_host"] = host
     data["configured"] = bool(data.get("configured") or data["alexa_web_configured"])
+    data["login_available"] = True
+    data["region"] = data.get("region") or base.load_options().get("amazon_region", "eu")
     return web.json_response(data)
 
 
 async def handle_api_app_info(request: web.Request) -> web.Response:
     """Return app metadata and include Alexa Web auth source information."""
-    response = await base.handle_api_app_info(request)
+    response = await _original_handle_api_app_info(request)
     try:
         data = json.loads(response.text)
     except (TypeError, json.JSONDecodeError):
-        return response
+        data = {}
     host, cookie, csrf = _get_alexa_web_options()
+    session = _read_session()
     if cookie and csrf:
         data["configured"] = True
         data["authenticated"] = True
-        data["token_source"] = "alexa_web_cookie"
-        data["auth_message"] = f"Alexa-Web-Zugangsdaten vorhanden ({host})."
+        data["token_source"] = "alexa_web_session" if session else "alexa_web_cookie"
+        data["auth_message"] = f"Alexa-Web-Session vorhanden ({host})."
+        data["amazon_user"] = data.get("amazon_user") or {}
+    else:
+        data["token_source"] = data.get("token_source") or "not_connected"
     return web.json_response(data)
+
+
+async def handle_auth_logout(request: web.Request) -> web.Response:
+    _clear_session()
+    return await _original_handle_auth_logout(request)
 
 
 # Patch route handlers before create_app() registers them.
 base.handle_api_devices = handle_api_devices
 base.handle_api_config_status = handle_api_config_status
 base.handle_api_app_info = handle_api_app_info
+base.handle_auth_login = handle_alexa_web_login
+base.handle_auth_logout = handle_auth_logout
+
+
+def create_app() -> web.Application:
+    app = _original_create_app()
+    app.router.add_get("/auth/alexa-web/session", handle_alexa_web_session_get)
+    app.router.add_post("/auth/alexa-web/session", handle_alexa_web_session_post)
+    app.router.add_get("/auth/alexa-web/status", handle_alexa_web_status)
+    app.router.add_post("/auth/alexa-web/logout", handle_alexa_web_logout)
+    return app
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("INGRESS_PORT", "8099"))
     _LOGGER.info("Starting Alexa Device Management patched web server on port %d", port)
-    web.run_app(base.create_app(), host="0.0.0.0", port=port)
+    web.run_app(create_app(), host="0.0.0.0", port=port)
