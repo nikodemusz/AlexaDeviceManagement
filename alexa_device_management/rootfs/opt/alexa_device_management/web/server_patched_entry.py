@@ -65,7 +65,25 @@ def _fix_alexa_openhab_login_source(source: str) -> str:
     raise web.HTTPFound(external_url(request, local_path))
 '''
 
-    return source.replace(old_start, new_start, 1)
+    source = source.replace(old_start, new_start, 1)
+
+    old_query_forward = '''    if request.query_string:
+        target += "?" + request.query_string
+'''
+
+    new_query_forward = '''    # request.query_string may contain a decoded representation of nested URL
+    # parameters. Use request.raw_path to forward Amazon OpenID parameters
+    # exactly as the browser sent them to the local ingress proxy.
+    raw_query = ""
+
+    if "?" in request.raw_path:
+        raw_query = request.raw_path.split("?", 1)[1]
+
+    if raw_query:
+        target += "?" + raw_query
+'''
+
+    return source.replace(old_query_forward, new_query_forward, 1)
 
 
 def _load_fixed_module(module_name: str, path: pathlib.Path, source: str) -> types.ModuleType:
