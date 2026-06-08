@@ -67,11 +67,7 @@ def _fix_alexa_openhab_login_source(source: str) -> str:
 
     source = source.replace(old_start, new_start, 1)
 
-    old_query_forward = '''    if request.query_string:
-        target += "?" + request.query_string
-'''
-
-    new_query_forward = '''    # request.query_string may contain a decoded representation of nested URL
+    old_query_forward_raw = '''    # request.query_string may contain a decoded representation of nested URL
     # parameters. Use request.raw_path to forward Amazon OpenID parameters
     # exactly as the browser sent them to the local ingress proxy.
     raw_query = ""
@@ -83,7 +79,29 @@ def _fix_alexa_openhab_login_source(source: str) -> str:
         target += "?" + raw_query
 '''
 
-    return source.replace(old_query_forward, new_query_forward, 1)
+    old_query_forward_plain = '''    if request.query_string:
+        target += "?" + request.query_string
+'''
+
+    new_query_forward = '''    # Home Assistant ingress and aiohttp may expose nested URL parameters in a
+    # decoded form. Re-encode all OpenID parameters before forwarding them to
+    # Amazon, otherwise Amazon receives values such as
+    # openid.return_to=https://www.amazon.de/ap/maplanding and responds with
+    # its generic 404 page.
+    query_items = []
+
+    for name in request.query:
+        for value in request.query.getall(name):
+            query_items.append((name, value))
+
+    if query_items:
+        target += "?" + urllib.parse.urlencode(query_items, doseq=True)
+'''
+
+    if old_query_forward_raw in source:
+        return source.replace(old_query_forward_raw, new_query_forward, 1)
+
+    return source.replace(old_query_forward_plain, new_query_forward, 1)
 
 
 def _load_fixed_module(module_name: str, path: pathlib.Path, source: str) -> types.ModuleType:
