@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.9
+
+- **Bugfix**: Aktive Alexa-Login-Route von der irreführenden OpenHAB-Bezeichnung auf `/auth/alexa-app/...` umgestellt.
+- **Bugfix**: Neuer Start-Entry `server_app_entry.py` verwendet host-aware Forwarding, damit Amazon-Login-Pfade den Zielhost enthalten können, z. B. `/FORWARD/www.amazon.de/...`.
+- **Release Notes**: Diese Version bereinigt die aktive Login-Route und korrigiert die Weiterleitung für Amazon-App-Login-Pfade mit explizitem Zielhost.
+
+## 0.8.8
+
+- **Bugfix**: Der Alexa-Web-Login erzeugt die App-Registrierungs-URL jetzt abhängig von der Amazon-Domain. Für `amazon.de` wird dadurch die deutsche Amazon-Domain und `de_DE` als Sprache verwendet.
+- **Release Notes**: Diese Version korrigiert eine fehlerhafte Amazon-Ziel-URL, die trotz korrektem Home-Assistant-Ingress-Proxy auf der Amazon-Seite "Suchst du etwas?" landen konnte.
+
 ## 0.8.7
 
 - **Bugfix**: Der Alexa-Web-Login-Proxy kodiert OpenID-Query-Parameter vor dem Weiterleiten an Amazon explizit erneut mit `urllib.parse.urlencode(...)`. Das ist robuster, wenn Home Assistant Ingress oder aiohttp den Query-String bereits dekodiert an das Add-on übergeben.
