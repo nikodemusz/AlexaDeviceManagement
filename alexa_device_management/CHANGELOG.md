@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.6
+
+- **Bugfix**: Der Alexa-Web-Login-Proxy leitet Amazon-OpenID-Parameter jetzt mit dem rohen Query-String aus `request.raw_path` weiter. Dadurch werden verschachtelte URL-Parameter wie `openid.return_to` nicht mehr vor dem Weiterreichen an Amazon dekodiert.
+- **Release Notes**: Diese Version korrigiert die zweite Stelle im Ingress-Proxy, an der Amazon-Login-URLs beschädigt werden konnten und dadurch auf der Amazon-404-Seite "Suchst du etwas?" landeten.
+
 ## 0.8.5
 
 - **Bugfix**: Alexa-Web-Login erhält den Amazon-OpenID-Query-String jetzt URL-kodiert. Dadurch landet der Login nicht mehr auf einer Amazon-404-Seite wie "Suchst du etwas?".
