@@ -25,9 +25,47 @@ def _fix_server_source(source: str) -> str:
 
 def _fix_alexa_openhab_login_source(source: str) -> str:
     if source.startswith("Local-only login proxy:\n"):
-        return '"""' + source
+        source = '"""' + source
 
-    return source
+    old_start = '''async def start(request: web.Request) -> web.StreamResponse:
+    alexa_host = safe_host(request.query.get("host", "alexa.amazon.de"))
+
+    session = await reset_proxy_session(request.app)
+    state = new_login_state(alexa_host)
+
+    seed_login_cookies(session, state)
+
+    login_url = URL(build_login_url(state))
+    local_path = "/auth/alexa-openhab/FORWARD" + login_url.path
+
+    if login_url.query_string:
+        local_path += "?" + login_url.query_string
+
+    raise web.HTTPFound(external_url(request, local_path))
+'''
+
+    new_start = '''async def start(request: web.Request) -> web.StreamResponse:
+    alexa_host = safe_host(request.query.get("host", "alexa.amazon.de"))
+
+    session = await reset_proxy_session(request.app)
+    state = new_login_state(alexa_host)
+
+    seed_login_cookies(session, state)
+
+    # Keep Amazon's OpenID query string percent-encoded. yarl.URL.query_string
+    # returns a decoded representation, which can break nested URL parameters
+    # such as openid.return_to and lead to an Amazon 404 page.
+    login_url = build_login_url(state)
+    parsed_login_url = urllib.parse.urlsplit(login_url)
+    local_path = "/auth/alexa-openhab/FORWARD" + parsed_login_url.path
+
+    if parsed_login_url.query:
+        local_path += "?" + parsed_login_url.query
+
+    raise web.HTTPFound(external_url(request, local_path))
+'''
+
+    return source.replace(old_start, new_start, 1)
 
 
 def _load_fixed_module(module_name: str, path: pathlib.Path, source: str) -> types.ModuleType:
