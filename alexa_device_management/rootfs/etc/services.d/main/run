@@ -1,5 +1,5 @@
 #!/usr/bin/with-contenv sh
 set -eu
 
-echo "[info] Starting Alexa Device Management web server with Alexa Web discovery..."
-python3 /opt/alexa_device_management/web/server_patched_entry.py
+echo "[info] Starting Alexa Device Management web server with Alexa App discovery..."
+python3 /opt/alexa_device_management/web/server_app_entry.py
