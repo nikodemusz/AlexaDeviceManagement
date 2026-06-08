@@ -2,8 +2,8 @@
 
 ## 0.8.5
 
-- **Dokumentation**: Changelog und README um die aktuelle Alexa-Web-Login-Reparatur ergänzt.
-- **Release Notes**: Festgehalten, dass das Add-on beim Start Syntax-Artefakte in den gepatchten Alexa-Web-Login-Dateien robust korrigiert.
+- **Bugfix**: Alexa-Web-Login erhält den Amazon-OpenID-Query-String jetzt URL-kodiert. Dadurch landet der Login nicht mehr auf einer Amazon-404-Seite wie "Suchst du etwas?".
+- **Release Notes**: Diese Version korrigiert den Weiterleitungsaufbau im Home-Assistant-Ingress-Proxy für den Amazon-App-Registrierungs-Login.
 
 ## 0.8.4
 
@@ -136,7 +136,6 @@
 
 - Add Amazon Alexa authentication configuration (client_id, client_secret, refresh_token, region).
 - Add ingress web UI to display Alexa devices.
-- Web server powered by aiohttp serves a device overview panel.
 - Configuration status shown in the UI (configured vs. not configured).
 
 ## 0.2.0
