@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.8.5
+
+- **Dokumentation**: Changelog und README um die aktuelle Alexa-Web-Login-Reparatur ergänzt.
+- **Release Notes**: Festgehalten, dass das Add-on beim Start Syntax-Artefakte in den gepatchten Alexa-Web-Login-Dateien robust korrigiert.
+
+## 0.8.4
+
+- **Bugfix**: Startfehler durch fehlende öffnende Triple-Quote in `alexa_openhab_login.py` abgefangen. Der sichere Entry-Wrapper lädt das Login-Modul jetzt mit einer kleinen Quelltext-Korrektur vor.
+- **Bugfix**: Startfehler durch ein versehentliches `)f` in `server_patched.py` wird weiterhin beim Start korrigiert.
+
+## 0.8.3
+
+- **Bugfix**: Add-on-Startskript auf den sicheren `server_patched_entry.py` Entry-Wrapper umgestellt, damit der Alexa-Web-Login trotz kleiner Syntax-Artefakte startbar bleibt.
+
+## 0.8.2
+
+- **Wartung**: Add-on-Version erhöht, damit Home Assistant Repository-Updates zuverlässig erkennt.
+
+## 0.8.1
+
+- **Wartung**: Add-on-Version erhöht, damit Home Assistant die neue Build-Version anbietet.
+
 ## 0.8.0
 - **Feature** Umsetellen auf Amazon Web Login
 
