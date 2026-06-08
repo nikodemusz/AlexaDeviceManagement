@@ -18,9 +18,10 @@ This app brings back efficient bulk device management.
 
 - View all your Amazon Alexa devices in a clean web UI
 - App overview with add-on version, Alexa region, connection status, and logged-in Amazon user
+- Amazon Web Login helper for creating and storing the Alexa web session
 - Accessible as a sidebar menu item in Home Assistant OS
 - Runs as a standalone Docker container (no HA integration needed)
-- Configuration via add-on settings (Amazon OAuth2 credentials)
+- Configuration via add-on settings (Amazon region and optional session values)
 
 ## Installation
 
@@ -29,6 +30,10 @@ This app brings back efficient bulk device management.
 3. Add: `https://github.com/nikodemusz/AlexaDeviceManagement`
 4. Install **Alexa Device Management** and start it.
 5. Open **Alexa Devices** from the sidebar.
+
+## Release Notes
+
+See [CHANGELOG.md](./CHANGELOG.md) for version-specific release notes.
 
 ## Architecture
 
