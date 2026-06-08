@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.7
+
+- **Bugfix**: Der Alexa-Web-Login-Proxy kodiert OpenID-Query-Parameter vor dem Weiterleiten an Amazon explizit erneut mit `urllib.parse.urlencode(...)`. Das ist robuster, wenn Home Assistant Ingress oder aiohttp den Query-String bereits dekodiert an das Add-on übergeben.
+- **Release Notes**: Diese Version korrigiert weiterhin den Amazon-404-Fehler "Suchst du etwas?" beim App-Registrierungs-Login, indem verschachtelte URL-Parameter wie `openid.return_to` wieder Amazon-kompatibel kodiert werden.
+
 ## 0.8.6
 
 - **Bugfix**: Der Alexa-Web-Login-Proxy leitet Amazon-OpenID-Parameter jetzt mit dem rohen Query-String aus `request.raw_path` weiter. Dadurch werden verschachtelte URL-Parameter wie `openid.return_to` nicht mehr vor dem Weiterreichen an Amazon dekodiert.
