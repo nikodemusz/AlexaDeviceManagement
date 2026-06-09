@@ -12,6 +12,77 @@ RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt
 
 COPY rootfs /
 
+# Ensure the plain server entrypoint also exposes the Alexa web login proxy.
+# Depending on the Home Assistant app runner, /opt/.../server.py may be started
+# directly instead of server_patched_entry.py. In that case the route
+# /auth/alexa-openhab/start was missing and the Amazon login frontend returned
+# only "404: Not Found" through ingress.
+RUN python3 - <<'PY'
+from pathlib import Path
+import re
+
+server = Path('/opt/alexa_device_management/web/server.py')
+s = server.read_text()
+
+if 'import alexa_openhab_login' not in s:
+    s = s.replace(
+        'import aiohttp\nfrom aiohttp import web\n',
+        'import aiohttp\nfrom aiohttp import web\nimport alexa_openhab_login\n',
+        1,
+    )
+
+replacement = '''async def handle_auth_login(request: web.Request) -> web.Response:
+    """Start the Alexa web-session login assistant.
+
+    This project does not use the Alexa Smart Home Skill OAuth flow here. It
+    needs the Amazon/Alexa web-login frontend that creates a local Alexa web
+    session for reading and managing devices.
+    """
+    options = load_options()
+    alexa_host = options.get("alexa_host", "alexa.amazon.de")
+    alexa_host = (alexa_host or "alexa.amazon.de").strip().lower()
+    alexa_host = alexa_host.removeprefix("https://").removeprefix("http://").split("/")[0]
+    if not re.fullmatch(r"[a-z0-9.-]+", alexa_host):
+        alexa_host = "alexa.amazon.de"
+
+    ingress_path = request.headers.get("X-Ingress-Path", "")
+    if not re.match(r"^[a-zA-Z0-9/_-]*$", ingress_path):
+        ingress_path = ""
+
+    scheme = request.headers.get("X-Forwarded-Proto", "https") or "https"
+    host = request.headers.get("X-Forwarded-Host") or request.headers.get("Host", "")
+    if not host:
+        return web.json_response(
+            {"error": "Externe Ingress-URL konnte nicht ermittelt werden."},
+            status=400,
+        )
+
+    auth_url = (
+        f"{scheme}://{host}{ingress_path.rstrip('/')}/auth/alexa-openhab/start"
+        f"?host={urllib.parse.quote(alexa_host)}"
+    )
+
+    return web.json_response({
+        "auth_url": auth_url,
+        "message": "Alexa-Login-Assistent öffnen.",
+    })
+
+
+async def handle_auth_callback'''
+
+pattern = r'async def handle_auth_login\(request: web\.Request\) -> web\.Response:\n.*?\n\nasync def handle_auth_callback'
+s, count = re.subn(pattern, replacement, s, count=1, flags=re.S)
+if count != 1:
+    raise SystemExit('Could not patch handle_auth_login in server.py')
+
+route_marker = '    app.router.add_post("/auth/logout", handle_auth_logout)\n'
+route_replacement = route_marker + '    alexa_openhab_login.setup_routes(app)\n'
+if 'alexa_openhab_login.setup_routes(app)' not in s:
+    s = s.replace(route_marker, route_replacement, 1)
+
+server.write_text(s)
+PY
+
 # Temporary safety fix: make Alexa device API failures visible instead of
 # silently falling back to demo devices. The real next step is replacing the
 # current LWA endpoint calls with the Alexa web API client.
