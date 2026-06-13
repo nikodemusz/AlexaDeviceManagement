@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.10
+
+- **Bugfix**: Die Web-UI startet den Alexa-Login jetzt per direkter Browser-Navigation zu `/auth/login` statt über `fetch()` mit anschließendem `window.open(...)`.
+- **Bugfix**: Dadurch bleibt der Login-Start ein echter Benutzer-Klick und wird von iOS/Safari/Home-Assistant-Ingress nicht mehr als verzögertes Popup behandelt.
+- **Release Notes**: Diese Version vereinfacht den Loginpfad. Der Server übernimmt die komplette Redirect-Kette von `/auth/login` über `/auth/alexa-app/start` bis zur Amazon-Loginseite.
+
 ## 0.8.9
 
 - **Bugfix**: Aktive Alexa-Login-Route von der irreführenden OpenHAB-Bezeichnung auf `/auth/alexa-app/...` umgestellt.
