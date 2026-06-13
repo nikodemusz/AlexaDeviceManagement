@@ -59,20 +59,16 @@
         <div class="login-steps">
           <h3>Ablauf:</h3>
           <ol>
-            <li>Amazon/Alexa im Browser öffnen und anmelden.</li>
-            <li>Im Assistenten Cookie/CSRF einfügen.</li>
-            <li>Die App testet die Session direkt gegen Alexa.</li>
-            <li>Danach wird die Geräteliste automatisch über die Alexa-Web-Endpunkte geladen.</li>
+            <li>Der Browser öffnet direkt den lokalen Login-Start <code>/auth/login</code>.</li>
+            <li>Der Server leitet auf den Alexa-App-Login-Proxy weiter.</li>
+            <li>Amazon liefert nach erfolgreicher Anmeldung den Token an <code>/ap/maplanding</code> zurück.</li>
+            <li>Die App speichert daraus die lokale Alexa-Web-Session und lädt danach die Geräteliste.</li>
           </ol>
         </div>
         <button id="btn-start-login" class="btn btn-primary btn-large">
           🔑 Alexa-Web-Session verbinden
         </button>
-        <p id="login-hint" class="login-hint">Klicke auf den Button, um den Session-Assistenten zu öffnen.</p>
-        <div id="login-fallback" class="login-fallback hidden">
-          <p>Falls sich kein neuer Tab geöffnet hat, klicke bitte hier:</p>
-          <a id="login-fallback-link" class="btn btn-secondary" target="_blank">Session-Assistent öffnen</a>
-        </div>
+        <p id="login-hint" class="login-hint">Klicke auf den Button, um den Amazon-Login direkt zu starten.</p>
       </div>
     </div>
 
@@ -136,44 +132,14 @@
           btnLogin.classList.remove("hidden");
           btnLogout.classList.add("hidden");
           btnStartLogin.disabled = false;
-          loginHint.textContent = "Klicke auf den Button, um die Alexa-Web-Session zu verbinden.";
+          loginHint.textContent = "Klicke auf den Button, um den Amazon-Login direkt zu starten.";
         }
       } catch (_) {}
     }
 
-    async function startLogin() {
-      try {
-        hideLoginFallback();
-        const resp = await fetch(`${INGRESS_PATH}/auth/login`);
-        if (!resp.ok) {
-          const data = await resp.json();
-          showAlert(data.error || "Login-Fehler", "error");
-          return;
-        }
-        const data = await resp.json();
-        const popup = window.open(data.auth_url, "_blank");
-        const popupBlocked = !popup;
-        if (!popupBlocked) {
-          try { popup.focus(); } catch (_) {}
-          showAlert("Der Alexa-Web-Session-Assistent wurde geöffnet.", "success");
-          return;
-        }
-        showLoginFallback(data.auth_url);
-        showAlert("Der Browser hat den neuen Tab blockiert. Bitte öffne den Assistenten über den Link unten.", "warning");
-      } catch (err) {
-        showAlert("Fehler beim Starten des Assistenten: " + err.message, "error");
-      }
-    }
-
-    function showLoginFallback(authUrl) {
-      const fallback = document.getElementById("login-fallback");
-      const link = document.getElementById("login-fallback-link");
-      link.href = authUrl;
-      fallback.classList.remove("hidden");
-    }
-
-    function hideLoginFallback() {
-      document.getElementById("login-fallback").classList.add("hidden");
+    function startLogin() {
+      const loginUrl = `${INGRESS_PATH}/auth/login`;
+      window.location.assign(loginUrl);
     }
 
     async function logout() {
