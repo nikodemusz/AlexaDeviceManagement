@@ -83,6 +83,75 @@ if 'alexa_openhab_login.setup_routes(app)' not in s:
 server.write_text(s)
 PY
 
+# In the browser UI the Amazon login must be started directly from the click
+# event. A fetch() preflight followed by window.open() is treated as a delayed
+# popup by Safari/iOS and some Home Assistant ingress contexts, so the Amazon
+# login tab may never open. The server-side /auth/login endpoint now redirects
+# into the local Alexa app-login proxy; the UI only opens that URL directly.
+RUN python3 - <<'PY'
+from pathlib import Path
+
+index = Path('/opt/alexa_device_management/web/static/index.html')
+s = index.read_text()
+
+old = '''    async function startLogin() {
+      try {
+        hideLoginFallback();
+        const resp = await fetch(`${INGRESS_PATH}/auth/login`);
+        if (!resp.ok) {
+          const data = await resp.json();
+          showAlert(data.error || "Login-Fehler", "error");
+          return;
+        }
+        const data = await resp.json();
+        const popup = window.open(data.auth_url, "_blank");
+        const popupBlocked = !popup;
+        if (!popupBlocked) {
+          try { popup.focus(); } catch (_) {}
+          showAlert("Der Alexa-Web-Session-Assistent wurde geöffnet.", "success");
+          return;
+        }
+        showLoginFallback(data.auth_url);
+        showAlert("Der Browser hat den neuen Tab blockiert. Bitte öffne den Assistenten über den Link unten.", "warning");
+      } catch (err) {
+        showAlert("Fehler beim Starten des Assistenten: " + err.message, "error");
+      }
+    }
+'''
+
+new = '''    function startLogin(event) {
+      if (event) {
+        event.preventDefault();
+      }
+
+      hideLoginFallback();
+
+      const loginUrl = `${INGRESS_PATH}/auth/login`;
+      const popup = window.open(loginUrl, "_blank", "noopener");
+
+      if (popup) {
+        try { popup.focus(); } catch (_) {}
+        showAlert("Der Amazon-Login wurde geöffnet.", "success");
+        return;
+      }
+
+      showLoginFallback(loginUrl);
+      showAlert("Der Browser hat den neuen Tab blockiert. Bitte öffne den Amazon-Login über den Link unten.", "warning");
+    }
+'''
+
+if old not in s:
+    raise SystemExit('Could not patch startLogin() in static/index.html')
+
+s = s.replace(old, new, 1)
+s = s.replace(
+    'Klicke auf den Button, um den Session-Assistenten zu öffnen.',
+    'Klicke auf den Button, um den Amazon-Login in einem neuen Tab zu öffnen.',
+)
+s = s.replace('Session-Assistent öffnen</a>', 'Amazon-Login öffnen</a>')
+index.write_text(s)
+PY
+
 # Temporary safety fix: make Alexa device API failures visible instead of
 # silently falling back to demo devices. The real next step is replacing the
 # current LWA endpoint calls with the Alexa web API client.
