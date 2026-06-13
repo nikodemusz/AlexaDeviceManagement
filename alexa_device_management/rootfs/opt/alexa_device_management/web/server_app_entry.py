@@ -58,6 +58,47 @@ def _patch_login_source(source: str) -> str:
     return source.replace(old_target, new_target, 1)
 
 
+def _patch_server_source(source: str) -> str:
+    """Make /auth/login a browser navigation endpoint, not a JSON preflight."""
+    old_handler = '''async def handle_alexa_web_login(request: web.Request) -> web.Response:
+    host, _, _ = _get_alexa_web_options()
+
+    auth_url = _external_url(
+        request,
+        "/auth/alexa-app/start?host="
+        + urllib.parse.quote(host or "alexa.amazon.de"),
+    )
+
+    return web.json_response(
+        {
+            "auth_url": auth_url,
+            "message": "Alexa-Login-Assistent öffnen.",
+        }
+    )
+
+
+async def handle_alexa_web_session_get'''
+
+    new_handler = '''async def handle_alexa_web_login(request: web.Request) -> web.Response:
+    host, _, _ = _get_alexa_web_options()
+
+    auth_url = _external_url(
+        request,
+        "/auth/alexa-app/start?host="
+        + urllib.parse.quote(host or "alexa.amazon.de"),
+    )
+
+    raise web.HTTPFound(auth_url)
+
+
+async def handle_alexa_web_session_get'''
+
+    patched = source.replace(old_handler, new_handler, 1)
+    if patched == source:
+        raise RuntimeError("Could not patch handle_alexa_web_login redirect handler")
+    return patched
+
+
 def main() -> None:
     if str(BASE_DIR) not in sys.path:
         sys.path.insert(0, str(BASE_DIR))
@@ -71,6 +112,7 @@ def main() -> None:
 
     server_source = legacy_entry._fix_server_source(PATCHED_SERVER.read_text())
     server_source = server_source.replace("alexa_openhab_login", "alexa_app_login")
+    server_source = _patch_server_source(server_source)
 
     globals_dict = {
         "__name__": "__main__",
