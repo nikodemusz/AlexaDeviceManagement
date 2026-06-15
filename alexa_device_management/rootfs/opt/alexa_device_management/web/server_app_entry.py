@@ -13,7 +13,6 @@ PATCHED_SERVER = BASE_DIR / "server_patched.py"
 ALEXA_LOGIN_SOURCE = BASE_DIR / "alexa_openhab_login.py"
 
 
-
 def _load_module(module_name: str, path: pathlib.Path, source: str) -> types.ModuleType:
     module = types.ModuleType(module_name)
     module.__file__ = str(path)
@@ -24,31 +23,59 @@ def _load_module(module_name: str, path: pathlib.Path, source: str) -> types.Mod
     return module
 
 
+def _replace_start(source: str) -> str:
+    replacement = '''async def start(request: web.Request) -> web.StreamResponse:
+    alexa_host = safe_host(request.query.get("host", "alexa.amazon.de"))
+
+    session = await reset_proxy_session(request.app)
+    state = new_login_state(alexa_host)
+
+    seed_login_cookies(session, state)
+
+    login_url = build_login_url(state)
+    parsed_login_url = urllib.parse.urlsplit(login_url)
+
+    if not parsed_login_url.netloc:
+        raise web.HTTPInternalServerError(text="Amazon login URL has no target host")
+
+    local_path = (
+        "/auth/alexa-app/FORWARD/"
+        + parsed_login_url.netloc
+        + parsed_login_url.path
+    )
+
+    if parsed_login_url.query:
+        local_path += "?" + parsed_login_url.query
+
+    raise web.HTTPFound(external_url(request, local_path))
+'''
+
+    pattern = (
+        r"async def start\(request: web\.Request\) -> web\.StreamResponse:\n"
+        r".*?\n\nasync def register_app"
+    )
+    patched, count = re.subn(
+        pattern,
+        replacement + "\n\nasync def register_app",
+        source,
+        count=1,
+        flags=re.S,
+    )
+    if count != 1:
+        raise RuntimeError("Could not patch Alexa app login start()")
+    return patched
+
 
 def _replace_setup_routes(source: str) -> str:
-    """Install login routes exactly once, even after Docker build rewrites.
-
-    Some image builds modify alexa_openhab_login.py before this entrypoint runs.
-    In that case both /auth/alexa-app and /auth/alexa-openhab may already be in
-    the source. After the route-name normalization below those can collapse into
-    duplicate /auth/alexa-app wildcard routes, and aiohttp aborts startup with
-    "method * is already registered". Replace the whole setup_routes() function
-    instead of depending on one exact historical body.
-    """
     replacement = '''def setup_routes(app: web.Application) -> None:
-    route_keys = (
-        "/auth/alexa-app/{tail:.*}",
-        "/auth/alexa-openhab/{tail:.*}",
-    )
+    route_key = "/auth/alexa-app/{tail:.*}"
     existing = {
         getattr(resource, "canonical", None)
         for resource in app.router.resources()
     }
 
-    for route_key in route_keys:
-        if route_key not in existing:
-            app.router.add_route("*", route_key, proxy)
-            existing.add(route_key)
+    if route_key not in existing:
+        app.router.add_route("*", route_key, proxy)
 
     if cleanup not in app.on_cleanup:
         app.on_cleanup.append(cleanup)
@@ -60,22 +87,11 @@ def _replace_setup_routes(source: str) -> str:
     )
     patched, count = re.subn(pattern, replacement, source, count=1)
     if count != 1:
-        raise RuntimeError("Could not patch alexa login setup_routes()")
+        raise RuntimeError("Could not patch Alexa app login setup_routes()")
     return patched
 
 
-
-def _patch_login_source(source: str) -> str:
-    import server_patched_entry as legacy_entry
-
-    source = legacy_entry._fix_alexa_openhab_login_source(source)
-
-    source = source.replace(
-        'local_path = "/" + "auth" + "/alexa-openhab/FORWARD" + parsed_login_url.path',
-        'local_path = "/" + "auth" + "/alexa-openhab/FORWARD/" + parsed_login_url.netloc + parsed_login_url.path',
-        1,
-    )
-
+def _replace_proxy_target(source: str) -> str:
     old_target = '''    if tail.startswith("FORWARD/"):
         target = retail_url.rstrip("/") + "/" + tail[len("FORWARD/") :]
     elif tail.startswith("PROXY/"):
@@ -98,22 +114,23 @@ def _patch_login_source(source: str) -> str:
         return web.Response(text="Ungültiger Proxy-Pfad", status=400)
 '''
 
-    source = source.replace(old_target, new_target, 1)
-    source = source.replace("/auth/alexa-openhab", "/auth/alexa-app")
-    source = _replace_setup_routes(source)
-
+    if old_target in source:
+        return source.replace(old_target, new_target, 1)
     return source
 
 
+def _patch_login_source(source: str) -> str:
+    import server_patched_entry as legacy_entry
+
+    source = legacy_entry._fix_alexa_openhab_login_source(source)
+    source = _replace_start(source)
+    source = _replace_proxy_target(source)
+    source = source.replace("/auth/alexa-openhab", "/auth/alexa-app")
+    source = _replace_setup_routes(source)
+    return source
+
 
 def _force_amazon_com_openid_namespace(login_url: str) -> str:
-    """Keep Amazon's app-registration OpenID extension namespace canonical.
-
-    The retail login host may be region-specific (for example www.amazon.de),
-    but Amazon expects the oa2 namespace identifier to stay on amazon.com. When
-    that parameter is generated with amazon.de, Amazon accepts the request path
-    but renders its generic "Suchst du etwas?" 404 page instead of the login UI.
-    """
     parsed = urllib.parse.urlsplit(login_url)
     query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
     query["openid.ns.oa2"] = ["http://www.amazon.com/ap/ext/oauth/2"]
@@ -121,7 +138,6 @@ def _force_amazon_com_openid_namespace(login_url: str) -> str:
     return urllib.parse.urlunsplit(
         (parsed.scheme, parsed.netloc, parsed.path, fixed_query, parsed.fragment)
     )
-
 
 
 def _install_login_url_builder(module: types.ModuleType) -> None:
@@ -134,7 +150,6 @@ def _install_login_url_builder(module: types.ModuleType) -> None:
         return _force_amazon_com_openid_namespace(original_builder(state))
 
     module.build_login_url = build_login_url
-
 
 
 def _patch_server_source(source: str) -> str:
@@ -162,7 +177,6 @@ async def handle_alexa_web_session_get'''
     if count != 1:
         raise RuntimeError("Could not patch handle_alexa_web_login redirect handler")
     return patched
-
 
 
 def main() -> None:
