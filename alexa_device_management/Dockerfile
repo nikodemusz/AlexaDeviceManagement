@@ -12,7 +12,9 @@ RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt
 
 COPY rootfs /
 
-# Release safety fixes for 0.8.11:
+# Release safety fixes for 0.8.15:
+# - keep the Alexa web/app login flow independent from the removed legacy LWA
+#   client_id/client_secret/refresh_token flow
 # - make the Alexa web-login helper syntactically valid if the source file is
 #   missing the opening module docstring marker
 # - install the Alexa app-login routes without relying on brittle exact HTML/JS
@@ -24,6 +26,7 @@ import re
 
 web_dir = Path('/opt/alexa_device_management/web')
 server = web_dir / 'server.py'
+patched_server = web_dir / 'server_patched.py'
 login_helper = web_dir / 'alexa_openhab_login.py'
 index = web_dir / 'static' / 'index.html'
 
@@ -87,6 +90,44 @@ route_marker = '    app.router.add_post("/auth/logout", handle_auth_logout)\n'
 if 'alexa_openhab_login.setup_routes(app)' not in s:
     s = s.replace(route_marker, route_marker + '    alexa_openhab_login.setup_routes(app)\n', 1)
 server.write_text(s)
+
+# Make the patched Alexa-web path the single source of truth for connection
+# status and device discovery. Otherwise a leftover legacy LWA/API-key setup
+# can make the UI think it is already connected and hide the Alexa web login.
+ps = patched_server.read_text()
+ps = ps.replace(
+    '    return await _original_handle_api_devices(request)\n',
+    '    return web.json_response({\n'
+    '        "devices": [],\n'
+    '        "demo": False,\n'
+    '        "source": "not_connected",\n'
+    '        "warning": "Alexa-Web-Session fehlt. Bitte Alexa-Web-Login verbinden.",\n'
+    '    })\n',
+    1,
+)
+ps = ps.replace(
+    '    data["configured"] = bool(data.get("configured") or data["alexa_web_configured"])\n',
+    '    data["legacy_lwa_configured"] = bool(data.get("configured"))\n'
+    '    data["configured"] = data["alexa_web_configured"]\n',
+    1,
+)
+ps = ps.replace(
+    '    else:\n'
+    '        data["token_source"] = data.get("token_source") or "not_connected"\n'
+    '    return web.json_response(data)\n',
+    '    else:\n'
+    '        legacy_configured = bool(data.get("configured"))\n'
+    '        data["configured"] = False\n'
+    '        data["authenticated"] = False\n'
+    '        data["legacy_lwa_configured"] = legacy_configured\n'
+    '        data["token_source"] = "not_connected"\n'
+    '        data["amazon_user"] = {}\n'
+    '        if legacy_configured:\n'
+    '            data["auth_message"] = "Alte LWA/API-Key-Konfiguration ignoriert. Bitte Alexa-Web-Login neu verbinden."\n'
+    '    return web.json_response(data)\n',
+    1,
+)
+patched_server.write_text(ps)
 
 # Make UI login direct and idempotent. If the repository source already has the
 # fixed function, leave it alone instead of aborting the Docker build.
@@ -152,6 +193,7 @@ server.write_text(s)
 
 # Fail early during image build if the helper is still syntactically broken.
 compile(login_helper.read_text(), str(login_helper), 'exec')
+compile(patched_server.read_text(), str(patched_server), 'exec')
 PY
 
 LABEL \
