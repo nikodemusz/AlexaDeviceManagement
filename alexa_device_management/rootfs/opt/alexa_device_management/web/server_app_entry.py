@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pathlib
+import re
 import sys
 import types
 
@@ -59,26 +60,12 @@ def _patch_login_source(source: str) -> str:
 
 
 def _patch_server_source(source: str) -> str:
-    """Make /auth/login a browser navigation endpoint, not a JSON preflight."""
-    old_handler = '''async def handle_alexa_web_login(request: web.Request) -> web.Response:
-    host, _, _ = _get_alexa_web_options()
+    """Make /auth/login a browser navigation endpoint, not a JSON preflight.
 
-    auth_url = _external_url(
-        request,
-        "/auth/alexa-app/start?host="
-        + urllib.parse.quote(host or "alexa.amazon.de"),
-    )
-
-    return web.json_response(
-        {
-            "auth_url": auth_url,
-            "message": "Alexa-Login-Assistent öffnen.",
-        }
-    )
-
-
-async def handle_alexa_web_session_get'''
-
+    Older builds had a brittle exact-string replacement here. That breaks as
+    soon as server_patched.py was already normalized by another build patch or
+    contains the historical stray ')f' typo. Use a function-body regex instead.
+    """
     new_handler = '''async def handle_alexa_web_login(request: web.Request) -> web.Response:
     host, _, _ = _get_alexa_web_options()
 
@@ -93,8 +80,13 @@ async def handle_alexa_web_session_get'''
 
 async def handle_alexa_web_session_get'''
 
-    patched = source.replace(old_handler, new_handler, 1)
-    if patched == source:
+    pattern = (
+        r"async def handle_alexa_web_login\(request: web\.Request\) -> web\.Response:\n"
+        r".*?\n\nasync def handle_alexa_web_session_get"
+    )
+    patched, count = re.subn(pattern, new_handler, source, count=1, flags=re.S)
+
+    if count != 1:
         raise RuntimeError("Could not patch handle_alexa_web_login redirect handler")
     return patched
 
