@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.8.13
+
+- **Bugfix**: Alexa-Web-Login-Routen werden jetzt idempotent registriert. Dadurch startet das Add-on auch dann sauber, wenn `server.py` die Route bereits registriert hat und `server_patched.py` sie anschließend erneut einbinden würde.
+- **Bugfix**: Der Startfehler `Added route will never be executed, method * is already registered` wurde beseitigt.
+- **Release Notes**: Diese Version stabilisiert den HA-OS-Updatepfad nach den Login-Routen-Korrekturen und verhindert doppelte Wildcard-Registrierung für `/auth/alexa-openhab/...`.
+
+## 0.8.12
+
+- **Bugfix**: Der Runtime-Patch in `server_app_entry.py` sucht den Alexa-Web-Login-Handler jetzt robuster und ist nicht mehr von einem exakt formatierten Quelltextblock abhängig.
+- **Bugfix**: Der Startfehler `Could not patch handle_alexa_web_login redirect handler` wurde beseitigt.
+- **Release Notes**: Diese Version macht den Start-Wrapper toleranter gegenüber bereits korrigierten oder leicht anders formatierten Login-Handlern.
+
+## 0.8.11
+
+- **Bugfix**: Der Build-Patch registriert den Alexa-Web-Login-Proxy jetzt auch dann, wenn der HA-App-Runner direkt `server.py` startet statt den gepatchten Entry-Wrapper zu verwenden.
+- **Bugfix**: `/auth/login` startet jetzt den Alexa-Web-Session-Login-Assistenten statt des alten Amazon-LWA/OAuth-Flows.
+- **Bugfix**: Die Route `/auth/alexa-openhab/start` wird dadurch im direkten `server.py`-Startpfad verfügbar und liefert nicht mehr `404: Not Found`.
+- **Release Notes**: Diese Version korrigiert den Login-Start über Home-Assistant-Ingress, damit das Amazon/Alexa-Web-Login-Frontend wieder erreicht wird.
+
 ## 0.8.10
 
 - **Bugfix**: Die Web-UI startet den Alexa-Login jetzt per direkter Browser-Navigation zu `/auth/login` statt über `fetch()` mit anschließendem `window.open(...)`.
