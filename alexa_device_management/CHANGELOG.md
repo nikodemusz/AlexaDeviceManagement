@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.14
+
+- **Bugfix**: `server_app_entry.py` ersetzt die komplette `setup_routes()`-Funktion des Alexa-Login-Helfers jetzt robust zur Laufzeit. Dadurch können Dockerfile-Build-Patches und Runtime-Patches keine doppelte Wildcard-Route mehr erzeugen.
+- **Bugfix**: Startabbruch durch doppelte Registrierung von `/auth/alexa-app/{tail:.*}` wurde beseitigt. Die Oberfläche ist dadurch wieder erreichbar.
+- **Release Notes**: Diese Version korrigiert den Add-on-Start selbst. Ursache war eine Kombination aus Kompatibilitätsroute `/auth/alexa-openhab/...` und späterer Runtime-Normalisierung auf `/auth/alexa-app/...`.
+
 ## 0.8.13
 
 - **Bugfix**: Alexa-Web-Login-Routen werden jetzt idempotent registriert. Dadurch startet das Add-on auch dann sauber, wenn `server.py` die Route bereits registriert hat und `server_patched.py` sie anschließend erneut einbinden würde.
