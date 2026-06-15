@@ -56,7 +56,31 @@ def _patch_login_source(source: str) -> str:
         return web.Response(text="Ungültiger Proxy-Pfad", status=400)
 '''
 
-    return source.replace(old_target, new_target, 1)
+    source = source.replace(old_target, new_target, 1)
+
+    # Make setup_routes idempotent. Some image builds already register these
+    # routes in server.py, while server_patched.py registers them again after
+    # base.create_app(). aiohttp rejects a duplicate wildcard route with
+    # "method * is already registered"; the same route being present is fine.
+    old_setup_routes = '''def setup_routes(app: web.Application) -> None:
+    app.router.add_route("*", "/auth/alexa-app/{tail:.*}", proxy)
+    app.on_cleanup.append(cleanup)
+'''
+    new_setup_routes = '''def setup_routes(app: web.Application) -> None:
+    route_key = "/auth/alexa-app/{tail:.*}"
+
+    for resource in app.router.resources():
+        if getattr(resource, "canonical", None) == route_key:
+            if cleanup not in app.on_cleanup:
+                app.on_cleanup.append(cleanup)
+            return
+
+    app.router.add_route("*", route_key, proxy)
+    app.on_cleanup.append(cleanup)
+'''
+    source = source.replace(old_setup_routes, new_setup_routes, 1)
+
+    return source
 
 
 def _patch_server_source(source: str) -> str:
