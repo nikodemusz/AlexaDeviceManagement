@@ -22,15 +22,53 @@ def _load_module(module_name: str, path: pathlib.Path, source: str) -> types.Mod
     return module
 
 
+def _replace_setup_routes(source: str) -> str:
+    """Install login routes exactly once, even after Docker build rewrites.
+
+    Some image builds modify alexa_openhab_login.py before this entrypoint runs.
+    In that case both /auth/alexa-app and /auth/alexa-openhab may already be in
+    the source. After the route-name normalization below those can collapse into
+    duplicate /auth/alexa-app wildcard routes, and aiohttp aborts startup with
+    "method * is already registered". Replace the whole setup_routes() function
+    instead of depending on one exact historical body.
+    """
+    replacement = '''def setup_routes(app: web.Application) -> None:
+    route_keys = (
+        "/auth/alexa-app/{tail:.*}",
+        "/auth/alexa-openhab/{tail:.*}",
+    )
+    existing = {
+        getattr(resource, "canonical", None)
+        for resource in app.router.resources()
+    }
+
+    for route_key in route_keys:
+        if route_key not in existing:
+            app.router.add_route("*", route_key, proxy)
+            existing.add(route_key)
+
+    if cleanup not in app.on_cleanup:
+        app.on_cleanup.append(cleanup)
+'''
+
+    pattern = (
+        r"def setup_routes\(app: web\.Application\) -> None:\n"
+        r"(?:    .*\n)+"
+    )
+    patched, count = re.subn(pattern, replacement, source, count=1)
+    if count != 1:
+        raise RuntimeError("Could not patch alexa login setup_routes()")
+    return patched
+
+
 def _patch_login_source(source: str) -> str:
     import server_patched_entry as legacy_entry
 
     source = legacy_entry._fix_alexa_openhab_login_source(source)
-    source = source.replace("/auth/alexa-openhab", "/auth/alexa-app")
 
     source = source.replace(
-        'local_path = "/" + "auth" + "/alexa-app/FORWARD" + parsed_login_url.path',
-        'local_path = "/" + "auth" + "/alexa-app/FORWARD/" + parsed_login_url.netloc + parsed_login_url.path',
+        'local_path = "/" + "auth" + "/alexa-openhab/FORWARD" + parsed_login_url.path',
+        'local_path = "/" + "auth" + "/alexa-openhab/FORWARD/" + parsed_login_url.netloc + parsed_login_url.path',
         1,
     )
 
@@ -57,39 +95,14 @@ def _patch_login_source(source: str) -> str:
 '''
 
     source = source.replace(old_target, new_target, 1)
-
-    # Make setup_routes idempotent. Some image builds already register these
-    # routes in server.py, while server_patched.py registers them again after
-    # base.create_app(). aiohttp rejects a duplicate wildcard route with
-    # "method * is already registered"; the same route being present is fine.
-    old_setup_routes = '''def setup_routes(app: web.Application) -> None:
-    app.router.add_route("*", "/auth/alexa-app/{tail:.*}", proxy)
-    app.on_cleanup.append(cleanup)
-'''
-    new_setup_routes = '''def setup_routes(app: web.Application) -> None:
-    route_key = "/auth/alexa-app/{tail:.*}"
-
-    for resource in app.router.resources():
-        if getattr(resource, "canonical", None) == route_key:
-            if cleanup not in app.on_cleanup:
-                app.on_cleanup.append(cleanup)
-            return
-
-    app.router.add_route("*", route_key, proxy)
-    app.on_cleanup.append(cleanup)
-'''
-    source = source.replace(old_setup_routes, new_setup_routes, 1)
+    source = source.replace("/auth/alexa-openhab", "/auth/alexa-app")
+    source = _replace_setup_routes(source)
 
     return source
 
 
 def _patch_server_source(source: str) -> str:
-    """Make /auth/login a browser navigation endpoint, not a JSON preflight.
-
-    Older builds had a brittle exact-string replacement here. That breaks as
-    soon as server_patched.py was already normalized by another build patch or
-    contains the historical stray ')f' typo. Use a function-body regex instead.
-    """
+    """Make /auth/login a browser navigation endpoint, not a JSON preflight."""
     new_handler = '''async def handle_alexa_web_login(request: web.Request) -> web.Response:
     host, _, _ = _get_alexa_web_options()
 
