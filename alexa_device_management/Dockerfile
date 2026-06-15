@@ -12,18 +12,44 @@ RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt
 
 COPY rootfs /
 
-# Ensure the plain server entrypoint also exposes the Alexa web login proxy.
-# Depending on the Home Assistant app runner, /opt/.../server.py may be started
-# directly instead of server_patched_entry.py. In that case the route
-# /auth/alexa-openhab/start was missing and the Amazon login frontend returned
-# only "404: Not Found" through ingress.
+# Release safety fixes for 0.8.11:
+# - make the Alexa web-login helper syntactically valid if the source file is
+#   missing the opening module docstring marker
+# - install the Alexa app-login routes without relying on brittle exact HTML/JS
+#   string patches that can break the Home Assistant add-on build
+# - keep the old /auth/alexa-openhab path as a compatibility alias
 RUN python3 - <<'PY'
 from pathlib import Path
 import re
 
-server = Path('/opt/alexa_device_management/web/server.py')
-s = server.read_text()
+web_dir = Path('/opt/alexa_device_management/web')
+server = web_dir / 'server.py'
+login_helper = web_dir / 'alexa_openhab_login.py'
+index = web_dir / 'static' / 'index.html'
 
+# Fix accidentally broken module docstring in alexa_openhab_login.py.
+helper_text = login_helper.read_text()
+if helper_text.startswith('Local-only login proxy:'):
+    login_helper.write_text('"""' + helper_text)
+    helper_text = login_helper.read_text()
+
+# Prefer the neutral /auth/alexa-app route name, but keep the older
+# /auth/alexa-openhab route working so already-open login redirects do not die.
+helper_text = helper_text.replace('/auth/alexa-openhab', '/auth/alexa-app')
+helper_text = helper_text.replace(
+    'def setup_routes(app: web.Application) -> None:\n'
+    '    app.router.add_route("*", "/auth/alexa-app/{tail:.*}", proxy)\n'
+    '    app.on_cleanup.append(cleanup)\n',
+    'def setup_routes(app: web.Application) -> None:\n'
+    '    app.router.add_route("*", "/auth/alexa-app/{tail:.*}", proxy)\n'
+    '    app.router.add_route("*", "/auth/alexa-openhab/{tail:.*}", proxy)\n'
+    '    app.on_cleanup.append(cleanup)\n',
+)
+login_helper.write_text(helper_text)
+
+# Patch server.py idempotently. The shipped source still contains the old LWA
+# OAuth handler; for this add-on we need the local Alexa web-session helper.
+s = server.read_text()
 if 'import alexa_openhab_login' not in s:
     s = s.replace(
         'import aiohttp\nfrom aiohttp import web\n',
@@ -31,13 +57,8 @@ if 'import alexa_openhab_login' not in s:
         1,
     )
 
-replacement = '''async def handle_auth_login(request: web.Request) -> web.Response:
-    """Start the Alexa web-session login assistant.
-
-    This project does not use the Alexa Smart Home Skill OAuth flow here. It
-    needs the Amazon/Alexa web-login frontend that creates a local Alexa web
-    session for reading and managing devices.
-    """
+replacement = '''async def handle_auth_login(request: web.Request) -> web.StreamResponse:
+    """Start the local Alexa app-login proxy."""
     options = load_options()
     alexa_host = options.get("alexa_host", "alexa.amazon.de")
     alexa_host = (alexa_host or "alexa.amazon.de").strip().lower()
@@ -49,51 +70,27 @@ replacement = '''async def handle_auth_login(request: web.Request) -> web.Respon
     if not re.match(r"^[a-zA-Z0-9/_-]*$", ingress_path):
         ingress_path = ""
 
-    scheme = request.headers.get("X-Forwarded-Proto", "https") or "https"
-    host = request.headers.get("X-Forwarded-Host") or request.headers.get("Host", "")
-    if not host:
-        return web.json_response(
-            {"error": "Externe Ingress-URL konnte nicht ermittelt werden."},
-            status=400,
-        )
-
-    auth_url = (
-        f"{scheme}://{host}{ingress_path.rstrip('/')}/auth/alexa-openhab/start"
+    return web.HTTPFound(
+        f"{ingress_path.rstrip('/')}/auth/alexa-app/start"
         f"?host={urllib.parse.quote(alexa_host)}"
     )
-
-    return web.json_response({
-        "auth_url": auth_url,
-        "message": "Alexa-Login-Assistent öffnen.",
-    })
 
 
 async def handle_auth_callback'''
 
-pattern = r'async def handle_auth_login\(request: web\.Request\) -> web\.Response:\n.*?\n\nasync def handle_auth_callback'
+pattern = r'async def handle_auth_login\(request: web\.Request\) -> web\.(?:Response|StreamResponse):\n.*?\n\nasync def handle_auth_callback'
 s, count = re.subn(pattern, replacement, s, count=1, flags=re.S)
 if count != 1:
     raise SystemExit('Could not patch handle_auth_login in server.py')
 
 route_marker = '    app.router.add_post("/auth/logout", handle_auth_logout)\n'
-route_replacement = route_marker + '    alexa_openhab_login.setup_routes(app)\n'
 if 'alexa_openhab_login.setup_routes(app)' not in s:
-    s = s.replace(route_marker, route_replacement, 1)
-
+    s = s.replace(route_marker, route_marker + '    alexa_openhab_login.setup_routes(app)\n', 1)
 server.write_text(s)
-PY
 
-# In the browser UI the Amazon login must be started directly from the click
-# event. A fetch() preflight followed by window.open() is treated as a delayed
-# popup by Safari/iOS and some Home Assistant ingress contexts, so the Amazon
-# login tab may never open. The server-side /auth/login endpoint now redirects
-# into the local Alexa app-login proxy; the UI only opens that URL directly.
-RUN python3 - <<'PY'
-from pathlib import Path
-
-index = Path('/opt/alexa_device_management/web/static/index.html')
-s = index.read_text()
-
+# Make UI login direct and idempotent. If the repository source already has the
+# fixed function, leave it alone instead of aborting the Docker build.
+i = index.read_text()
 old = '''    async function startLogin() {
       try {
         hideLoginFallback();
@@ -118,74 +115,43 @@ old = '''    async function startLogin() {
       }
     }
 '''
-
-new = '''    function startLogin(event) {
-      if (event) {
-        event.preventDefault();
-      }
-
-      hideLoginFallback();
-
+new = '''    function startLogin() {
       const loginUrl = `${INGRESS_PATH}/auth/login`;
-      const popup = window.open(loginUrl, "_blank", "noopener");
-
-      if (popup) {
-        try { popup.focus(); } catch (_) {}
-        showAlert("Der Amazon-Login wurde geöffnet.", "success");
-        return;
-      }
-
-      showLoginFallback(loginUrl);
-      showAlert("Der Browser hat den neuen Tab blockiert. Bitte öffne den Amazon-Login über den Link unten.", "warning");
+      window.location.assign(loginUrl);
     }
 '''
+if old in i:
+    i = i.replace(old, new, 1)
 
-if old not in s:
-    raise SystemExit('Could not patch startLogin() in static/index.html')
-
-s = s.replace(old, new, 1)
-s = s.replace(
+i = i.replace(
     'Klicke auf den Button, um den Session-Assistenten zu öffnen.',
-    'Klicke auf den Button, um den Amazon-Login in einem neuen Tab zu öffnen.',
+    'Klicke auf den Button, um den Amazon-Login direkt zu starten.',
 )
-s = s.replace('Session-Assistent öffnen</a>', 'Amazon-Login öffnen</a>')
-index.write_text(s)
-PY
+i = i.replace('Session-Assistent öffnen</a>', 'Amazon-Login öffnen</a>')
+index.write_text(i)
 
-# Temporary safety fix: make Alexa device API failures visible instead of
-# silently falling back to demo devices. The real next step is replacing the
-# current LWA endpoint calls with the Alexa web API client.
-RUN python3 - <<'PY'
-from pathlib import Path
-
-server = Path('/opt/alexa_device_management/web/server.py')
-index = Path('/opt/alexa_device_management/web/static/index.html')
-
+# Keep API errors visible instead of silently falling back to demo data. All
+# replacements are optional so this block remains safe across repeated builds.
 s = server.read_text()
 s = s.replace(
-"""                if resp.status == 404:\n                    break\n                if resp.status != 200:\n                    text = await resp.text()\n                    endpoint_errors.append(\n                        f\"{endpoint_path} failed ({resp.status}): {text[:120]}\"\n                    )\n                    break\n""",
-"""                if resp.status == 404:\n                    text = await resp.text()\n                    endpoint_errors.append(\n                        f\"{endpoint_path} failed (404): endpoint does not exist or token is not accepted for this Alexa API ({text[:120]})\"\n                    )\n                    break\n                if resp.status != 200:\n                    text = await resp.text()\n                    endpoint_errors.append(\n                        f\"{endpoint_path} failed ({resp.status}): {text[:120]}\"\n                    )\n                    break\n""",
+'''                if resp.status == 404:\n                    break\n                if resp.status != 200:\n                    text = await resp.text()\n                    endpoint_errors.append(\n                        f"{endpoint_path} failed ({resp.status}): {text[:120]}"\n                    )\n                    break\n''',
+'''                if resp.status == 404:\n                    text = await resp.text()\n                    endpoint_errors.append(\n                        f"{endpoint_path} failed (404): endpoint does not exist or token is not accepted for this Alexa API ({text[:120]})"\n                    )\n                    break\n                if resp.status != 200:\n                    text = await resp.text()\n                    endpoint_errors.append(\n                        f"{endpoint_path} failed ({resp.status}): {text[:120]}"\n                    )\n                    break\n''',
 1,
 )
 s = s.replace(
-"""        return web.json_response(\n            {\"devices\": get_demo_devices(), \"auth_error\": str(exc)},\n        )\n""",
-"""        return web.json_response(\n            {\"devices\": [], \"auth_error\": str(exc), \"demo\": False},\n        )\n""",
+'''        return web.json_response(\n            {"devices": get_demo_devices(), "auth_error": str(exc)},\n        )\n''',
+'''        return web.json_response(\n            {"devices": [], "auth_error": str(exc), "demo": False},\n        )\n''',
 1,
 )
 s = s.replace(
-"""            return web.json_response(\n                {\"devices\": get_demo_devices(), \"api_error\": str(exc)},\n            )\n""",
-"""            return web.json_response(\n                {\"devices\": [], \"api_error\": str(exc), \"demo\": False},\n            )\n""",
+'''            return web.json_response(\n                {"devices": get_demo_devices(), "api_error": str(exc)},\n            )\n''',
+'''            return web.json_response(\n                {"devices": [], "api_error": str(exc), "demo": False},\n            )\n''',
 1,
 )
 server.write_text(s)
 
-i = index.read_text()
-i = i.replace(
-"""        const data = await resp.json();\n        renderDevices(data.devices || []);\n        updateDeviceInfo(data.devices || [], data.demo === true);\n""",
-"""        const data = await resp.json();\n        const devices = data.devices || [];\n        const errorMessage = data.api_error || data.auth_error || data.warning || \"\";\n        renderDevices(devices);\n        updateDeviceInfo(devices, data.demo === true, errorMessage);\n        if (errorMessage) {\n          showAlert(errorMessage, \"error\");\n        }\n""",
-1,
-)
-index.write_text(i)
+# Fail early during image build if the helper is still syntactically broken.
+compile(login_helper.read_text(), str(login_helper), 'exec')
 PY
 
 LABEL \
