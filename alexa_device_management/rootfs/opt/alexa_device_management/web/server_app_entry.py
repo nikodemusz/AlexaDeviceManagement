@@ -6,10 +6,12 @@ import pathlib
 import re
 import sys
 import types
+import urllib.parse
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 PATCHED_SERVER = BASE_DIR / "server_patched.py"
 ALEXA_LOGIN_SOURCE = BASE_DIR / "alexa_openhab_login.py"
+
 
 
 def _load_module(module_name: str, path: pathlib.Path, source: str) -> types.ModuleType:
@@ -20,6 +22,7 @@ def _load_module(module_name: str, path: pathlib.Path, source: str) -> types.Mod
     sys.modules[module_name] = module
     exec(compile(source, str(path), "exec"), module.__dict__)
     return module
+
 
 
 def _replace_setup_routes(source: str) -> str:
@@ -59,6 +62,7 @@ def _replace_setup_routes(source: str) -> str:
     if count != 1:
         raise RuntimeError("Could not patch alexa login setup_routes()")
     return patched
+
 
 
 def _patch_login_source(source: str) -> str:
@@ -101,6 +105,38 @@ def _patch_login_source(source: str) -> str:
     return source
 
 
+
+def _force_amazon_com_openid_namespace(login_url: str) -> str:
+    """Keep Amazon's app-registration OpenID extension namespace canonical.
+
+    The retail login host may be region-specific (for example www.amazon.de),
+    but Amazon expects the oa2 namespace identifier to stay on amazon.com. When
+    that parameter is generated with amazon.de, Amazon accepts the request path
+    but renders its generic "Suchst du etwas?" 404 page instead of the login UI.
+    """
+    parsed = urllib.parse.urlsplit(login_url)
+    query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+    query["openid.ns.oa2"] = ["http://www.amazon.com/ap/ext/oauth/2"]
+    fixed_query = urllib.parse.urlencode(query, doseq=True)
+    return urllib.parse.urlunsplit(
+        (parsed.scheme, parsed.netloc, parsed.path, fixed_query, parsed.fragment)
+    )
+
+
+
+def _install_login_url_builder(module: types.ModuleType) -> None:
+    import server_patched_entry as legacy_entry
+
+    legacy_entry._install_login_url_builder(module)
+    original_builder = module.build_login_url
+
+    def build_login_url(state):
+        return _force_amazon_com_openid_namespace(original_builder(state))
+
+    module.build_login_url = build_login_url
+
+
+
 def _patch_server_source(source: str) -> str:
     """Make /auth/login a browser navigation endpoint, not a JSON preflight."""
     new_handler = '''async def handle_alexa_web_login(request: web.Request) -> web.Response:
@@ -128,6 +164,7 @@ async def handle_alexa_web_session_get'''
     return patched
 
 
+
 def main() -> None:
     if str(BASE_DIR) not in sys.path:
         sys.path.insert(0, str(BASE_DIR))
@@ -137,7 +174,7 @@ def main() -> None:
     login_source = _patch_login_source(ALEXA_LOGIN_SOURCE.read_text())
     login_module = _load_module("alexa_app_login", ALEXA_LOGIN_SOURCE, login_source)
     sys.modules["alexa_openhab_login"] = login_module
-    legacy_entry._install_login_url_builder(login_module)
+    _install_login_url_builder(login_module)
 
     server_source = legacy_entry._fix_server_source(PATCHED_SERVER.read_text())
     server_source = server_source.replace("alexa_openhab_login", "alexa_app_login")
