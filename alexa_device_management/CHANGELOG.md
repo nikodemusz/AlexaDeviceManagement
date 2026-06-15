@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.18
+
+- **Bugfix**: Der Alexa-App-Login erzwingt für `openid.ns.oa2` wieder Amazons kanonischen Namespace `http://www.amazon.com/ap/ext/oauth/2`, auch wenn der eigentliche Login über `www.amazon.de` läuft.
+- **Bugfix**: Dadurch landet der Login-Proxy nicht mehr auf Amazons generischer 404-Seite „Suchst du etwas?“, wenn `/auth/alexa-app/FORWARD/www.amazon.de/ap/signin?...` über Home-Assistant-Ingress geöffnet wird.
+- **Release Notes**: Diese Version korrigiert die OpenID-Parametererzeugung für den regionalen Amazon-Login. Die Retail-Domain bleibt deutsch, nur der OpenID-Extension-Namespace bleibt Amazon-kompatibel global.
+
 ## 0.8.15
 
 - **Bugfix**: Der Alexa-Web/App-Login ist jetzt strikt von der alten LWA/API-Key-Konfiguration (`client_id`, `client_secret`, `refresh_token`) getrennt.
@@ -118,50 +124,3 @@
 - **Bugfix**: Amazon Login wird im Home Assistant Ingress nicht mehr im Iframe
   geöffnet, sondern in einem neuen Tab. Dadurch greift `X-Frame-Options: DENY`
   der Amazon-Loginseite nicht mehr.
-- **Verbesserung**: Popup-Blocker-Erkennung mit klickbarem Fallback-Link ergänzt.
-- **Verbesserung**: Hinweis für Benutzer ergänzt, dass die Amazon-Anmeldeseite in
-  einem neuen Tab geöffnet wurde.
-
-## 0.6.5
-
-- **Bugfix**: EU OAuth-Autorisierungs-Endpoint aktualisiert. Amazon leitet
-  `www.amazon.co.uk/ap/oa` nun auf `eu.account.amazon.com` weiter, welches
-  die Verbindung ablehnte. Der Endpoint wurde direkt auf
-  `https://eu.account.amazon.com/ap/oa` geändert.
-
-## 0.6.4
-
-- **Bugfix**: OAuth redirect_uri verwendete das Schema aus dem `X-Forwarded-Proto`
-  Header, welcher in manchen Konfigurationen `http` statt `https` lieferte.
-  Die redirect_uri wird nun immer mit `https://` generiert, da Amazon LWA
-  ausschließlich HTTPS-URLs akzeptiert.
-
-## 0.6.3
-
-- **Bugfix**: OAuth redirect_uri war nur ein relativer Pfad (z.B.
-  `/api/hassio_ingress/.../auth/callback`) statt einer vollständigen absoluten
-  URL (`https://domain.de/api/hassio_ingress/.../auth/callback`). Amazon LWA
-  verlangt eine absolute URL und lehnte die relative URI mit dem Fehler
-  "lwa-invalid-parameter-bad-redirect-uri-vendor" (400 Bad Request) ab.
-  Die redirect_uri wird nun korrekt aus den Proxy-Headern (X-Forwarded-Proto,
-  X-Forwarded-Host) zusammengesetzt.
-
-## 0.6.2
-
-- **Bugfix**: OAuth-Scope korrigiert – `alexa::all` (doppelter Doppelpunkt) war kein
-  gültiger Amazon LWA Scope und führte zu einem 400 Bad Request Fehler
-  ("lwa-invalid-parameter-bad-scope"). Korrekter Scope ist `alexa:all` (einfacher
-  Doppelpunkt). Dieser Scope muss im Amazon Developer Console Security Profile
-  unter "Allowed Scopes" aktiviert sein.
-
-## 0.6.1
-
-- **Bugfix**: OAuth-Scope korrigiert – `alexa::devices:all:read alexa::devices:all:write`
-  war kein gültiger Amazon LWA Scope und führte zu einem 400 Bad Request Fehler.
-  Ersetzt durch den korrekten Scope `alexa::all`.
-
-## 0.6.0
-
-- **Feature**: Integrierter OAuth2-Login direkt in der App – kein manuelles Kopieren
-  eines Refresh-Tokens mehr nötig! Der Benutzer klickt "Mit Amazon anmelden",
-  wird zu Amazon weitergeleitet, meldet sich dort an, und der Refresh-Token wird
