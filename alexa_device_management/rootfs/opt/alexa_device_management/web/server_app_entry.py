@@ -23,6 +23,39 @@ def _load_module(module_name: str, path: pathlib.Path, source: str) -> types.Mod
     return module
 
 
+def _replace_external_url(source: str) -> str:
+    replacement = '''def external_url(request: web.Request, path: str) -> str:
+    ingress_path = request.headers.get("X-Ingress-Path", "")
+
+    if not re.match(r"^[a-zA-Z0-9/_-]*$", ingress_path):
+        ingress_path = ""
+
+    if not path.startswith("/"):
+        path = "/" + path
+
+    # Home Assistant Ingress authenticates requests through the generated
+    # /api/hassio_ingress/<token> base path. Login/proxy redirects must stay
+    # under this path. Building https://<ha-host>/auth/... loses the ingress
+    # token and Home Assistant returns 401 before the add-on is reached.
+    return ingress_path.rstrip("/") + path
+'''
+
+    pattern = (
+        r"def external_url\(request: web\.Request, path: str\) -> str:\n"
+        r".*?\n\ndef defaults_for_host"
+    )
+    patched, count = re.subn(
+        pattern,
+        replacement + "\n\ndef defaults_for_host",
+        source,
+        count=1,
+        flags=re.S,
+    )
+    if count != 1:
+        raise RuntimeError("Could not patch Alexa app login external_url()")
+    return patched
+
+
 def _replace_start(source: str) -> str:
     replacement = '''async def start(request: web.Request) -> web.StreamResponse:
     alexa_host = safe_host(request.query.get("host", "alexa.amazon.de"))
@@ -123,6 +156,7 @@ def _patch_login_source(source: str) -> str:
     import server_patched_entry as legacy_entry
 
     source = legacy_entry._fix_alexa_openhab_login_source(source)
+    source = _replace_external_url(source)
     source = _replace_start(source)
     source = _replace_proxy_target(source)
     source = source.replace("/auth/alexa-openhab", "/auth/alexa-app")
@@ -153,14 +187,18 @@ def _install_login_url_builder(module: types.ModuleType) -> None:
 
 
 def _patch_server_source(source: str) -> str:
-    """Make /auth/login a browser navigation endpoint, not a JSON preflight."""
+    """Make /auth/login a browser navigation endpoint inside HA Ingress."""
     new_handler = '''async def handle_alexa_web_login(request: web.Request) -> web.Response:
     host, _, _ = _get_alexa_web_options()
 
-    auth_url = _external_url(
-        request,
-        "/auth/alexa-app/start?host="
-        + urllib.parse.quote(host or "alexa.amazon.de"),
+    ingress_path = request.headers.get("X-Ingress-Path", "")
+    if not re.match(r"^[a-zA-Z0-9/_-]*$", ingress_path):
+        ingress_path = ""
+
+    auth_url = (
+        ingress_path.rstrip("/")
+        + "/auth/alexa-app/start?host="
+        + urllib.parse.quote(host or "alexa.amazon.de")
     )
 
     raise web.HTTPFound(auth_url)
