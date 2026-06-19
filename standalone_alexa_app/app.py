@@ -47,7 +47,7 @@ def _load_json(path: pathlib.Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
 
@@ -146,7 +146,7 @@ def _patch_login_helper_source(source: str) -> str:
 
 def load_login_helper() -> types.ModuleType:
     helper_path = pathlib.Path(os.environ.get("ALEXA_HELPER_PATH", DEFAULT_HELPER_PATH))
-    source = _patch_login_helper_source(helper_path.read_text())
+    source = _patch_login_helper_source(helper_path.read_text(encoding="utf-8"))
 
     module = types.ModuleType("standalone_alexa_app_login")
     module.__file__ = str(helper_path)
