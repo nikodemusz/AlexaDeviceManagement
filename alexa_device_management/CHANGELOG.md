@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.1
+
+- **Bugfix**: `/auth/login` erhält unter Home-Assistant-Ingress den vollständigen Ingress-Prefix. Die Weiterleitung geht dadurch nicht mehr auf `/auth/alexa-app/start` am Domain-Root, sondern auf `/api/hassio_ingress/<token>/auth/alexa-app/start`.
+- **Release Notes**: Diese Version korrigiert den Login-Start innerhalb von HA OS Ingress. Installieren, Repository neu laden und anschließend den Alexa-Login erneut starten.
+
+## 0.9.0
+
+- **Rewrite**: Aktiver Server auf `server_clean.py` umgestellt. Die alte Patch-/Runtime-Rewrite-Kette wird nicht mehr gestartet.
+- **Feature**: Neuer Login-Mechanismus `oh_style_login.py`, orientiert am aktuellen openHAB Amazon Echo Control Binding.
+- **Feature**: Login startet über Amazons App-Registration-Flow mit `www.amazon.com/ap/signin`, `maplanding`, `auth/register` und `/ap/exchangetoken`.
+- **Cleanup**: Add-on-Konfiguration bereinigt. Alte Werte wie `client_id`, `client_secret`, `refresh_token`, `alexa_cookie`, `alexa_csrf` und `amazon_region` sind nicht mehr Bestandteil der aktiven Konfiguration.
+- **Docs**: `OPENHAB_STYLE_LOGIN.md` ergänzt und den aktiven Loginweg dokumentiert.
+
 ## 0.8.21
 
 - **Cleanup**: Alte LWA-/OAuth-Konfigurationswerte aus `config.yaml` entfernt: `client_id`, `client_secret`, `refresh_token`, `alexa_cookie`, `alexa_csrf`.
