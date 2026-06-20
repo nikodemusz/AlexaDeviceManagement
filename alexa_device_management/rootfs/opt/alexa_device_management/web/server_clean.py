@@ -11,7 +11,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "0.9.0"
+APP_VERSION = "0.9.1"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -83,7 +83,7 @@ async def logout(request: web.Request) -> web.Response:
 
 
 async def auth_login(request: web.Request) -> web.StreamResponse:
-    raise web.HTTPFound("/auth/alexa-app/start")
+    raise web.HTTPFound(oh_style_login.external_url(request, "/auth/alexa-app/start"))
 
 
 async def auth_session(request: web.Request) -> web.Response:
