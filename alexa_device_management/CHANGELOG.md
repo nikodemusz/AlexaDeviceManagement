@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.21
+
+- **Cleanup**: Alte LWA-/OAuth-Konfigurationswerte aus `config.yaml` entfernt: `client_id`, `client_secret`, `refresh_token`, `alexa_cookie`, `alexa_csrf`.
+- **Cleanup**: `AUTHENTICATION.md` ersetzt. Die Dokumentation beschreibt jetzt den geplanten Cookie-/Proxy-Login nach openHAB-Vorbild statt des verworfenen Amazon-Developer-Console-/OAuth-Wegs.
+- **Cleanup**: `server.py` enthält keinen alten Login-with-Amazon-/Token-Refresh-Code mehr, sondern nur noch einen Legacy-Shim auf den aktuellen Startpfad.
+- **Hinweis**: Der eigentliche Cookie-Proxy-Login ist damit noch nicht fertig implementiert. Diese Version bereinigt bewusst die Projektbasis, damit die nächste Implementierung nicht mehr vom falschen LWA-Pfad überlagert wird.
+
 ## 0.8.18
 
 - **Bugfix**: Der Alexa-App-Login erzwingt für `openid.ns.oa2` wieder Amazons kanonischen Namespace `http://www.amazon.com/ap/ext/oauth/2`, auch wenn der eigentliche Login über `www.amazon.de` läuft.
@@ -92,35 +99,8 @@
 
 ## 0.7.0
 
-- **Feature**: Neue Info-Ansicht in der Web-UI ergänzt. Sie zeigt nun die
-  installierte App-Version, Alexa-Region, Verbindungsstatus und die Anzahl der
-  geladenen Geräte.
-- **Feature**: Der aktuell angemeldete Amazon-Benutzer wird in der Übersicht
-  angezeigt, damit sofort ersichtlich ist, welches Konto verbunden ist.
-- **Verbesserung**: Für neue Logins wird zusätzlich der Amazon-Profil-Scope
-  angefordert, damit Kontoinformationen zuverlässig geladen und gespeichert
-  werden können.
+- **Feature**: Neue Info-Ansicht in der Web-UI ergänzt.
 
-## 0.6.8
+## 0.6.8 und älter
 
-- **Bugfix**: Geräteabruf robuster gemacht, damit im Amazon-Konto registrierte
-  Homeautomation-Geräte zuverlässig geladen werden. Es werden jetzt beide Alexa
-  Endpoints (`GET /v2/devices` und `GET /v2/appliances`) abgefragt.
-- **Verbesserung**: Geräte-Normalisierung erweitert, damit unterschiedliche
-  Antwortformate der Alexa API (z.B. `appliances`/`devices`, `actions`/`capabilities`)
-  korrekt in der UI dargestellt werden.
-
-## 0.6.7
-
-- **Feature**: Vollständige Auflistung der Homeautomation-Geräte über die Alexa
-  API (`GET /v2/appliances`) mit Pagination (`nextToken`), damit alle Geräte
-  geladen werden.
-- **Verbesserung**: Amazon Appliance-Daten werden für die UI normalisiert
-  (Name, Typ, Erreichbarkeit, Raum, Fähigkeiten), damit die Geräteliste
-  konsistent dargestellt wird.
-
-## 0.6.6
-
-- **Bugfix**: Amazon Login wird im Home Assistant Ingress nicht mehr im Iframe
-  geöffnet, sondern in einem neuen Tab. Dadurch greift `X-Frame-Options: DENY`
-  der Amazon-Loginseite nicht mehr.
+- Frühere Experimente mit OAuth/LWA und Alexa-API-Endpunkten. Diese Historie ist für die neue Cookie-/Proxy-Richtung nicht mehr maßgeblich.
