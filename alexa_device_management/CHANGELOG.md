@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.2
+
+- **Bugfix**: Amazon-Login-Proxy schreibt nun mehr Amazon-Links, Formularziele und Asset-URLs auf den lokalen HA-Ingress-Proxy um.
+- **Bugfix**: Relative `form action`, `href` und `src`-Ziele werden nicht mehr direkt gegen Amazon oder gegen den falschen Root-Pfad aufgelöst.
+- **Verbesserung**: Zusätzliche Amazon-Asset-Hosts werden über den Proxy erreichbar gemacht, damit die Loginseite weniger unformatiert erscheint.
+- **Release Notes**: Diese Version verbessert den sichtbaren Amazon-Login und die Formularweiterleitung. Falls die Seite weiterhin nicht sauber lädt, bitte Browser-DevTools/Netzwerkfehler oder Screenshot der Loginseite prüfen.
+
 ## 0.9.1
 
 - **Bugfix**: `/auth/login` erhält unter Home-Assistant-Ingress den vollständigen Ingress-Prefix. Die Weiterleitung geht dadurch nicht mehr auf `/auth/alexa-app/start` am Domain-Root, sondern auf `/api/hassio_ingress/<token>/auth/alexa-app/start`.
