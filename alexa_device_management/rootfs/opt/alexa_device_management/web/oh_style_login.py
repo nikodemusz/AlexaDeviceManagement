@@ -39,6 +39,17 @@ DEVICE_TYPE = "A2IVLV5VM2W81"
 DEFAULT_RETAIL_DOMAIN = "amazon.com"
 DEFAULT_RETAIL_URL = "https://www.amazon.com"
 DEFAULT_ALEXA_API = "https://alexa.amazon.com"
+AMAZON_PROXY_HOSTS = (
+    "www.amazon.com",
+    "amazon.com",
+    "images-na.ssl-images-amazon.com",
+    "m.media-amazon.com",
+    "m.media-amazon.de",
+    "images-eu.ssl-images-amazon.com",
+    "fls-na.amazon.com",
+    "completion.amazon.com",
+    "unagi-na.amazon.com",
+)
 
 
 def read_json(path: pathlib.Path) -> dict[str, Any]:
@@ -72,6 +83,22 @@ def external_url(request: web.Request, path: str) -> str:
     if host:
         return f"{proto}://{host}{ingress_path.rstrip('/')}{path}"
     return f"{ingress_path.rstrip('/')}{path}"
+
+
+def proxied_url(request: web.Request, target_url: str, default_host: str = "www.amazon.com") -> str:
+    parsed = URL(target_url)
+    if parsed.host:
+        host = safe_host(parsed.host)
+        path = parsed.raw_path or "/"
+        query = parsed.raw_query_string
+    else:
+        host = default_host
+        path = target_url if target_url.startswith("/") else "/" + target_url
+        query = ""
+    local = f"/auth/alexa-app/proxy/{host}{path}"
+    if query:
+        local += "?" + query
+    return external_url(request, local)
 
 
 def csrf_from_cookie(cookie_header: str) -> str:
@@ -299,10 +326,7 @@ async def start(request: web.Request) -> web.StreamResponse:
     state = new_state()
     seed_login_cookies(session, state)
     login_url = URL(build_openhab_login_url(state))
-    local = "/auth/alexa-app/proxy/" + login_url.host + login_url.path
-    if login_url.query_string:
-        local += "?" + login_url.query_string
-    raise web.HTTPFound(external_url(request, local))
+    raise web.HTTPFound(proxied_url(request, str(login_url)))
 
 
 async def handle_redirect(request: web.Request, session: aiohttp.ClientSession, location: str, state: dict[str, Any]) -> web.StreamResponse:
@@ -315,31 +339,36 @@ async def handle_redirect(request: web.Request, session: aiohttp.ClientSession, 
             return result_page(True, f"Session stored for {data.get('host', 'Alexa')}")
         except Exception as exc:
             return result_page(False, str(exc))
-    if location.startswith("/"):
-        raise web.HTTPFound(external_url(request, "/auth/alexa-app/proxy/www.amazon.com" + location))
-    parsed = URL(location)
-    if parsed.host:
-        local = "/auth/alexa-app/proxy/" + parsed.host + parsed.path
-        if parsed.query_string:
-            local += "?" + parsed.query_string
-        raise web.HTTPFound(external_url(request, local))
-    raise web.HTTPFound(location)
+    raise web.HTTPFound(proxied_url(request, location))
 
 
-def rewrite_html(request: web.Request, text: str) -> str:
-    local = external_url(request, "/auth/alexa-app/proxy/www.amazon.com/")
+def rewrite_html(request: web.Request, text: str, current_host: str = "www.amazon.com") -> str:
     result = text
-    replacements = {
-        'action="/': f'action="{local}',
-        'action="&#x2F;': f'action="{local}',
-        "https://www.amazon.com/": local,
-        "http://www.amazon.com/": local,
-        "https://www.amazon.com:443/": local,
-        "https:&#x2F;&#x2F;www.amazon.com&#x2F;": local,
-        "https:&#x2F;&#x2F;www.amazon.com:443&#x2F;": local,
-    }
-    for src, dst in replacements.items():
-        result = result.replace(src, dst)
+
+    def repl_absolute(match: re.Match[str]) -> str:
+        quote, scheme, host, path = match.groups()
+        return f"={quote}{proxied_url(request, scheme + '://' + host + path)}"
+
+    result = re.sub(
+        r"=([\"'])https?://([a-z0-9.-]+)((?:/|&#x2F;)[^\"']*)",
+        repl_absolute,
+        result,
+        flags=re.I,
+    )
+
+    local_root = external_url(request, f"/auth/alexa-app/proxy/{current_host}/")
+    result = re.sub(r"=([\"'])/(?!/)", lambda m: f"={m.group(1)}{local_root}", result)
+    result = re.sub(r"=([\"'])&#x2F;", lambda m: f"={m.group(1)}{local_root}", result)
+
+    for host in AMAZON_PROXY_HOSTS:
+        root = external_url(request, f"/auth/alexa-app/proxy/{host}/")
+        result = result.replace(f"https://{host}/", root)
+        result = result.replace(f"http://{host}/", root)
+        result = result.replace(f"https://{host}:443/", root)
+        result = result.replace(f"https:\\/\\/{host}\\/", root)
+        result = result.replace(f"https:&#x2F;&#x2F;{host}&#x2F;", root)
+        result = result.replace(f"https:&#x2F;&#x2F;{host}:443&#x2F;", root)
+
     return result
 
 
@@ -364,7 +393,10 @@ async def proxy(request: web.Request) -> web.StreamResponse:
         "User-Agent": f"AmazonWebView/Amazon Alexa/{API_VERSION}/iOS/{DI_OS_VERSION}/iPhone",
         "Accept": request.headers.get("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"),
         "Accept-Language": request.headers.get("Accept-Language", "en-US,en;q=0.8"),
+        "Referer": proxied_url(request, "https://" + host + "/"),
     }
+    if request.headers.get("Origin"):
+        headers["Origin"] = "https://" + host
     body = None
     if request.method in {"POST", "PUT", "PATCH"}:
         body = await request.read()
@@ -378,7 +410,7 @@ async def proxy(request: web.Request) -> web.StreamResponse:
     if status in {301, 302, 303, 307, 308} and location:
         return await handle_redirect(request, session, location, state)
     if "text/html" in content_type:
-        return web.Response(text=rewrite_html(request, content.decode(errors="replace")), content_type="text/html", charset="utf-8", status=status)
+        return web.Response(text=rewrite_html(request, content.decode(errors="replace"), host), content_type="text/html", charset="utf-8", status=status)
     return web.Response(body=content, status=status, content_type=content_type.split(";")[0] or "application/octet-stream")
 
 
