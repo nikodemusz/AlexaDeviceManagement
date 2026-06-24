@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.5
+
+- **Debug**: Neuer Endpunkt `/api/devices-debug` gibt die Rohdaten der ersten 3 Smart-Home-Geräte zurück. Damit lässt sich prüfen, in welchen API-Feldern Skill- und Hersteller-Informationen tatsächlich geliefert werden, um die Normalisierung gezielt anpassen zu können.
+
 ## 0.9.4
 
 - **Feature**: Geräteliste jetzt als Tabelle statt Kachelansicht.
