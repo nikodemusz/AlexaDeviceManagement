@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.6
+
+- **Design**: Neues App-Icon und Logo im Alexa-Stil — dunkles Navy, cyan „A" mit Smile-Arc, angelehnt an das offizielle Amazon Alexa App-Icon.
+
 ## 0.9.5
 
 - **Debug**: Neuer Endpunkt `/api/devices-debug` gibt die Rohdaten der ersten 3 Smart-Home-Geräte zurück. Damit lässt sich prüfen, in welchen API-Feldern Skill- und Hersteller-Informationen tatsächlich geliefert werden, um die Normalisierung gezielt anpassen zu können.
