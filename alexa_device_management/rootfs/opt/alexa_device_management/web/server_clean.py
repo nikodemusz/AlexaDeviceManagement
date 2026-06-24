@@ -11,7 +11,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "0.9.6"
+APP_VERSION = "0.9.7"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -309,6 +309,114 @@ async def devices_debug(request: web.Request) -> web.Response:
     return web.json_response(result)
 
 
+async def debug_ui(request: web.Request) -> web.Response:
+    ingress_path = request.headers.get("X-Ingress-Path", "").rstrip("/")
+    endpoints = [
+        ("/api/app-info",            "App-Info"),
+        ("/api/config-status",       "Config-Status"),
+        ("/auth/session",            "Session"),
+        ("/api/token-refresh-status","Token-Refresh-Status"),
+        ("/api/devices",             "Geräteliste (normalisiert)"),
+        ("/api/devices-debug",       "Geräte Rohdaten (Smart Home Sample)"),
+    ]
+    buttons = "\n".join(
+        f'<button onclick="load(\'{ingress_path}{ep}\')">{label}<br><small>{ep}</small></button>'
+        for ep, label in endpoints
+    )
+    html = f"""<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Debug – Alexa Device Management</title>
+  <style>
+    * {{ box-sizing: border-box; }}
+    body {{ margin: 0; font-family: system-ui, sans-serif; background: #f5f6fa; color: #2d3436; display: flex; height: 100vh; }}
+    nav {{ width: 260px; min-width: 220px; background: #fff; border-right: 1px solid #e0e0e0; padding: 20px 12px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }}
+    nav h2 {{ margin: 0 0 16px; font-size: 15px; color: #636e72; }}
+    nav button {{
+      width: 100%; border: 1px solid #dfe6e9; border-radius: 8px; padding: 10px 12px;
+      background: #f8f9fa; cursor: pointer; text-align: left; font-size: 13px;
+      font-weight: 600; color: #2d3436; transition: background .15s;
+    }}
+    nav button small {{ font-weight: 400; color: #636e72; font-size: 11px; display: block; margin-top: 2px; word-break: break-all; }}
+    nav button:hover {{ background: #e8f4fd; border-color: #00caff; }}
+    nav button.active {{ background: #e8f4fd; border-color: #00caff; color: #0098c8; }}
+    main {{ flex: 1; display: flex; flex-direction: column; overflow: hidden; }}
+    #url-bar {{ padding: 12px 20px; background: #fff; border-bottom: 1px solid #e0e0e0; font-size: 13px; color: #636e72; display: flex; align-items: center; gap: 10px; }}
+    #url-bar code {{ color: #2d3436; font-size: 13px; }}
+    #url-bar button {{ border: none; background: #00caff; color: #fff; border-radius: 6px; padding: 5px 12px; cursor: pointer; font-size: 12px; }}
+    #output {{ flex: 1; overflow: auto; padding: 20px; }}
+    pre {{ margin: 0; font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; }}
+    .loading {{ color: #636e72; font-style: italic; }}
+    .error {{ color: #c0392b; }}
+    .key {{ color: #2980b9; }}
+    .str {{ color: #27ae60; }}
+    .num {{ color: #e67e22; }}
+    .bool {{ color: #8e44ad; }}
+    .null {{ color: #95a5a6; }}
+    a.back {{ display: inline-block; margin-top: 4px; font-size: 12px; color: #636e72; text-decoration: none; }}
+    a.back:hover {{ color: #00caff; }}
+  </style>
+</head>
+<body>
+  <nav>
+    <h2>🛠 Debug-Endpunkte</h2>
+    {buttons}
+    <a class="back" href="{ingress_path}/">← Zurück zur App</a>
+  </nav>
+  <main>
+    <div id="url-bar">
+      <span>URL:</span><code id="current-url">—</code>
+      <button onclick="reload()">↻ Neu laden</button>
+    </div>
+    <div id="output"><pre class="loading">Endpunkt links auswählen…</pre></div>
+  </main>
+  <script>
+    let currentUrl = null;
+
+    function syntaxHL(json) {{
+      return JSON.stringify(json, null, 2)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/("(\\u[a-fA-F0-9]{{4}}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, m => {{
+          if (/^"/.test(m)) return /:$/.test(m) ? `<span class="key">${{m}}</span>` : `<span class="str">${{m}}</span>`;
+          if (/true|false/.test(m)) return `<span class="bool">${{m}}</span>`;
+          if (/null/.test(m)) return `<span class="null">${{m}}</span>`;
+          return `<span class="num">${{m}}</span>`;
+        }});
+    }}
+
+    async function load(url) {{
+      currentUrl = url;
+      document.getElementById('current-url').textContent = url;
+      document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+      event.currentTarget.classList.add('active');
+      const out = document.getElementById('output');
+      out.innerHTML = '<pre class="loading">Lade…</pre>';
+      try {{
+        const resp = await fetch(url);
+        const text = await resp.text();
+        let json;
+        try {{ json = JSON.parse(text); }} catch {{ json = null; }}
+        if (json !== null) {{
+          out.innerHTML = '<pre>' + syntaxHL(json) + '</pre>';
+        }} else {{
+          out.innerHTML = '<pre class="error">Kein JSON: ' + text.replace(/</g,'&lt;') + '</pre>';
+        }}
+      }} catch(e) {{
+        out.innerHTML = '<pre class="error">Fehler: ' + e.message + '</pre>';
+      }}
+    }}
+
+    function reload() {{
+      if (currentUrl) load(currentUrl);
+    }}
+  </script>
+</body>
+</html>"""
+    return web.Response(text=html, content_type="text/html")
+
+
 def create_app() -> web.Application:
     app = web.Application()
     app.router.add_get("/", index)
@@ -316,6 +424,7 @@ def create_app() -> web.Application:
     app.router.add_get("/api/config-status", config_status)
     app.router.add_get("/api/devices", devices)
     app.router.add_get("/api/devices-debug", devices_debug)
+    app.router.add_get("/debug", debug_ui)
     app.router.add_get("/api/token-refresh-status", token_refresh_status)
     app.router.add_get("/auth/login", auth_login)
     app.router.add_get("/auth/session", auth_session)

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.7
+
+- **Feature**: Neue Debug-Seite unter `/debug` — alle API-Endpunkte per Klick aufrufbar, JSON-Antwort wird syntaxhervorgehoben angezeigt. Kein manuelles Token-Kopieren nötig.
+- **Feature**: „🛠 Debug"-Button in der Hauptseite-Toolbar verlinkt direkt auf die Debug-Konsole.
+
 ## 0.9.6
 
 - **Design**: Neues App-Icon und Logo — stilisierter Echo-Lautsprecher (grau auf weiß), passend zum Home-Assistant-Add-on-Stil. Mit Alexa-Ring, Grille-Linien und Basis.
