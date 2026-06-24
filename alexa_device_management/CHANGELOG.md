@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.3
+
+- **Feature**: Smart-Home-Geräte werden jetzt zusätzlich zu Echo-Geräten angezeigt. Lampen, Schalter, Steckdosen, Thermostate und alle anderen mit Alexa verbundenen Drittanbieter-Geräte erscheinen in der Geräteliste.
+- **Verbesserung**: Geräteabfrage nutzt zwei Alexa-API-Endpunkte: `/api/devices-v2/device` (Echo-Geräte) und `/api/behaviors/entities?skillId=amzn1.ask.1p.smarthome` (Smart-Home-Geräte). Beide Quellen werden zusammengeführt und dedupliziert.
+- **Verbesserung**: HTTP-Header bei Alexa-API-Anfragen auf Browser-User-Agent mit `Referer`/`Origin` umgestellt, wie es der Smart-Home-Endpunkt erwartet.
+- **UI**: Jede Gerätekarte zeigt jetzt ein Badge `🏠 Smart Home` oder `🔵 Echo` sowie den Hersteller/Skill-Namen an.
+- **UI**: Farbiger linker Rand zur visuellen Unterscheidung: Blau = Echo-Gerät, Grün = Smart-Home-Gerät.
+- **Bugfix**: Versionsnummer in `server_clean.py` war auf 0.9.1 geblieben, obwohl `config.yaml` bereits 0.9.2 ausgewiesen hat. Beide sind jetzt synchron.
+
 ## 0.9.2
 
 - **Bugfix**: Amazon-Login-Proxy schreibt nun mehr Amazon-Links, Formularziele und Asset-URLs auf den lokalen HA-Ingress-Proxy um.
