@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.0
+
+- **Feature**: Filterzeile in der Gerätetabelle. Jede Spalte ist filterbar:
+  - **Skill / Connector**: Dropdown mit allen vorhandenen Werten (distinct) — z.B. nur „Home Assistant" oder „openHAB Skill" anzeigen
+  - **Typ**, **Raum**, **Quelle**: Dropdown mit distinct-Werten
+  - **Online-Status**: Dropdown (Alle / Online / Offline)
+  - **Name**, **Hersteller**: Freitextfilter
+- Geräte-Counter zeigt an wie viele Geräte gefiltert sichtbar sind (z.B. „42 von 791 Geräten")
+
 ## 0.9.9
 
 - **Bugfix**: Sidebar-Icon in Home Assistant wird jetzt korrekt angezeigt. `mdi:amazon-alexa` war in manchen HA-Versionen nicht verfügbar — ersetzt durch `mdi:speaker` (Lautsprecher-Icon, immer verfügbar).

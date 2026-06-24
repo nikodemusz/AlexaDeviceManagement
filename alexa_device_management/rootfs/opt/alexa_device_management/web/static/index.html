@@ -197,21 +197,70 @@
       return [...document.querySelectorAll(".row-check:checked")].map(cb => cb.dataset.serial);
     }
 
+    let _allDevices = [];
+
+    function distinct(arr, key) {
+      return [...new Set(arr.map(d => d[key] || '').filter(Boolean))].sort();
+    }
+
+    function selectOptions(values) {
+      return '<option value="">Alle</option>' + values.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+    }
+
+    function applyFilters() {
+      const name    = document.getElementById('f-name')?.value.toLowerCase() || '';
+      const type    = document.getElementById('f-type')?.value || '';
+      const skill   = document.getElementById('f-skill')?.value || '';
+      const mfr     = document.getElementById('f-manufacturer')?.value.toLowerCase() || '';
+      const room    = document.getElementById('f-room')?.value || '';
+      const source  = document.getElementById('f-source')?.value || '';
+      const online  = document.getElementById('f-online')?.value || '';
+
+      let visible = 0;
+      document.querySelectorAll('.device-table tbody tr').forEach(tr => {
+        const d = _allDevices[parseInt(tr.dataset.index)];
+        if (!d) return;
+        const show = (
+          (!name   || d.name.toLowerCase().includes(name)) &&
+          (!type   || (d.type || '').replace(/_/g, ' ') === type) &&
+          (!skill  || (d.skill || '') === skill) &&
+          (!mfr    || (d.family || '').toLowerCase().includes(mfr)) &&
+          (!room   || (d.room || '') === room) &&
+          (!source || d.source === source) &&
+          (!online || (online === 'online' ? d.online : !d.online))
+        );
+        tr.style.display = show ? '' : 'none';
+        if (show) visible++;
+      });
+      const info = document.getElementById("selection-info");
+      if (info) {
+        const sel = selectedSerials().length;
+        info.textContent = sel > 0 ? `${sel} ausgewählt` : `${visible} von ${_allDevices.length} Geräten`;
+      }
+    }
+
     function updateSelectionInfo() {
       const count = selectedSerials().length;
       const info = document.getElementById("selection-info");
-      if (info) info.textContent = count > 0 ? `${count} Gerät(e) ausgewählt` : "";
+      if (!info) return;
+      const visible = document.querySelectorAll('.device-table tbody tr:not([style*="display: none"])').length;
+      info.textContent = count > 0 ? `${count} ausgewählt` : `${visible} von ${_allDevices.length} Geräten`;
     }
 
     function renderDevices(devices) {
+      _allDevices = devices;
       const container = document.getElementById("device-container");
       if (devices.length === 0) {
         container.innerHTML = `<div class="empty-state"><p>Keine Geräte gefunden.</p></div>`;
         return;
       }
 
+      const types   = distinct(devices, 'type').map(v => v.replace(/_/g, ' '));
+      const skills  = distinct(devices, 'skill');
+      const rooms   = distinct(devices, 'room');
+
       const rows = devices.map((d, i) => `
-        <tr class="${d.source === 'smart_home' ? 'row-smart-home' : 'row-echo'}">
+        <tr class="${d.source === 'smart_home' ? 'row-smart-home' : 'row-echo'}" data-index="${i}">
           <td class="col-check">
             <input type="checkbox" class="row-check" data-serial="${esc(d.serial)}" data-index="${i}" />
           </td>
@@ -234,7 +283,7 @@
 
       container.innerHTML = `
         <div class="table-toolbar">
-          <span id="selection-info" class="selection-info"></span>
+          <span id="selection-info" class="selection-info">${devices.length} Geräte</span>
         </div>
         <div class="table-wrapper">
           <table class="device-table">
@@ -249,6 +298,35 @@
                 <th class="col-room">Raum</th>
                 <th class="col-serial">Seriennummer</th>
                 <th class="col-source">Quelle</th>
+              </tr>
+              <tr class="filter-row">
+                <th class="col-check"></th>
+                <th class="col-status">
+                  <select id="f-online" class="f-select">
+                    <option value="">Alle</option>
+                    <option value="online">🟢</option>
+                    <option value="offline">⚫</option>
+                  </select>
+                </th>
+                <th class="col-name"><input id="f-name" class="f-input" type="text" placeholder="Filter…" /></th>
+                <th class="col-type">
+                  <select id="f-type" class="f-select">${selectOptions(types)}</select>
+                </th>
+                <th class="col-skill">
+                  <select id="f-skill" class="f-select">${selectOptions(skills)}</select>
+                </th>
+                <th class="col-manufacturer"><input id="f-manufacturer" class="f-input" type="text" placeholder="Filter…" /></th>
+                <th class="col-room">
+                  <select id="f-room" class="f-select">${selectOptions(rooms)}</select>
+                </th>
+                <th class="col-serial"></th>
+                <th class="col-source">
+                  <select id="f-source" class="f-select">
+                    <option value="">Alle</option>
+                    <option value="smart_home">🏠 Smart Home</option>
+                    <option value="echo">🔵 Echo</option>
+                  </select>
+                </th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -269,6 +347,11 @@
           updateSelectionInfo();
         });
       });
+      ['f-name','f-type','f-skill','f-manufacturer','f-room','f-source','f-online'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('input', applyFilters);
+      });
+      applyFilters();
     }
 
     function showAlert(message, type) {
