@@ -204,15 +204,16 @@
         return;
       }
       container.innerHTML = devices.map(d => `
-        <div class="device-card">
+        <div class="device-card ${d.source === 'smart_home' ? 'device-smart-home' : 'device-echo'}">
           <div class="online-indicator ${d.online ? 'online' : 'offline'}" title="${d.online ? 'Online' : 'Offline'}"></div>
           <div class="device-name">${esc(d.name)}</div>
-          <div class="device-type">${esc((d.type || '').replace(/_/g, ' '))}</div>
+          <div class="device-type">${esc((d.type || '').replace(/_/g, ' '))}${d.family ? ` · ${esc(d.family)}` : ''}</div>
           <div class="device-meta">
             <span class="device-room">📍 ${esc(d.room || '—')}</span>
             <span class="device-serial">SN: ${esc(d.serial)}</span>
           </div>
           <div class="capabilities">
+            <span class="chip chip-source">${d.source === 'smart_home' ? '🏠 Smart Home' : '🔵 Echo'}</span>
             ${(d.capabilities || []).map(c => `<span class="chip">${esc(c)}</span>`).join('')}
           </div>
         </div>
