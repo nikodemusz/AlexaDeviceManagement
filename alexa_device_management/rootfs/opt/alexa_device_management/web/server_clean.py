@@ -11,7 +11,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -120,6 +120,19 @@ def alexa_headers(data: dict[str, Any]) -> dict[str, str]:
     if data.get("csrf"):
         headers["csrf"] = data["csrf"]
     return headers
+
+
+async def alexa_delete(path: str, data: dict[str, Any]) -> None:
+    if not is_configured():
+        raise web.HTTPUnauthorized(text="Alexa session missing")
+    base = data.get("websiteApiUrl", "https://alexa.amazon.com").rstrip("/")
+    headers = alexa_headers(data)
+    headers["Content-Type"] = "application/json; charset=UTF-8"
+    async with aiohttp.ClientSession() as session:
+        async with session.delete(base + path, headers=headers, allow_redirects=False) as resp:
+            if resp.status not in (200, 204):
+                text = await resp.text()
+                raise web.HTTPBadGateway(text=f"Alexa API DELETE {resp.status}: {text[:200]}")
 
 
 async def alexa_get_json(path: str, data: dict[str, Any]) -> Any:
@@ -310,6 +323,39 @@ async def token_refresh_status(request: web.Request) -> web.Response:
     return web.json_response({"auto_refresh_active": False, "has_valid_token": is_configured(), "last_error": None})
 
 
+async def delete_devices(request: web.Request) -> web.Response:
+    if not is_configured():
+        raise web.HTTPUnauthorized(text="Alexa session missing")
+    data = session_data()
+    try:
+        body = await request.json()
+    except Exception:
+        raise web.HTTPBadRequest(text="Invalid JSON body")
+    targets = body.get("devices", [])
+    if not isinstance(targets, list) or not targets:
+        raise web.HTTPBadRequest(text="devices list required")
+
+    results: list[dict[str, Any]] = []
+    for target in targets:
+        serial = str(target.get("serial", "")).strip()
+        source = str(target.get("source", "")).strip()
+        if not serial:
+            results.append({"serial": serial, "ok": False, "error": "Missing serial"})
+            continue
+        try:
+            if source == "echo":
+                await alexa_delete(f"/api/devices-v2/device/{serial}", data)
+            else:
+                await alexa_delete(f"/api/phoenix/v1/appliance/{serial}", data)
+            results.append({"serial": serial, "ok": True})
+        except web.HTTPException as exc:
+            results.append({"serial": serial, "ok": False, "error": exc.reason or str(exc)})
+        except Exception as exc:
+            results.append({"serial": serial, "ok": False, "error": str(exc)})
+
+    return web.json_response({"results": results})
+
+
 async def devices_debug(request: web.Request) -> web.Response:
     """Return raw API payloads (first 3 smart-home items) to inspect field structure."""
     if not is_configured():
@@ -441,6 +487,7 @@ def create_app() -> web.Application:
     app.router.add_get("/api/config-status", config_status)
     app.router.add_get("/api/devices", devices)
     app.router.add_get("/api/devices-debug", devices_debug)
+    app.router.add_post("/api/devices/delete", delete_devices)
     app.router.add_get("/debug", debug_ui)
     app.router.add_get("/api/token-refresh-status", token_refresh_status)
     app.router.add_get("/auth/login", auth_login)

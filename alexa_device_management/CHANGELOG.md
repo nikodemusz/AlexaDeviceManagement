@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0
+
+- **Feature**: Bulk-Delete — ausgewählte Geräte können gemeinsam gelöscht werden.
+  - Sobald mindestens ein Gerät per Checkbox selektiert ist, erscheint der Button „🗑 Auswahl löschen" in der Tabellen-Toolbar.
+  - Ein Bestätigungs-Dialog listet alle betroffenen Geräte auf, bevor die Aktion ausgeführt wird.
+  - Echo-Geräte werden über `/api/devices-v2/device/{serial}` entfernt, Smart-Home-Geräte über `/api/phoenix/v1/appliance/{entityId}`.
+  - Erfolgreich gelöschte Geräte verschwinden sofort aus der Tabelle; Fehler werden pro Gerät gemeldet.
+
 ## 1.0.0
 
 - **Feature**: Filterzeile in der Gerätetabelle. Jede Spalte ist filterbar:
