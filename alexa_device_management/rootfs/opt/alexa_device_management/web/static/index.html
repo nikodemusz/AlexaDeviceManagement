@@ -197,6 +197,47 @@
       return [...document.querySelectorAll(".row-check:checked")].map(cb => cb.dataset.serial);
     }
 
+    function selectedDevices() {
+      return [...document.querySelectorAll('.row-check:checked')].map(cb => ({
+        serial: cb.dataset.serial,
+        source: cb.dataset.source,
+        name: (_allDevices[parseInt(cb.dataset.index)] || {}).name || cb.dataset.serial
+      }));
+    }
+
+    async function deleteSelected() {
+      const targets = selectedDevices();
+      if (!targets.length) return;
+      const names = targets.map(d => `• ${d.name}`).join('\n');
+      if (!confirm(`${targets.length} Gerät(e) dauerhaft aus Alexa löschen?\n\n${names}\n\nDiese Aktion kann nicht rückgängig gemacht werden.`)) return;
+      try {
+        const resp = await fetch(`${INGRESS_PATH}/api/devices/delete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ devices: targets.map(d => ({ serial: d.serial, source: d.source })) })
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const result = await resp.json();
+        const ok = result.results.filter(r => r.ok);
+        const failed = result.results.filter(r => !r.ok);
+        if (ok.length) {
+          const deletedSerials = new Set(ok.map(r => r.serial));
+          document.querySelectorAll('.row-check').forEach(cb => {
+            if (deletedSerials.has(cb.dataset.serial)) cb.closest('tr').remove();
+          });
+          _allDevices = _allDevices.filter(d => !deletedSerials.has(d.serial));
+        }
+        applyFilters();
+        if (failed.length) {
+          showAlert(`${ok.length} gelöscht, ${failed.length} Fehler: ` + failed.map(r => r.error).join(' | '), 'warning');
+        } else {
+          showAlert(`${ok.length} Gerät(e) erfolgreich gelöscht.`, 'success');
+        }
+      } catch (err) {
+        showAlert('Fehler beim Löschen: ' + err.message, 'error');
+      }
+    }
+
     let _allDevices = [];
 
     function distinct(arr, key) {
@@ -233,18 +274,20 @@
         if (show) visible++;
       });
       const info = document.getElementById("selection-info");
-      if (info) {
-        const sel = selectedSerials().length;
-        info.textContent = sel > 0 ? `${sel} ausgewählt` : `${visible} von ${_allDevices.length} Geräten`;
-      }
+      const btnDelete = document.getElementById("btn-delete");
+      const sel = selectedSerials().length;
+      if (info) info.textContent = sel > 0 ? `${sel} ausgewählt` : `${visible} von ${_allDevices.length} Geräten`;
+      if (btnDelete) btnDelete.classList.toggle('hidden', sel === 0);
     }
 
     function updateSelectionInfo() {
       const count = selectedSerials().length;
       const info = document.getElementById("selection-info");
+      const btnDelete = document.getElementById("btn-delete");
       if (!info) return;
       const visible = document.querySelectorAll('.device-table tbody tr:not([style*="display: none"])').length;
       info.textContent = count > 0 ? `${count} ausgewählt` : `${visible} von ${_allDevices.length} Geräten`;
+      if (btnDelete) btnDelete.classList.toggle('hidden', count === 0);
     }
 
     function renderDevices(devices) {
@@ -262,7 +305,7 @@
       const rows = devices.map((d, i) => `
         <tr class="${d.source === 'smart_home' ? 'row-smart-home' : 'row-echo'}" data-index="${i}">
           <td class="col-check">
-            <input type="checkbox" class="row-check" data-serial="${esc(d.serial)}" data-index="${i}" />
+            <input type="checkbox" class="row-check" data-serial="${esc(d.serial)}" data-source="${esc(d.source)}" data-index="${i}" />
           </td>
           <td class="col-status">
             <span class="online-dot ${d.online ? 'online' : 'offline'}" title="${d.online ? 'Online' : 'Offline'}"></span>
@@ -284,6 +327,7 @@
       container.innerHTML = `
         <div class="table-toolbar">
           <span id="selection-info" class="selection-info">${devices.length} Geräte</span>
+          <button id="btn-delete" class="btn btn-danger hidden" onclick="deleteSelected()">🗑 Auswahl löschen</button>
         </div>
         <div class="table-wrapper">
           <table class="device-table">
