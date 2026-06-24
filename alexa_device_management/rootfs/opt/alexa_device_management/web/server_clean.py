@@ -11,7 +11,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "0.9.7"
+APP_VERSION = "0.9.8"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -212,40 +212,57 @@ def _normalize_echo_device(raw: dict[str, Any]) -> dict[str, Any]:
 def _normalize_smart_home_device(raw: dict[str, Any]) -> dict[str, Any]:
     legacy = raw.get("legacyAppliance") if isinstance(raw.get("legacyAppliance"), dict) else {}
     details = raw.get("additionalApplianceDetails") if isinstance(raw.get("additionalApplianceDetails"), dict) else {}
+    provider_data = raw.get("providerData") if isinstance(raw.get("providerData"), dict) else {}
+    icon = raw.get("icon") if isinstance(raw.get("icon"), dict) else {}
     display_categories = raw.get("displayCategories")
     category = display_categories[0] if isinstance(display_categories, list) and display_categories else None
+
     device_id = (
-        raw.get("entityId") or raw.get("applianceId")
-        or raw.get("id") or legacy.get("applianceId") or ""
+        raw.get("id") or raw.get("entityId") or raw.get("applianceId")
+        or legacy.get("applianceId") or ""
     )
     name = (
-        raw.get("friendlyName") or raw.get("name") or raw.get("displayName")
+        raw.get("displayName") or raw.get("friendlyName") or raw.get("name")
         or raw.get("applianceName") or legacy.get("friendlyName")
         or device_id or "Unbekanntes Gerät"
     )
     device_type = (
-        raw.get("entityType") or raw.get("applianceType") or category
+        provider_data.get("deviceType") or icon.get("value")
+        or raw.get("entityType") or raw.get("applianceType") or category
         or raw.get("deviceType") or legacy.get("applianceType") or "SMART_HOME"
     )
-    manufacturer = (
-        raw.get("manufacturerName") or legacy.get("manufacturerName")
-        or details.get("manufacturer") or ""
-    )
-    skill = (
-        raw.get("skillName") or raw.get("providerName")
-        or legacy.get("skillName") or ""
-    )
+
+    # description format: "entity_id via Skill Name"
+    description = str(raw.get("description") or "")
+    if " via " in description:
+        entity_id, _, skill = description.partition(" via ")
+        skill = skill.strip()
+        manufacturer = entity_id.strip()
+    else:
+        skill = (
+            raw.get("skillName") or raw.get("providerName")
+            or legacy.get("skillName") or ""
+        )
+        manufacturer = (
+            raw.get("manufacturerName") or legacy.get("manufacturerName")
+            or details.get("manufacturer") or ""
+        )
+
     room = (
         raw.get("roomName") or raw.get("location") or raw.get("groupName")
         or details.get("roomName") or ""
     )
+    online = (
+        raw.get("availability") == "AVAILABLE"
+        or bool(raw.get("isReachable", raw.get("reachable", raw.get("online", False))))
+    )
     return {
         "name": str(name),
-        "serial": str(raw.get("serialNumber") or raw.get("applianceId") or device_id),
+        "serial": str(device_id),
         "type": str(device_type),
         "family": str(manufacturer),
         "skill": str(skill),
-        "online": bool(raw.get("isReachable", raw.get("reachable", raw.get("online", False)))),
+        "online": online,
         "firmware": str(raw.get("softwareVersion") or raw.get("version") or ""),
         "capabilities": _normalize_capabilities(raw),
         "room": str(room),
