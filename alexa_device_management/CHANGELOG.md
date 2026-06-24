@@ -2,7 +2,7 @@
 
 ## 0.9.6
 
-- **Design**: Neues App-Icon und Logo — stilisierter Echo-Lautsprecher (grau auf weiß), passend zum Home-Assistant-Add-on-Stil. Mit Alexa-Ring, Grille-Linien und Basis.
+- **Design**: Neues App-Icon und Logo im Alexa-Stil — dunkles Navy, cyan „A" mit Smile-Arc, angelehnt an das offizielle Amazon Alexa App-Icon.
 
 ## 0.9.5
 
