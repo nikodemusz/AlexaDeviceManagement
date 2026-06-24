@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.9
+
+- **Bugfix**: Sidebar-Icon in Home Assistant wird jetzt korrekt angezeigt. `mdi:amazon-alexa` war in manchen HA-Versionen nicht verfügbar — ersetzt durch `mdi:speaker` (Lautsprecher-Icon, immer verfügbar).
+
 ## 0.9.8
 
 - **Bugfix**: Skill/Connector-Feld zeigt jetzt korrekt den Connector-Namen (z.B. „Home Assistant", „openHAB Skill"). Der Wert wird aus dem `description`-Feld der Alexa-API geparst (`entity_id via Connector`).
