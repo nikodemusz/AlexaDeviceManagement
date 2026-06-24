@@ -11,7 +11,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "0.9.4"
+APP_VERSION = "0.9.5"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -293,12 +293,29 @@ async def token_refresh_status(request: web.Request) -> web.Response:
     return web.json_response({"auto_refresh_active": False, "has_valid_token": is_configured(), "last_error": None})
 
 
+async def devices_debug(request: web.Request) -> web.Response:
+    """Return raw API payloads (first 3 smart-home items) to inspect field structure."""
+    if not is_configured():
+        raise web.HTTPUnauthorized(text="Not configured")
+    data = session_data()
+    result: dict[str, Any] = {}
+    try:
+        payload = await alexa_get_json("/api/behaviors/entities?skillId=amzn1.ask.1p.smarthome", data)
+        items = _extract_smart_home_items(payload)
+        result["smart_home_raw_sample"] = items[:3]
+        result["smart_home_total"] = len(items)
+    except Exception as exc:
+        result["smart_home_error"] = str(exc)
+    return web.json_response(result)
+
+
 def create_app() -> web.Application:
     app = web.Application()
     app.router.add_get("/", index)
     app.router.add_get("/api/app-info", app_info)
     app.router.add_get("/api/config-status", config_status)
     app.router.add_get("/api/devices", devices)
+    app.router.add_get("/api/devices-debug", devices_debug)
     app.router.add_get("/api/token-refresh-status", token_refresh_status)
     app.router.add_get("/auth/login", auth_login)
     app.router.add_get("/auth/session", auth_session)
