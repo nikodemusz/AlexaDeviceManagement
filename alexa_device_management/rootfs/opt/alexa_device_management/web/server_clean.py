@@ -199,6 +199,7 @@ def _normalize_echo_device(raw: dict[str, Any]) -> dict[str, Any]:
         "serial": serial,
         "type": str(raw.get("deviceType") or "ECHO_DEVICE"),
         "family": str(raw.get("deviceFamily") or "ECHO"),
+        "skill": "",
         "online": bool(raw.get("online", raw.get("isOnline", False))),
         "firmware": str(raw.get("softwareVersion") or ""),
         "capabilities": _normalize_capabilities(raw),
@@ -226,9 +227,13 @@ def _normalize_smart_home_device(raw: dict[str, Any]) -> dict[str, Any]:
         raw.get("entityType") or raw.get("applianceType") or category
         or raw.get("deviceType") or legacy.get("applianceType") or "SMART_HOME"
     )
-    provider = (
-        raw.get("providerName") or raw.get("manufacturerName") or raw.get("skillName")
-        or legacy.get("manufacturerName") or details.get("manufacturer") or ""
+    manufacturer = (
+        raw.get("manufacturerName") or legacy.get("manufacturerName")
+        or details.get("manufacturer") or ""
+    )
+    skill = (
+        raw.get("skillName") or raw.get("providerName")
+        or legacy.get("skillName") or ""
     )
     room = (
         raw.get("roomName") or raw.get("location") or raw.get("groupName")
@@ -238,7 +243,8 @@ def _normalize_smart_home_device(raw: dict[str, Any]) -> dict[str, Any]:
         "name": str(name),
         "serial": str(raw.get("serialNumber") or raw.get("applianceId") or device_id),
         "type": str(device_type),
-        "family": str(provider),
+        "family": str(manufacturer),
+        "skill": str(skill),
         "online": bool(raw.get("isReachable", raw.get("reachable", raw.get("online", False)))),
         "firmware": str(raw.get("softwareVersion") or raw.get("version") or ""),
         "capabilities": _normalize_capabilities(raw),

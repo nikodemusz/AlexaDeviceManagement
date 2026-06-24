@@ -72,7 +72,7 @@
       </div>
     </div>
 
-    <main id="device-container" class="device-grid">
+    <main id="device-container">
       <div class="loading">Lade Geräte...</div>
     </main>
   </div>
@@ -87,6 +87,9 @@
         const data = await resp.json();
         renderDevices(data.devices || []);
         updateDeviceInfo(data.devices || [], data.demo === true || data.source === "demo", data.api_error || data.warning);
+        if (data.warnings && data.warnings.length) {
+          showAlert("Teilweise Fehler beim Laden: " + data.warnings.join(" | "), "warning");
+        }
       } catch (err) {
         updateDeviceInfo([], false, err.message);
         showAlert("Fehler beim Laden der Geräte: " + err.message, "error");
@@ -136,9 +139,7 @@
     }
 
     async function logout() {
-      if (!confirm("Möchtest du dich wirklich abmelden? Die gespeicherte Alexa-Web-Session wird gelöscht.")) {
-        return;
-      }
+      if (!confirm("Möchtest du dich wirklich abmelden? Die gespeicherte Alexa-Web-Session wird gelöscht.")) return;
       try {
         const resp = await fetch(`${INGRESS_PATH}/auth/logout`, { method: "POST" });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -173,12 +174,8 @@
       document.getElementById("info-amazon-user").textContent = displayUser;
 
       const detailParts = [];
-      if (amazonUser.name && amazonUser.email && amazonUser.name !== amazonUser.email) {
-        detailParts.push(amazonUser.name);
-      }
-      if (amazonUser.user_id) {
-        detailParts.push(`User-ID: ${amazonUser.user_id}`);
-      }
+      if (amazonUser.name && amazonUser.email && amazonUser.name !== amazonUser.email) detailParts.push(amazonUser.name);
+      if (amazonUser.user_id) detailParts.push(`User-ID: ${amazonUser.user_id}`);
       document.getElementById("info-amazon-user-detail").textContent =
         detailParts.join(" • ") || "Kein Amazon-Benutzer verfügbar";
     }
@@ -186,15 +183,23 @@
     function updateDeviceInfo(devices, demoMode, errorMessage) {
       const count = Array.isArray(devices) ? devices.length : 0;
       document.getElementById("info-device-count").textContent = `${count}`;
-
       if (errorMessage) {
         document.getElementById("info-device-detail").textContent = `Fehler/Fallback: ${errorMessage}`;
         return;
       }
-
       document.getElementById("info-device-detail").textContent = demoMode
         ? "Demo-Geräte werden angezeigt"
         : "Geräte aus Alexa geladen";
+    }
+
+    function selectedSerials() {
+      return [...document.querySelectorAll(".row-check:checked")].map(cb => cb.dataset.serial);
+    }
+
+    function updateSelectionInfo() {
+      const count = selectedSerials().length;
+      const info = document.getElementById("selection-info");
+      if (info) info.textContent = count > 0 ? `${count} Gerät(e) ausgewählt` : "";
     }
 
     function renderDevices(devices) {
@@ -203,21 +208,66 @@
         container.innerHTML = `<div class="empty-state"><p>Keine Geräte gefunden.</p></div>`;
         return;
       }
-      container.innerHTML = devices.map(d => `
-        <div class="device-card ${d.source === 'smart_home' ? 'device-smart-home' : 'device-echo'}">
-          <div class="online-indicator ${d.online ? 'online' : 'offline'}" title="${d.online ? 'Online' : 'Offline'}"></div>
-          <div class="device-name">${esc(d.name)}</div>
-          <div class="device-type">${esc((d.type || '').replace(/_/g, ' '))}${d.family ? ` · ${esc(d.family)}` : ''}</div>
-          <div class="device-meta">
-            <span class="device-room">📍 ${esc(d.room || '—')}</span>
-            <span class="device-serial">SN: ${esc(d.serial)}</span>
-          </div>
-          <div class="capabilities">
-            <span class="chip chip-source">${d.source === 'smart_home' ? '🏠 Smart Home' : '🔵 Echo'}</span>
-            ${(d.capabilities || []).map(c => `<span class="chip">${esc(c)}</span>`).join('')}
-          </div>
-        </div>
+
+      const rows = devices.map((d, i) => `
+        <tr class="${d.source === 'smart_home' ? 'row-smart-home' : 'row-echo'}">
+          <td class="col-check">
+            <input type="checkbox" class="row-check" data-serial="${esc(d.serial)}" data-index="${i}" />
+          </td>
+          <td class="col-status">
+            <span class="online-dot ${d.online ? 'online' : 'offline'}" title="${d.online ? 'Online' : 'Offline'}"></span>
+          </td>
+          <td class="col-name">${esc(d.name)}</td>
+          <td class="col-type">${esc((d.type || '').replace(/_/g, ' '))}</td>
+          <td class="col-skill">${esc(d.skill || '—')}</td>
+          <td class="col-manufacturer">${esc(d.family || '—')}</td>
+          <td class="col-room">${esc(d.room || '—')}</td>
+          <td class="col-serial"><code>${esc(d.serial)}</code></td>
+          <td class="col-source">
+            <span class="badge ${d.source === 'smart_home' ? 'badge-smarthome' : 'badge-echo'}">
+              ${d.source === 'smart_home' ? '🏠 Smart Home' : '🔵 Echo'}
+            </span>
+          </td>
+        </tr>
       `).join('');
+
+      container.innerHTML = `
+        <div class="table-toolbar">
+          <span id="selection-info" class="selection-info"></span>
+        </div>
+        <div class="table-wrapper">
+          <table class="device-table">
+            <thead>
+              <tr>
+                <th class="col-check"><input type="checkbox" id="check-all" title="Alle auswählen" /></th>
+                <th class="col-status" title="Online-Status">●</th>
+                <th class="col-name">Name</th>
+                <th class="col-type">Typ</th>
+                <th class="col-skill">Skill / Connector</th>
+                <th class="col-manufacturer">Hersteller</th>
+                <th class="col-room">Raum</th>
+                <th class="col-serial">Seriennummer</th>
+                <th class="col-source">Quelle</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
+
+      document.getElementById("check-all").addEventListener("change", function () {
+        document.querySelectorAll(".row-check").forEach(cb => cb.checked = this.checked);
+        updateSelectionInfo();
+      });
+      document.querySelectorAll(".row-check").forEach(cb => {
+        cb.addEventListener("change", () => {
+          const all = document.querySelectorAll(".row-check");
+          const checked = document.querySelectorAll(".row-check:checked");
+          document.getElementById("check-all").indeterminate = checked.length > 0 && checked.length < all.length;
+          document.getElementById("check-all").checked = checked.length === all.length;
+          updateSelectionInfo();
+        });
+      });
     }
 
     function showAlert(message, type) {
@@ -244,9 +294,7 @@
       if (event.data && event.data.type === "oauth_callback") {
         fetchConfigStatus();
         fetchAppInfo();
-        if (event.data.success) {
-          fetchDevices();
-        }
+        if (event.data.success) fetchDevices();
       }
     });
 
@@ -257,7 +305,6 @@
         const data = await resp.json();
         const badge = document.getElementById("refresh-status");
         badge.classList.remove("hidden");
-
         if (data.auto_refresh_active && data.has_valid_token) {
           const mins = Math.floor(data.next_refresh_in / 60);
           badge.textContent = `🔄 Auto-Refresh aktiv (nächster in ${mins}min)`;
