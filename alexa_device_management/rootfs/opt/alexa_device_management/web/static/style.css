@@ -227,6 +227,30 @@ body {
   border-left: 3px solid #27ae60;
 }
 
+/* Filter row */
+.filter-row th {
+  padding: 6px 8px;
+  background: #f0f4f8;
+  border-bottom: 2px solid #e9ecef;
+}
+
+.f-input, .f-select {
+  width: 100%;
+  font-size: 12px;
+  padding: 4px 6px;
+  border: 1px solid #d0d7de;
+  border-radius: 5px;
+  background: #fff;
+  color: #2d3436;
+  box-sizing: border-box;
+}
+
+.f-input:focus, .f-select:focus {
+  outline: none;
+  border-color: #00caff;
+  box-shadow: 0 0 0 2px rgba(0, 202, 255, 0.15);
+}
+
 .col-check { width: 36px; }
 .col-status { width: 36px; text-align: center; }
 .col-name { min-width: 160px; font-weight: 600; color: #2d3436; }
