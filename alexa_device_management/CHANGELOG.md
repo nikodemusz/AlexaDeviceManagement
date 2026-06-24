@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.8
+
+- **Bugfix**: Skill/Connector-Feld zeigt jetzt korrekt den Connector-Namen (z.B. „Home Assistant", „openHAB Skill"). Der Wert wird aus dem `description`-Feld der Alexa-API geparst (`entity_id via Connector`).
+- **Bugfix**: Hersteller-Feld zeigt jetzt die HA-Entity-ID (z.B. `switch.mariodruck_internetzugang`) statt leer zu bleiben.
+- **Bugfix**: Online-Status für Smart-Home-Geräte nutzt jetzt `availability == "AVAILABLE"` (korrektes API-Feld).
+- **Bugfix**: Gerätetyp wird jetzt aus `providerData.deviceType` gelesen (z.B. `SWITCH`, `ACTIVITY_TRIGGER`).
+- **Bugfix**: Gerätename wird jetzt aus `displayName` gelesen statt aus `friendlyName` (das in dieser API-Antwort nicht existiert).
+
 ## 0.9.7
 
 - **Feature**: Neue Debug-Seite unter `/debug` — alle API-Endpunkte per Klick aufrufbar, JSON-Antwort wird syntaxhervorgehoben angezeigt. Kein manuelles Token-Kopieren nötig.
