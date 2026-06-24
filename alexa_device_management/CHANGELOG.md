@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.4
+
+- **Feature**: Geräteliste jetzt als Tabelle statt Kachelansicht.
+- **Feature**: Checkbox-Spalte mit „Alle auswählen"-Header und Auswahl-Counter – Vorbereitung für künftige Bulk-Operationen (Umbenennen, Löschen).
+- **Feature**: Neue Spalte „Skill / Connector" zeigt den Alexa-Skill-Namen des Connectors (z.B. „openHAB Skill", „Home Assistant") getrennt vom Hersteller.
+- **Verbesserung**: Hersteller-Spalte (`manufacturerName`) ist jetzt separat sichtbar und nicht mehr im `family`-Sammelfeld versteckt.
+- **UI**: Online-Status als farbiger Punkt, Quell-Badge (🔵 Echo / 🏠 Smart Home) und farbige Zeilen-Akzente (Blau = Echo, Grün = Smart Home).
+
 ## 0.9.3
 
 - **Feature**: Smart-Home-Geräte werden jetzt zusätzlich zu Echo-Geräten angezeigt. Lampen, Schalter, Steckdosen, Thermostate und alle anderen mit Alexa verbundenen Drittanbieter-Geräte erscheinen in der Geräteliste.
