@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.3
+
+- **Bugfix**: Delete für Smart-Home-Geräte verwendet jetzt die `legacyAppliance.applianceId` statt der `entityId` — die Phoenix-API erwartet das klassische Appliance-Format, nicht die Behaviors-Entity-ID.
+- **Bugfix**: Geräte-IDs werden beim DELETE-Aufruf URL-kodiert (behebt HTTP 400 bei IDs mit Sonderzeichen).
+
 ## 1.1.2
 
 - **Bugfix**: Delete-Fehler zeigen jetzt den echten HTTP-Status-Code und Alexa-API-Antworttext an (statt nur „Bad Gateway").

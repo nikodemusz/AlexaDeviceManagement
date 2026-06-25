@@ -198,11 +198,15 @@
     }
 
     function selectedDevices() {
-      return [...document.querySelectorAll('.row-check:checked')].map(cb => ({
-        serial: cb.dataset.serial,
-        source: cb.dataset.source,
-        name: (_allDevices[parseInt(cb.dataset.index)] || {}).name || cb.dataset.serial
-      }));
+      return [...document.querySelectorAll('.row-check:checked')].map(cb => {
+        const d = _allDevices[parseInt(cb.dataset.index)] || {};
+        return {
+          serial: cb.dataset.serial,
+          source: cb.dataset.source,
+          appliance_id: d.appliance_id || '',
+          name: d.name || cb.dataset.serial
+        };
+      });
     }
 
     async function deleteSelected() {
