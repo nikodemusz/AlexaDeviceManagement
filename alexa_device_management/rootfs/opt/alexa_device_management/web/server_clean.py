@@ -12,7 +12,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "1.1.3"
+APP_VERSION = "1.1.4"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -350,9 +350,22 @@ async def delete_devices(request: web.Request) -> web.Response:
             if source == "echo":
                 await alexa_delete(f"/api/devices-v2/device/{quote(serial, safe='')}", data)
             else:
-                # Phoenix API needs the legacy applianceId (from legacyAppliance.applianceId)
                 appliance_id = str(target.get("appliance_id", "")).strip() or serial
-                await alexa_delete(f"/api/phoenix/v1/appliance/{quote(appliance_id, safe='')}", data)
+                # Try behaviors/entities first (same namespace as device retrieval),
+                # fall back to phoenix v1 appliance endpoint
+                last_err: Exception | None = None
+                for path in [
+                    f"/api/behaviors/entities/{quote(serial, safe='')}",
+                    f"/api/phoenix/v1/appliance/{quote(appliance_id, safe='')}",
+                ]:
+                    try:
+                        await alexa_delete(path, data)
+                        last_err = None
+                        break
+                    except Exception as exc:
+                        last_err = exc
+                if last_err is not None:
+                    raise last_err
             results.append({"serial": serial, "ok": True})
         except Exception as exc:
             results.append({"serial": serial, "ok": False, "error": str(exc)})
@@ -361,7 +374,7 @@ async def delete_devices(request: web.Request) -> web.Response:
 
 
 async def devices_debug(request: web.Request) -> web.Response:
-    """Return raw API payloads (first 3 smart-home items) to inspect field structure."""
+    """Return raw API payloads + extracted ID fields to diagnose delete issues."""
     if not is_configured():
         raise web.HTTPUnauthorized(text="Not configured")
     data = session_data()
@@ -369,8 +382,19 @@ async def devices_debug(request: web.Request) -> web.Response:
     try:
         payload = await alexa_get_json("/api/behaviors/entities?skillId=amzn1.ask.1p.smarthome", data)
         items = _extract_smart_home_items(payload)
-        result["smart_home_raw_sample"] = items[:3]
         result["smart_home_total"] = len(items)
+        result["smart_home_id_fields"] = [
+            {
+                "displayName": (item.get("displayName") or item.get("friendlyName") or "")[:60],
+                "id": item.get("id"),
+                "entityId": item.get("entityId"),
+                "applianceId": item.get("applianceId"),
+                "legacy_applianceId": (item.get("legacyAppliance") or {}).get("applianceId"),
+                "description": (item.get("description") or "")[:80],
+            }
+            for item in items[:5]
+        ]
+        result["smart_home_raw_sample"] = items[:3]
     except Exception as exc:
         result["smart_home_error"] = str(exc)
     return web.json_response(result)
