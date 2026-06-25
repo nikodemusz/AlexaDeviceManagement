@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.7
+
+- **Bugfix**: Delete für Smart-Home-Geräte sendet `Content-Type: application/json` jetzt nur noch wenn auch ein Request-Body vorhanden ist — leere `Content-Type`-Header haben die Phoenix-API mit HTTP 400 abbrechen lassen.
+- **Bugfix**: Delete probiert jetzt 4 Varianten in Reihenfolge: Phoenix-Endpoints jeweils ohne Body und mit JSON-Body `{"entityId": ..., "entityType": "APPLIANCE"}`, damit alle möglichen API-Erwartungen abgedeckt werden.
+  - `DELETE /api/phoenix/v1/deviceTyping/{id}` (kein Body)
+  - `DELETE /api/phoenix/v1/appliance/{id}` (kein Body)
+  - `DELETE /api/phoenix/v1/deviceTyping/{id}` (mit JSON-Body)
+  - `DELETE /api/phoenix/v1/appliance/{id}` (mit JSON-Body)
+
 ## 1.1.6
 
 - **Bugfix**: Delete probiert jetzt 4 Endpoints in Reihenfolge und meldet bei Misserfolg den genauen HTTP-Status jedes Versuchs — hilft den richtigen Endpoint zu identifizieren.

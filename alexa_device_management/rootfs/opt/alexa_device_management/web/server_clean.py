@@ -12,7 +12,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "1.1.6"
+APP_VERSION = "1.1.7"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -123,17 +123,18 @@ def alexa_headers(data: dict[str, Any]) -> dict[str, str]:
     return headers
 
 
-async def alexa_delete(path: str, data: dict[str, Any]) -> None:
+async def alexa_delete(path: str, data: dict[str, Any], body: bytes | None = None) -> None:
     if not is_configured():
         raise Exception("Alexa session missing")
     base = data.get("websiteApiUrl", "https://alexa.amazon.com").rstrip("/")
     headers = alexa_headers(data)
-    headers["Content-Type"] = "application/json; charset=UTF-8"
+    if body is not None:
+        headers["Content-Type"] = "application/json; charset=UTF-8"
     async with aiohttp.ClientSession() as session:
-        async with session.delete(base + path, headers=headers, allow_redirects=False) as resp:
+        async with session.delete(base + path, headers=headers, data=body, allow_redirects=False) as resp:
             if resp.status not in (200, 204):
-                body = await resp.text()
-                raise Exception(f"HTTP {resp.status}: {body[:300]}")
+                resp_body = await resp.text()
+                raise Exception(f"HTTP {resp.status}: {resp_body[:300]}")
 
 
 async def alexa_get_json(path: str, data: dict[str, Any]) -> Any:
@@ -351,23 +352,24 @@ async def delete_devices(request: web.Request) -> web.Response:
                 await alexa_delete(f"/api/devices-v2/device/{quote(serial, safe='')}", data)
             else:
                 sid = quote(serial, safe='')
-                skill = "amzn1.ask.1p.smarthome"
-                # Try endpoints in order — first match that returns 200/204 wins.
-                # Report all attempts in error so the caller can see which paths failed.
+                entity_body = json.dumps({"entityId": serial, "entityType": "APPLIANCE"}).encode()
+                # Try endpoints in order — first match returning 200/204 wins.
+                # Variants: no-body (avoid Content-Type mismatch) and with body.
                 attempts: list[tuple[str, str]] = []
                 ok = False
-                for path in [
-                    f"/api/behaviors/entities/{sid}?skillId={skill}",
-                    f"/api/behaviors/entities/{sid}",
-                    f"/api/phoenix/v1/deviceTyping/{sid}",
-                    f"/api/phoenix/v1/appliance/{sid}",
+                for path, body in [
+                    (f"/api/phoenix/v1/deviceTyping/{sid}",  None),
+                    (f"/api/phoenix/v1/appliance/{sid}",     None),
+                    (f"/api/phoenix/v1/deviceTyping/{sid}",  entity_body),
+                    (f"/api/phoenix/v1/appliance/{sid}",     entity_body),
                 ]:
                     try:
-                        await alexa_delete(path, data)
+                        await alexa_delete(path, data, body=body)
                         ok = True
                         break
                     except Exception as exc:
-                        attempts.append((path, str(exc)))
+                        body_label = "body" if body else "no-body"
+                        attempts.append((f"{path} [{body_label}]", str(exc)))
                 if not ok:
                     detail = " | ".join(f"{p}: {e}" for p, e in attempts)
                     raise Exception(detail)
