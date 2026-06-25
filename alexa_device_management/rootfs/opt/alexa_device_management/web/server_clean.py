@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import pathlib
 from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "1.1.2"
+APP_VERSION = "1.1.3"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -269,9 +270,12 @@ def _normalize_smart_home_device(raw: dict[str, Any]) -> dict[str, Any]:
         raw.get("availability") == "AVAILABLE"
         or bool(raw.get("isReachable", raw.get("reachable", raw.get("online", False))))
     )
+    # Phoenix API needs the legacy applianceId, not the behaviors entityId
+    appliance_id = str(legacy.get("applianceId") or raw.get("applianceId") or device_id)
     return {
         "name": str(name),
         "serial": str(device_id),
+        "appliance_id": appliance_id,
         "type": str(device_type),
         "family": str(manufacturer),
         "skill": str(skill),
@@ -344,9 +348,11 @@ async def delete_devices(request: web.Request) -> web.Response:
             continue
         try:
             if source == "echo":
-                await alexa_delete(f"/api/devices-v2/device/{serial}", data)
+                await alexa_delete(f"/api/devices-v2/device/{quote(serial, safe='')}", data)
             else:
-                await alexa_delete(f"/api/phoenix/v1/appliance/{serial}", data)
+                # Phoenix API needs the legacy applianceId (from legacyAppliance.applianceId)
+                appliance_id = str(target.get("appliance_id", "")).strip() or serial
+                await alexa_delete(f"/api/phoenix/v1/appliance/{quote(appliance_id, safe='')}", data)
             results.append({"serial": serial, "ok": True})
         except Exception as exc:
             results.append({"serial": serial, "ok": False, "error": str(exc)})
