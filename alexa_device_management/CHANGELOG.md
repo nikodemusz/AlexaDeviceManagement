@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.6
+
+- **Bugfix**: Delete probiert jetzt 4 Endpoints in Reihenfolge und meldet bei Misserfolg den genauen HTTP-Status jedes Versuchs — hilft den richtigen Endpoint zu identifizieren.
+  - `DELETE /api/behaviors/entities/{id}?skillId=amzn1.ask.1p.smarthome`
+  - `DELETE /api/behaviors/entities/{id}`
+  - `DELETE /api/phoenix/v1/deviceTyping/{id}`
+  - `DELETE /api/phoenix/v1/appliance/{id}`
+
 ## 1.1.5
 
 - **UX**: Debug-Seite komplett für Mobile überarbeitet — keine feste Seitenleiste mehr, Endpunkt-Buttons wrappen als Kacheln, Output-Bereich scrollt vollständig.
