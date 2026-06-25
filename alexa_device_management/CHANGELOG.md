@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.1
+
+- **Bugfix**: „Alle auswählen"-Checkbox berücksichtigt jetzt aktive Filter — bei aktivem Filter werden nur die sichtbaren Geräte selektiert, nicht alle. Der Checkbox-Status (checked / indeterminate) wird nach jedem Filterwechsel neu berechnet.
+
 ## 1.1.0
 
 - **Feature**: Bulk-Delete — ausgewählte Geräte können gemeinsam gelöscht werden.

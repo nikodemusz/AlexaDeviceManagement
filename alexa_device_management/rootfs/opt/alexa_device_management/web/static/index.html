@@ -273,11 +273,28 @@
         tr.style.display = show ? '' : 'none';
         if (show) visible++;
       });
+      syncCheckAll();
       const info = document.getElementById("selection-info");
       const btnDelete = document.getElementById("btn-delete");
       const sel = selectedSerials().length;
       if (info) info.textContent = sel > 0 ? `${sel} ausgewählt` : `${visible} von ${_allDevices.length} Geräten`;
       if (btnDelete) btnDelete.classList.toggle('hidden', sel === 0);
+    }
+
+    function visibleCheckboxes() {
+      return [...document.querySelectorAll('.device-table tbody tr')]
+        .filter(tr => tr.style.display !== 'none')
+        .map(tr => tr.querySelector('.row-check'))
+        .filter(Boolean);
+    }
+
+    function syncCheckAll() {
+      const allVis = visibleCheckboxes();
+      const checkedVis = allVis.filter(cb => cb.checked);
+      const chk = document.getElementById("check-all");
+      if (!chk) return;
+      chk.indeterminate = checkedVis.length > 0 && checkedVis.length < allVis.length;
+      chk.checked = allVis.length > 0 && checkedVis.length === allVis.length;
     }
 
     function updateSelectionInfo() {
@@ -379,15 +396,12 @@
       `;
 
       document.getElementById("check-all").addEventListener("change", function () {
-        document.querySelectorAll(".row-check").forEach(cb => cb.checked = this.checked);
+        visibleCheckboxes().forEach(cb => cb.checked = this.checked);
         updateSelectionInfo();
       });
       document.querySelectorAll(".row-check").forEach(cb => {
         cb.addEventListener("change", () => {
-          const all = document.querySelectorAll(".row-check");
-          const checked = document.querySelectorAll(".row-check:checked");
-          document.getElementById("check-all").indeterminate = checked.length > 0 && checked.length < all.length;
-          document.getElementById("check-all").checked = checked.length === all.length;
+          syncCheckAll();
           updateSelectionInfo();
         });
       });
