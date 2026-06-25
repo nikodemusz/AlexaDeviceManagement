@@ -12,7 +12,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "1.1.4"
+APP_VERSION = "1.1.5"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -403,15 +403,18 @@ async def devices_debug(request: web.Request) -> web.Response:
 async def debug_ui(request: web.Request) -> web.Response:
     ingress_path = request.headers.get("X-Ingress-Path", "").rstrip("/")
     endpoints = [
-        ("/api/app-info",            "App-Info"),
-        ("/api/config-status",       "Config-Status"),
-        ("/auth/session",            "Session"),
-        ("/api/token-refresh-status","Token-Refresh-Status"),
-        ("/api/devices",             "Geräteliste (normalisiert)"),
-        ("/api/devices-debug",       "Geräte Rohdaten (Smart Home Sample)"),
+        ("/api/app-info",             "App-Info"),
+        ("/api/config-status",        "Config-Status"),
+        ("/auth/session",             "Session"),
+        ("/api/token-refresh-status", "Token-Refresh"),
+        ("/api/devices",              "Geräteliste"),
+        ("/api/devices-debug",        "Geräte Rohdaten"),
     ]
     buttons = "\n".join(
-        f'<button onclick="load(\'{ingress_path}{ep}\')">{label}<br><small>{ep}</small></button>'
+        f'<button onclick="load(\'{ingress_path}{ep}\', this)">'
+        f'<span class="btn-label">{label}</span>'
+        f'<span class="btn-ep">{ep}</span>'
+        f'</button>'
         for ep, label in endpoints
     )
     html = f"""<!DOCTYPE html>
@@ -421,50 +424,77 @@ async def debug_ui(request: web.Request) -> web.Response:
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Debug – Alexa Device Management</title>
   <style>
-    * {{ box-sizing: border-box; }}
-    body {{ margin: 0; font-family: system-ui, sans-serif; background: #f5f6fa; color: #2d3436; display: flex; height: 100vh; }}
-    nav {{ width: 260px; min-width: 220px; background: #fff; border-right: 1px solid #e0e0e0; padding: 20px 12px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }}
-    nav h2 {{ margin: 0 0 16px; font-size: 15px; color: #636e72; }}
-    nav button {{
-      width: 100%; border: 1px solid #dfe6e9; border-radius: 8px; padding: 10px 12px;
-      background: #f8f9fa; cursor: pointer; text-align: left; font-size: 13px;
-      font-weight: 600; color: #2d3436; transition: background .15s;
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{ font-family: system-ui, sans-serif; background: #f5f6fa; color: #2d3436;
+           display: flex; flex-direction: column; height: 100vh; overflow: hidden; }}
+
+    /* Top bar */
+    .top-bar {{ background: #fff; border-bottom: 1px solid #e0e0e0;
+                padding: 10px 14px; display: flex; align-items: center;
+                justify-content: space-between; gap: 10px; flex-shrink: 0; }}
+    .top-bar h2 {{ font-size: 14px; color: #636e72; white-space: nowrap; }}
+    .top-bar a {{ font-size: 13px; color: #00caff; text-decoration: none; white-space: nowrap; }}
+
+    /* Endpoint buttons */
+    .ep-grid {{ display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 14px;
+                background: #fff; border-bottom: 1px solid #e0e0e0; flex-shrink: 0; }}
+    .ep-grid button {{
+      border: 1px solid #dfe6e9; border-radius: 8px; padding: 8px 12px;
+      background: #f8f9fa; cursor: pointer; text-align: left; transition: background .15s;
+      display: flex; flex-direction: column; gap: 2px;
     }}
-    nav button small {{ font-weight: 400; color: #636e72; font-size: 11px; display: block; margin-top: 2px; word-break: break-all; }}
-    nav button:hover {{ background: #e8f4fd; border-color: #00caff; }}
-    nav button.active {{ background: #e8f4fd; border-color: #00caff; color: #0098c8; }}
-    main {{ flex: 1; display: flex; flex-direction: column; overflow: hidden; }}
-    #url-bar {{ padding: 12px 20px; background: #fff; border-bottom: 1px solid #e0e0e0; font-size: 13px; color: #636e72; display: flex; align-items: center; gap: 10px; }}
-    #url-bar code {{ color: #2d3436; font-size: 13px; }}
-    #url-bar button {{ border: none; background: #00caff; color: #fff; border-radius: 6px; padding: 5px 12px; cursor: pointer; font-size: 12px; }}
-    #output {{ flex: 1; overflow: auto; padding: 20px; }}
-    pre {{ margin: 0; font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; }}
+    .btn-label {{ font-size: 13px; font-weight: 600; color: #2d3436; }}
+    .btn-ep {{ font-size: 10px; color: #636e72; word-break: break-all; }}
+    .ep-grid button:hover {{ background: #e8f4fd; border-color: #00caff; }}
+    .ep-grid button.active {{ background: #e8f4fd; border-color: #00caff; }}
+    .ep-grid button.active .btn-label {{ color: #0098c8; }}
+
+    /* Action bar */
+    .action-bar {{ padding: 8px 14px; background: #f8f9fa; border-bottom: 1px solid #e0e0e0;
+                   display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex-shrink: 0; }}
+    .action-bar code {{ font-size: 11px; color: #636e72; flex: 1; min-width: 0;
+                        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+    .action-bar button {{
+      border: none; border-radius: 6px; padding: 6px 14px; cursor: pointer;
+      font-size: 12px; font-weight: 600; white-space: nowrap;
+    }}
+    #btn-reload {{ background: #dfe6e9; color: #2d3436; }}
+    #btn-copy   {{ background: #00caff; color: #fff; }}
+    #btn-copy.copied {{ background: #27ae60; }}
+
+    /* Output */
+    #output {{ flex: 1; overflow: auto; padding: 14px; -webkit-overflow-scrolling: touch; }}
+    pre {{ font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; }}
     .loading {{ color: #636e72; font-style: italic; }}
-    .error {{ color: #c0392b; }}
-    .key {{ color: #2980b9; }}
-    .str {{ color: #27ae60; }}
-    .num {{ color: #e67e22; }}
+    .error   {{ color: #c0392b; }}
+    .key  {{ color: #2980b9; }}
+    .str  {{ color: #27ae60; }}
+    .num  {{ color: #e67e22; }}
     .bool {{ color: #8e44ad; }}
     .null {{ color: #95a5a6; }}
-    a.back {{ display: inline-block; margin-top: 4px; font-size: 12px; color: #636e72; text-decoration: none; }}
-    a.back:hover {{ color: #00caff; }}
   </style>
 </head>
 <body>
-  <nav>
+  <div class="top-bar">
     <h2>🛠 Debug-Endpunkte</h2>
+    <a href="{ingress_path}/">← Zurück zur App</a>
+  </div>
+
+  <div class="ep-grid">
     {buttons}
-    <a class="back" href="{ingress_path}/">← Zurück zur App</a>
-  </nav>
-  <main>
-    <div id="url-bar">
-      <span>URL:</span><code id="current-url">—</code>
-      <button onclick="reload()">↻ Neu laden</button>
-    </div>
-    <div id="output"><pre class="loading">Endpunkt links auswählen…</pre></div>
-  </main>
+  </div>
+
+  <div class="action-bar">
+    <code id="current-url">Endpunkt auswählen…</code>
+    <button id="btn-reload" onclick="reload()">↻ Laden</button>
+    <button id="btn-copy"   onclick="copyOutput()">📋 Kopieren</button>
+  </div>
+
+  <div id="output"><pre class="loading">Endpunkt oben auswählen…</pre></div>
+
   <script>
     let currentUrl = null;
+    let rawJson = null;
 
     function syntaxHL(json) {{
       return JSON.stringify(json, null, 2)
@@ -477,22 +507,24 @@ async def debug_ui(request: web.Request) -> web.Response:
         }});
     }}
 
-    async function load(url) {{
+    async function load(url, btn) {{
       currentUrl = url;
+      rawJson = null;
       document.getElementById('current-url').textContent = url;
-      document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
-      event.currentTarget.classList.add('active');
+      document.querySelectorAll('.ep-grid button').forEach(b => b.classList.remove('active'));
+      if (btn) btn.classList.add('active');
       const out = document.getElementById('output');
       out.innerHTML = '<pre class="loading">Lade…</pre>';
       try {{
         const resp = await fetch(url);
         const text = await resp.text();
         let json;
-        try {{ json = JSON.parse(text); }} catch {{ json = null; }}
+        try {{ json = JSON.parse(text); rawJson = text; }} catch {{ json = null; }}
         if (json !== null) {{
           out.innerHTML = '<pre>' + syntaxHL(json) + '</pre>';
         }} else {{
-          out.innerHTML = '<pre class="error">Kein JSON: ' + text.replace(/</g,'&lt;') + '</pre>';
+          rawJson = text;
+          out.innerHTML = '<pre class="error">Kein JSON:\\n' + text.replace(/</g,'&lt;') + '</pre>';
         }}
       }} catch(e) {{
         out.innerHTML = '<pre class="error">Fehler: ' + e.message + '</pre>';
@@ -500,7 +532,21 @@ async def debug_ui(request: web.Request) -> web.Response:
     }}
 
     function reload() {{
-      if (currentUrl) load(currentUrl);
+      const active = document.querySelector('.ep-grid button.active');
+      if (currentUrl) load(currentUrl, active);
+    }}
+
+    async function copyOutput() {{
+      if (!rawJson) return;
+      try {{
+        await navigator.clipboard.writeText(rawJson);
+        const btn = document.getElementById('btn-copy');
+        btn.textContent = '✓ Kopiert';
+        btn.classList.add('copied');
+        setTimeout(() => {{ btn.textContent = '📋 Kopieren'; btn.classList.remove('copied'); }}, 2000);
+      }} catch(e) {{
+        alert('Kopieren fehlgeschlagen: ' + e.message);
+      }}
     }}
   </script>
 </body>
