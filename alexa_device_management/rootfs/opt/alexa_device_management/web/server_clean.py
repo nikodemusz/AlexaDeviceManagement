@@ -11,7 +11,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.1.2"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -124,15 +124,15 @@ def alexa_headers(data: dict[str, Any]) -> dict[str, str]:
 
 async def alexa_delete(path: str, data: dict[str, Any]) -> None:
     if not is_configured():
-        raise web.HTTPUnauthorized(text="Alexa session missing")
+        raise Exception("Alexa session missing")
     base = data.get("websiteApiUrl", "https://alexa.amazon.com").rstrip("/")
     headers = alexa_headers(data)
     headers["Content-Type"] = "application/json; charset=UTF-8"
     async with aiohttp.ClientSession() as session:
         async with session.delete(base + path, headers=headers, allow_redirects=False) as resp:
             if resp.status not in (200, 204):
-                text = await resp.text()
-                raise web.HTTPBadGateway(text=f"Alexa API DELETE {resp.status}: {text[:200]}")
+                body = await resp.text()
+                raise Exception(f"HTTP {resp.status}: {body[:300]}")
 
 
 async def alexa_get_json(path: str, data: dict[str, Any]) -> Any:
@@ -348,8 +348,6 @@ async def delete_devices(request: web.Request) -> web.Response:
             else:
                 await alexa_delete(f"/api/phoenix/v1/appliance/{serial}", data)
             results.append({"serial": serial, "ok": True})
-        except web.HTTPException as exc:
-            results.append({"serial": serial, "ok": False, "error": exc.reason or str(exc)})
         except Exception as exc:
             results.append({"serial": serial, "ok": False, "error": str(exc)})
 
