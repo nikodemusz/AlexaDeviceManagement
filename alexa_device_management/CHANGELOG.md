@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.5
+
+- **UX**: Debug-Seite komplett für Mobile überarbeitet — keine feste Seitenleiste mehr, Endpunkt-Buttons wrappen als Kacheln, Output-Bereich scrollt vollständig.
+- **Feature**: „📋 Kopieren"-Button in der Debug-Seite kopiert die komplette JSON-Antwort in die Zwischenablage.
+
 ## 1.1.4
 
 - **Bugfix**: Delete für Smart-Home-Geräte versucht jetzt zuerst `/api/behaviors/entities/{entityId}` (gleicher Namespace wie Geräteabruf), fällt auf `/api/phoenix/v1/appliance/{applianceId}` zurück wenn der erste Versuch fehlschlägt.
