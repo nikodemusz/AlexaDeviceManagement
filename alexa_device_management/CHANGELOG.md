@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.4
+
+- **Bugfix**: Delete für Smart-Home-Geräte versucht jetzt zuerst `/api/behaviors/entities/{entityId}` (gleicher Namespace wie Geräteabruf), fällt auf `/api/phoenix/v1/appliance/{applianceId}` zurück wenn der erste Versuch fehlschlägt.
+- **Debug**: `/api/devices-debug` zeigt jetzt alle ID-Felder (`id`, `entityId`, `applianceId`, `legacyAppliance.applianceId`) für die ersten 5 Smart-Home-Geräte zur Diagnose.
+
 ## 1.1.3
 
 - **Bugfix**: Delete für Smart-Home-Geräte verwendet jetzt die `legacyAppliance.applianceId` statt der `entityId` — die Phoenix-API erwartet das klassische Appliance-Format, nicht die Behaviors-Entity-ID.
