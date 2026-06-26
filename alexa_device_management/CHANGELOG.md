@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.9
+
+- **Bugfix**: Nach dem Löschen eines Geräts funktioniert die Filterung wieder korrekt. Ursache war ein Index-Versatz: wenn ein Eintrag aus `_allDevices` entfernt wurde, verschoben sich alle Indizes, `applyFilters()` las danach falsche Geräte. Behoben durch seriell-basiertes Lookup (`_deviceBySerial`-Map) statt Array-Index.
+- **Bugfix**: Fehlermeldungen beim Bulk-Delete zeigen jetzt Gerätename und vollständigen Fehlertext pro Gerät (z.B. `• Echo Wohnzimmer: HTTP 403: …`). Zeilenumbrüche werden im Alert korrekt dargestellt.
+- **Bugfix**: Gerätename wird jetzt im Request und Response mitgeschickt, damit Fehlernachrichten nachvollziehbar sind.
+
 ## 1.1.8
 
 - **Bugfix**: Delete für Smart-Home-Geräte verwendet jetzt den korrekten Endpoint `DELETE /api/phoenix/appliance/{id}` (ohne `/v1/`). Der `/v1/`-Pfad ist veraltet und lieferte immer HTTP 400 zurück.

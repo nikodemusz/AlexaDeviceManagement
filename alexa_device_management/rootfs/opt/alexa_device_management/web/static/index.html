@@ -199,7 +199,7 @@
 
     function selectedDevices() {
       return [...document.querySelectorAll('.row-check:checked')].map(cb => {
-        const d = _allDevices[parseInt(cb.dataset.index)] || {};
+        const d = _deviceBySerial[cb.dataset.serial] || {};
         return {
           serial: cb.dataset.serial,
           source: cb.dataset.source,
@@ -218,9 +218,12 @@
         const resp = await fetch(`${INGRESS_PATH}/api/devices/delete`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ devices: targets.map(d => ({ serial: d.serial, source: d.source })) })
+          body: JSON.stringify({ devices: targets.map(d => ({ serial: d.serial, source: d.source, name: d.name })) })
         });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        if (!resp.ok) {
+          const errText = await resp.text().catch(() => '');
+          throw new Error(`HTTP ${resp.status}: ${errText}`);
+        }
         const result = await resp.json();
         const ok = result.results.filter(r => r.ok);
         const failed = result.results.filter(r => !r.ok);
@@ -229,11 +232,13 @@
           document.querySelectorAll('.row-check').forEach(cb => {
             if (deletedSerials.has(cb.dataset.serial)) cb.closest('tr').remove();
           });
+          deletedSerials.forEach(s => delete _deviceBySerial[s]);
           _allDevices = _allDevices.filter(d => !deletedSerials.has(d.serial));
         }
         applyFilters();
         if (failed.length) {
-          showAlert(`${ok.length} gelöscht, ${failed.length} Fehler: ` + failed.map(r => r.error).join(' | '), 'warning');
+          const errLines = failed.map(r => `• ${r.name || r.serial}: ${r.error || 'Unbekannter Fehler'}`).join('\n');
+          showAlert(`${ok.length} gelöscht, ${failed.length} Fehler:\n${errLines}`, 'warning');
         } else {
           showAlert(`${ok.length} Gerät(e) erfolgreich gelöscht.`, 'success');
         }
@@ -243,6 +248,7 @@
     }
 
     let _allDevices = [];
+    let _deviceBySerial = {};
 
     function distinct(arr, key) {
       return [...new Set(arr.map(d => d[key] || '').filter(Boolean))].sort();
@@ -263,7 +269,7 @@
 
       let visible = 0;
       document.querySelectorAll('.device-table tbody tr').forEach(tr => {
-        const d = _allDevices[parseInt(tr.dataset.index)];
+        const d = _deviceBySerial[tr.dataset.serial];
         if (!d) return;
         const show = (
           (!name   || d.name.toLowerCase().includes(name)) &&
@@ -313,6 +319,8 @@
 
     function renderDevices(devices) {
       _allDevices = devices;
+      _deviceBySerial = {};
+      devices.forEach(d => { _deviceBySerial[d.serial] = d; });
       const container = document.getElementById("device-container");
       if (devices.length === 0) {
         container.innerHTML = `<div class="empty-state"><p>Keine Geräte gefunden.</p></div>`;
@@ -324,7 +332,7 @@
       const rooms   = distinct(devices, 'room');
 
       const rows = devices.map((d, i) => `
-        <tr class="${d.source === 'smart_home' ? 'row-smart-home' : 'row-echo'}" data-index="${i}">
+        <tr class="${d.source === 'smart_home' ? 'row-smart-home' : 'row-echo'}" data-index="${i}" data-serial="${esc(d.serial)}">
           <td class="col-check">
             <input type="checkbox" class="row-check" data-serial="${esc(d.serial)}" data-source="${esc(d.source)}" data-index="${i}" />
           </td>
@@ -420,6 +428,7 @@
       const box = document.getElementById("alert-box");
       box.textContent = message;
       box.className = `alert alert-${type}`;
+      box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
     function esc(str) {

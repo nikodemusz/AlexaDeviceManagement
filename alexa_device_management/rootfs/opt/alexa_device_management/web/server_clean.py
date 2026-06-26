@@ -12,7 +12,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "1.1.8"
+APP_VERSION = "1.1.9"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -344,8 +344,9 @@ async def delete_devices(request: web.Request) -> web.Response:
     for target in targets:
         serial = str(target.get("serial", "")).strip()
         source = str(target.get("source", "")).strip()
+        name = str(target.get("name", "")).strip() or serial
         if not serial:
-            results.append({"serial": serial, "ok": False, "error": "Missing serial"})
+            results.append({"serial": serial, "name": name, "ok": False, "error": "Missing serial"})
             continue
         try:
             if source == "echo":
@@ -353,9 +354,9 @@ async def delete_devices(request: web.Request) -> web.Response:
             else:
                 sid = quote(serial, safe='')
                 await alexa_delete(f"/api/phoenix/appliance/{sid}", data)
-            results.append({"serial": serial, "ok": True})
+            results.append({"serial": serial, "name": name, "ok": True})
         except Exception as exc:
-            results.append({"serial": serial, "ok": False, "error": str(exc)})
+            results.append({"serial": serial, "name": name, "ok": False, "error": str(exc)})
 
     return web.json_response({"results": results})
 
