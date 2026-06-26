@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.8
+
+- **Bugfix**: Delete für Smart-Home-Geräte verwendet jetzt den korrekten Endpoint `DELETE /api/phoenix/appliance/{id}` (ohne `/v1/`). Der `/v1/`-Pfad ist veraltet und lieferte immer HTTP 400 zurück.
+
 ## 1.1.7
 
 - **Bugfix**: Delete für Smart-Home-Geräte sendet `Content-Type: application/json` jetzt nur noch wenn auch ein Request-Body vorhanden ist — leere `Content-Type`-Header haben die Phoenix-API mit HTTP 400 abbrechen lassen.
