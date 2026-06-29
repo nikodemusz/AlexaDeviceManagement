@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.14
+
+- **Debug**: Zweiter Button „💥 Delete-Probe (DELETE!)" in der Debug-Seite — ruft `/api/delete-probe?id=…&delete=1` auf (mit korrektem `&`). Bisher musste der User die URL manuell anpassen, was dazu führte dass `?delete=1` fälschlicherweise an die UUID angehängt wurde.
+
 ## 1.1.13
 
 - **Bugfix**: Delete für reine v3-Smart-Home-Geräte (openHAB3, keine `legacyAppliance`) probiert jetzt 5 Kandidaten-Endpoints in Reihenfolge und stoppt beim ersten erfolgreichen 2xx: `/api/phoenix/entity/`, `/api/smarthome/v2/entities/`, `/api/smarthome/v1/presentation/entities/`, `/api/phoenix/appliance/`, `/api/phoenix/registration/`. Phoenix v2 behandelte DELETE mit unbekannter UUID als No-Op (immer 200), deshalb galt das Gerät als gelöscht aber tauchte beim Neuladen wieder auf.

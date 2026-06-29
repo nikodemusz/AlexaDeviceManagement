@@ -12,7 +12,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "1.1.13"
+APP_VERSION = "1.1.14"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -541,9 +541,13 @@ async def debug_ui(request: web.Request) -> web.Response:
         for ep, label in endpoints
     )
     buttons += f"""
-<button onclick="probeDelete('{ingress_path}')" style="background:#fff5f5;border-color:#e17055;">
-  <span class="btn-label">🔬 Delete-Probe</span>
+<button onclick="probeDelete('{ingress_path}', false)" style="background:#fff5f5;border-color:#e17055;">
+  <span class="btn-label">🔬 Delete-Probe (GET)</span>
   <span class="btn-ep">/api/delete-probe?id=...</span>
+</button>
+<button onclick="probeDelete('{ingress_path}', true)" style="background:#ffe0e0;border-color:#c0392b;color:#7b241c;">
+  <span class="btn-label">💥 Delete-Probe (DELETE!)</span>
+  <span class="btn-ep">/api/delete-probe?id=...&amp;delete=1</span>
 </button>"""
     html = f"""<!DOCTYPE html>
 <html lang="de">
@@ -664,10 +668,11 @@ async def debug_ui(request: web.Request) -> web.Response:
       if (currentUrl) load(currentUrl, active);
     }}
 
-    async function probeDelete(ingressPath) {{
+    async function probeDelete(ingressPath, withDelete) {{
       const id = prompt('Geräte-UUID aus der Geräteliste (data-serial) eingeben:');
       if (!id) return;
-      const url = ingressPath + '/api/delete-probe?id=' + encodeURIComponent(id);
+      const trimmed = id.trim();
+      const url = ingressPath + '/api/delete-probe?id=' + encodeURIComponent(trimmed) + (withDelete ? '&delete=1' : '');
       load(url, null);
     }}
 
