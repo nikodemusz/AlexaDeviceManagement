@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.12
+
+- **Bugfix**: Delete für Smart-Home-Geräte (z.B. openHAB) verwendet jetzt die `legacyAppliance.applianceId` (Format `AAA_…`) als Phoenix-Schlüssel, wenn vorhanden — statt der UUID aus der behaviors/entities-API. Phoenix (Alexa Smart Home v2) kennt die v3-UUIDs nicht und hat DELETE deshalb als No-Op behandelt.
+
 ## 1.1.11
 
 - **Debug**: Delete-Probe erweitert — zeigt jetzt alle rohen Felder aus behaviors/entities (inkl. `legacyAppliance`), testet GET auf drei URL-Formate (`/api/phoenix/appliance/`, `/api/smarthome/appliance/`, `amzn1.alexa.endpoint.`-Präfix) und listet die ersten Einträge von `/api/phoenix/appliance` (ohne ID) um das interne ID-Format zu erkennen.
