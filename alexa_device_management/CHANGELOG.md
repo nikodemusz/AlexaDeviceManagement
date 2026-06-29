@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.16
+
+- **Debug**: Delete-Probe (`?delete=1`) versucht jetzt 5 zusätzliche Kandidaten: `/api/behaviors/entities/{id}`, `/api/behaviors/entities/{id}?skillId=amzn1.ask.1p.smarthome`, `/api/smarthome/v1/smart-home-devices/{id}`, `/api/phoenix/smarthome/appliance/{id}` — diese Endpoints wurden bisher nicht getestet.
+- **Debug**: GET-Proben ebenfalls auf diese neuen Pfade erweitert.
+
 ## 1.1.15
 
 - **Bugfix**: Delete für reine v3-Smart-Home-Geräte (openHAB3) prüft jetzt nach dem Löschen ob das Gerät noch in `behaviors/entities` vorhanden ist. `DELETE /api/phoenix/appliance/{uuid}` gibt für v3-UUIDs immer 200 zurück (No-Op), was fälschlicherweise als Erfolg gewertet wurde. Falls das Gerät nach allen Versuchen noch existiert, erscheint jetzt eine klare Fehlermeldung: „Gerät wird vom Alexa Skill verwaltet — in der Skill-Quelle (z.B. openHAB) entfernen."

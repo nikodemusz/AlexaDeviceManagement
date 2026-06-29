@@ -12,7 +12,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "1.1.15"
+APP_VERSION = "1.1.16"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -504,6 +504,9 @@ async def delete_probe(request: web.Request) -> web.Response:
         f"/api/smarthome/v2/entities/{sid}",
         f"/api/smarthome/v1/presentation/entities/{sid}",
         f"/api/phoenix/registration/{sid}",
+        f"/api/behaviors/entities/{sid}",
+        f"/api/smarthome/v1/smart-home-devices/{sid}",
+        f"/api/phoenix/smarthome/appliance/{sid}",
     ]
     result["v3_get_probes"] = {}
     for path in v3_candidates:
@@ -514,6 +517,10 @@ async def delete_probe(request: web.Request) -> web.Response:
     if request.rel_url.query.get("delete") == "1":
         all_delete_candidates = [
             f"/api/phoenix/appliance/{sid}",
+            f"/api/behaviors/entities/{sid}",
+            f"/api/behaviors/entities/{sid}?skillId=amzn1.ask.1p.smarthome",
+            f"/api/smarthome/v1/smart-home-devices/{sid}",
+            f"/api/phoenix/smarthome/appliance/{sid}",
         ] + v3_candidates
         result["delete_attempts"] = {}
         for path in all_delete_candidates:
