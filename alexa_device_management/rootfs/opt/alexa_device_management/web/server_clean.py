@@ -12,7 +12,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "1.1.9"
+APP_VERSION = "1.1.10"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -123,7 +123,8 @@ def alexa_headers(data: dict[str, Any]) -> dict[str, str]:
     return headers
 
 
-async def alexa_delete(path: str, data: dict[str, Any], body: bytes | None = None) -> None:
+async def alexa_delete(path: str, data: dict[str, Any], body: bytes | None = None) -> str:
+    """Returns response body on success (empty string for 204)."""
     if not is_configured():
         raise Exception("Alexa session missing")
     base = data.get("websiteApiUrl", "https://alexa.amazon.com").rstrip("/")
@@ -132,9 +133,20 @@ async def alexa_delete(path: str, data: dict[str, Any], body: bytes | None = Non
         headers["Content-Type"] = "application/json; charset=UTF-8"
     async with aiohttp.ClientSession() as session:
         async with session.delete(base + path, headers=headers, data=body, allow_redirects=False) as resp:
+            resp_body = await resp.text()
             if resp.status not in (200, 204):
-                resp_body = await resp.text()
                 raise Exception(f"HTTP {resp.status}: {resp_body[:300]}")
+            return resp_body
+
+
+async def alexa_raw_get(path: str, data: dict[str, Any]) -> tuple[int, str]:
+    """Returns (status, body) without throwing on non-200."""
+    if not is_configured():
+        return 0, "Alexa session missing"
+    base = data.get("websiteApiUrl", "https://alexa.amazon.com").rstrip("/")
+    async with aiohttp.ClientSession() as session:
+        async with session.get(base + path, headers=alexa_headers(data), allow_redirects=False) as resp:
+            return resp.status, await resp.text()
 
 
 async def alexa_get_json(path: str, data: dict[str, Any]) -> Any:
@@ -388,6 +400,47 @@ async def devices_debug(request: web.Request) -> web.Response:
     return web.json_response(result)
 
 
+async def delete_probe(request: web.Request) -> web.Response:
+    """Diagnostic: probe what Phoenix knows about a device and what DELETE returns."""
+    if not is_configured():
+        raise web.HTTPUnauthorized(text="Not configured")
+    data = session_data()
+    device_id = request.rel_url.query.get("id", "").strip()
+    if not device_id:
+        raise web.HTTPBadRequest(text="?id= required")
+
+    sid = quote(device_id, safe='')
+    result: dict[str, Any] = {"id": device_id}
+
+    # 1. Does Phoenix know this device via GET?
+    phoenix_status, phoenix_body = await alexa_raw_get(f"/api/phoenix/appliance/{sid}", data)
+    result["phoenix_get_status"] = phoenix_status
+    result["phoenix_get_body"] = phoenix_body[:500]
+
+    # 2. Perform DELETE and capture full response
+    base = data.get("websiteApiUrl", "https://alexa.amazon.com").rstrip("/")
+    headers = alexa_headers(data)
+    async with aiohttp.ClientSession() as session:
+        async with session.delete(
+            base + f"/api/phoenix/appliance/{sid}", headers=headers, allow_redirects=False
+        ) as resp:
+            delete_body = await resp.text()
+            result["delete_status"] = resp.status
+            result["delete_body"] = delete_body[:500]
+
+    # 3. Re-check: is the device still in behaviors/entities?
+    try:
+        payload = await alexa_get_json("/api/behaviors/entities?skillId=amzn1.ask.1p.smarthome", data)
+        items = _extract_smart_home_items(payload)
+        still_present = any(item.get("id") == device_id for item in items)
+        result["still_in_behaviors_entities"] = still_present
+        result["total_devices_after"] = len(items)
+    except Exception as exc:
+        result["recheck_error"] = str(exc)
+
+    return web.json_response(result)
+
+
 async def debug_ui(request: web.Request) -> web.Response:
     ingress_path = request.headers.get("X-Ingress-Path", "").rstrip("/")
     endpoints = [
@@ -405,6 +458,11 @@ async def debug_ui(request: web.Request) -> web.Response:
         f'</button>'
         for ep, label in endpoints
     )
+    buttons += f"""
+<button onclick="probeDelete('{ingress_path}')" style="background:#fff5f5;border-color:#e17055;">
+  <span class="btn-label">🔬 Delete-Probe</span>
+  <span class="btn-ep">/api/delete-probe?id=...</span>
+</button>"""
     html = f"""<!DOCTYPE html>
 <html lang="de">
 <head>
@@ -524,6 +582,13 @@ async def debug_ui(request: web.Request) -> web.Response:
       if (currentUrl) load(currentUrl, active);
     }}
 
+    async function probeDelete(ingressPath) {{
+      const id = prompt('Geräte-UUID aus der Geräteliste (data-serial) eingeben:');
+      if (!id) return;
+      const url = ingressPath + '/api/delete-probe?id=' + encodeURIComponent(id);
+      load(url, null);
+    }}
+
     async function copyOutput() {{
       if (!rawJson) return;
       try {{
@@ -550,6 +615,7 @@ def create_app() -> web.Application:
     app.router.add_get("/api/devices", devices)
     app.router.add_get("/api/devices-debug", devices_debug)
     app.router.add_post("/api/devices/delete", delete_devices)
+    app.router.add_get("/api/delete-probe", delete_probe)
     app.router.add_get("/debug", debug_ui)
     app.router.add_get("/api/token-refresh-status", token_refresh_status)
     app.router.add_get("/auth/login", auth_login)

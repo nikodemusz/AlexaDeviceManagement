@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.10
+
+- **Debug**: Neuer Endpoint `/api/delete-probe?id={uuid}` und Button „🔬 Delete-Probe" in der Debug-Seite. Zeigt: (1) Was Phoenix über das Gerät an dieser UUID weiß (GET), (2) Was der DELETE-Aufruf tatsächlich zurückgibt (Status + Body), (3) Ob das Gerät danach noch in der behaviors/entities-Liste vorhanden ist — damit kann man diagnostizieren ob die Löschung auf API-Ebene wirkt oder der HA-Skill das Gerät sofort wieder hinzufügt.
+
 ## 1.1.9
 
 - **Bugfix**: Nach dem Löschen eines Geräts funktioniert die Filterung wieder korrekt. Ursache war ein Index-Versatz: wenn ein Eintrag aus `_allDevices` entfernt wurde, verschoben sich alle Indizes, `applyFilters()` las danach falsche Geräte. Behoben durch seriell-basiertes Lookup (`_deviceBySerial`-Map) statt Array-Index.
