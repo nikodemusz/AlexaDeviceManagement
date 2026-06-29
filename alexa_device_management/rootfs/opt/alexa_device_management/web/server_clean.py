@@ -12,7 +12,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "1.1.14"
+APP_VERSION = "1.1.15"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -391,15 +391,24 @@ async def delete_devices(request: web.Request) -> web.Response:
                         f"/api/phoenix/registration/{sid}",
                     ]
                     last_err: str = "No candidate endpoint returned 2xx"
-                    deleted = False
                     for path in v3_paths:
-                        status, body = await alexa_raw_delete(path, data)
-                        if status in (200, 204):
-                            deleted = True
+                        st, bd = await alexa_raw_delete(path, data)
+                        if st in (200, 204):
                             break
-                        last_err = f"HTTP {status} on {path}: {body[:120]}"
-                    if not deleted:
+                        last_err = f"HTTP {st} on {path}: {bd[:120]}"
+                    else:
                         raise Exception(last_err)
+                    # Verify the device actually disappeared — phoenix/appliance
+                    # returns 200 as a no-op for unknown v3 UUIDs.
+                    chk_st, chk_body = await alexa_raw_get(
+                        "/api/behaviors/entities?skillId=amzn1.ask.1p.smarthome", data
+                    )
+                    if chk_st == 200 and serial in chk_body:
+                        raise Exception(
+                            "Gerät wird vom Alexa Skill verwaltet und kann nicht über "
+                            "die Web-API dauerhaft gelöscht werden. Gerät in der Skill-Quelle "
+                            "entfernen (z.B. Item in openHAB deaktivieren/löschen)."
+                        )
             results.append({"serial": serial, "name": name, "ok": True})
         except Exception as exc:
             results.append({"serial": serial, "name": name, "ok": False, "error": str(exc)})
