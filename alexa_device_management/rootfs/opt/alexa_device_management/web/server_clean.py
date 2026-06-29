@@ -12,7 +12,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "1.1.10"
+APP_VERSION = "1.1.11"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -401,7 +401,7 @@ async def devices_debug(request: web.Request) -> web.Response:
 
 
 async def delete_probe(request: web.Request) -> web.Response:
-    """Diagnostic: probe what Phoenix knows about a device and what DELETE returns."""
+    """Diagnostic: find the right delete endpoint by probing multiple API formats."""
     if not is_configured():
         raise web.HTTPUnauthorized(text="Not configured")
     data = session_data()
@@ -412,31 +412,49 @@ async def delete_probe(request: web.Request) -> web.Response:
     sid = quote(device_id, safe='')
     result: dict[str, Any] = {"id": device_id}
 
-    # 1. Does Phoenix know this device via GET?
-    phoenix_status, phoenix_body = await alexa_raw_get(f"/api/phoenix/appliance/{sid}", data)
-    result["phoenix_get_status"] = phoenix_status
-    result["phoenix_get_body"] = phoenix_body[:500]
-
-    # 2. Perform DELETE and capture full response
-    base = data.get("websiteApiUrl", "https://alexa.amazon.com").rstrip("/")
-    headers = alexa_headers(data)
-    async with aiohttp.ClientSession() as session:
-        async with session.delete(
-            base + f"/api/phoenix/appliance/{sid}", headers=headers, allow_redirects=False
-        ) as resp:
-            delete_body = await resp.text()
-            result["delete_status"] = resp.status
-            result["delete_body"] = delete_body[:500]
-
-    # 3. Re-check: is the device still in behaviors/entities?
+    # 1. Raw device data from behaviors/entities (all fields, not just known ones)
     try:
         payload = await alexa_get_json("/api/behaviors/entities?skillId=amzn1.ask.1p.smarthome", data)
         items = _extract_smart_home_items(payload)
-        still_present = any(item.get("id") == device_id for item in items)
-        result["still_in_behaviors_entities"] = still_present
-        result["total_devices_after"] = len(items)
+        raw_item = next((item for item in items if item.get("id") == device_id), None)
+        if raw_item:
+            legacy = raw_item.get("legacyAppliance") if isinstance(raw_item.get("legacyAppliance"), dict) else {}
+            result["behaviors_raw_keys"] = list(raw_item.keys())
+            result["behaviors_key_values"] = {
+                k: str(v)[:120] for k, v in raw_item.items()
+                if v is not None and k not in ("capabilities", "connections", "relationships", "displayCategories")
+            }
+            result["legacy_appliance_keys"] = list(legacy.keys()) if legacy else []
+            result["legacy_key_values"] = {k: str(v)[:120] for k, v in legacy.items() if v is not None}
+        else:
+            result["behaviors_raw_keys"] = "device not found in behaviors/entities"
     except Exception as exc:
-        result["recheck_error"] = str(exc)
+        result["behaviors_error"] = str(exc)
+
+    # 2. GET probes on multiple URL formats — find which one phoenix recognises
+    arns = [
+        f"/api/phoenix/appliance/{sid}",
+        f"/api/phoenix/appliance/amzn1.alexa.endpoint.{sid}",
+        f"/api/smarthome/appliance/{sid}",
+    ]
+    result["get_probes"] = {}
+    for path in arns:
+        status, body = await alexa_raw_get(path, data)
+        result["get_probes"][path] = {"status": status, "body": body[:200]}
+
+    # 3. GET /api/phoenix/appliance (list all) — shows ID format phoenix actually uses
+    list_status, list_body = await alexa_raw_get("/api/phoenix/appliance", data)
+    result["phoenix_list_status"] = list_status
+    try:
+        parsed = json.loads(list_body)
+        # Show first 3 entries with their ID fields only
+        entries = parsed if isinstance(parsed, list) else parsed.get("entities", parsed.get("appliances", []))
+        result["phoenix_list_sample"] = [
+            {k: v for k, v in (e.items() if isinstance(e, dict) else {}) if k in ("id", "entityId", "applianceId", "friendlyName", "displayName")}
+            for e in (entries[:3] if isinstance(entries, list) else [])
+        ]
+    except Exception:
+        result["phoenix_list_body_raw"] = list_body[:300]
 
     return web.json_response(result)
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.11
+
+- **Debug**: Delete-Probe erweitert — zeigt jetzt alle rohen Felder aus behaviors/entities (inkl. `legacyAppliance`), testet GET auf drei URL-Formate (`/api/phoenix/appliance/`, `/api/smarthome/appliance/`, `amzn1.alexa.endpoint.`-Präfix) und listet die ersten Einträge von `/api/phoenix/appliance` (ohne ID) um das interne ID-Format zu erkennen.
+
 ## 1.1.10
 
 - **Debug**: Neuer Endpoint `/api/delete-probe?id={uuid}` und Button „🔬 Delete-Probe" in der Debug-Seite. Zeigt: (1) Was Phoenix über das Gerät an dieser UUID weiß (GET), (2) Was der DELETE-Aufruf tatsächlich zurückgibt (Status + Body), (3) Ob das Gerät danach noch in der behaviors/entities-Liste vorhanden ist — damit kann man diagnostizieren ob die Löschung auf API-Ebene wirkt oder der HA-Skill das Gerät sofort wieder hinzufügt.
