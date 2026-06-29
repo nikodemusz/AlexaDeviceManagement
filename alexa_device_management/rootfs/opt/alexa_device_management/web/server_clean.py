@@ -12,7 +12,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "1.1.16"
+APP_VERSION = "1.1.17"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -157,6 +157,75 @@ async def alexa_raw_delete(path: str, data: dict[str, Any]) -> tuple[int, str]:
     async with aiohttp.ClientSession() as session:
         async with session.delete(base + path, headers=alexa_headers(data), allow_redirects=False) as resp:
             return resp.status, await resp.text()
+
+
+def _alexa_api_host(retail_domain: str) -> str:
+    """Map retail domain to the correct api.amazonalexa.com regional host."""
+    d = retail_domain.lower()
+    if any(s in d for s in ("amazon.co.jp", "amazon.com.au", "amazon.in")):
+        return "api.fe.amazonalexa.com"
+    if d != "amazon.com" and d.startswith("amazon."):
+        return "api.eu.amazonalexa.com"
+    return "api.amazonalexa.com"
+
+
+async def get_lwa_access_token(data: dict[str, Any]) -> str:
+    """Exchange the stored refresh token for a short-lived LWA bearer access token."""
+    refresh_token = data.get("refreshToken", "")
+    if not refresh_token:
+        raise Exception("Kein refreshToken in der Session — erneut einloggen")
+    state = read_json(pathlib.Path("/data/alexa_login_state.json"))
+    form: dict[str, str] = {
+        "app_name": "Amazon Alexa",
+        "app_version": oh_style_login.API_VERSION,
+        "di.os.name": "iOS",
+        "di.os.version": oh_style_login.DI_OS_VERSION,
+        "di.hw.version": "iPhone",
+        "di.sdk.version": oh_style_login.DI_SDK_VERSION,
+        "source_token": refresh_token,
+        "requested_token_type": "access_token",
+        "source_token_type": "refresh_token",
+    }
+    if state.get("serial"):
+        form["device_serial"] = state["serial"]
+        form["device_type"] = state.get("deviceType", oh_style_login.DEVICE_TYPE)
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            "https://api.amazon.com/auth/token",
+            data=form,
+            headers={"x-amzn-identity-auth-domain": "api.amazon.com"},
+        ) as resp:
+            body = await resp.text()
+            if resp.status != 200:
+                raise Exception(f"Token-Exchange fehlgeschlagen ({resp.status}): {body[:200]}")
+            result = json.loads(body)
+    token = result.get("access_token")
+    if not token:
+        # Some response shapes nest it differently
+        token = (result.get("response", {}).get("tokens", {}).get("bearer") or {}).get("access_token")
+    if not token:
+        raise Exception(f"Kein access_token in der Antwort: {str(result)[:200]}")
+    return token
+
+
+async def forget_v3_endpoint(uuid: str, data: dict[str, Any]) -> None:
+    """Call the official Alexa API forget endpoint for a v3 skill-managed entity."""
+    access_token = await get_lwa_access_token(data)
+    retail_domain = data.get("retailDomain", "amazon.com")
+    api_host = _alexa_api_host(retail_domain)
+    endpoint_id = quote(f"amzn1.alexa.endpoint.{uuid}", safe="")
+    url = f"https://{api_host}/v2/endpoints/{endpoint_id}/forget"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Length": "0",
+        "Accept": "application/json",
+        "User-Agent": f"AmazonWebView/Amazon Alexa/{oh_style_login.API_VERSION}/iOS/{oh_style_login.DI_OS_VERSION}/iPhone",
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, headers=headers, data=b"") as resp:
+            body = await resp.text()
+            if resp.status not in (200, 202, 204):
+                raise Exception(f"Forget-Endpoint {api_host} → HTTP {resp.status}: {body[:200]}")
 
 
 async def alexa_get_json(path: str, data: dict[str, Any]) -> Any:
@@ -382,33 +451,8 @@ async def delete_devices(request: web.Request) -> web.Response:
                     await alexa_delete(f"/api/phoenix/appliance/{quote(appliance_id, safe='')}", data)
                 else:
                     # Pure v3 entity (e.g. openHAB3) — no legacy applianceId.
-                    # Try candidate v3 endpoints in order; stop at first real 2xx.
-                    v3_paths = [
-                        f"/api/phoenix/entity/{sid}",
-                        f"/api/smarthome/v2/entities/{sid}",
-                        f"/api/smarthome/v1/presentation/entities/{sid}",
-                        f"/api/phoenix/appliance/{sid}",
-                        f"/api/phoenix/registration/{sid}",
-                    ]
-                    last_err: str = "No candidate endpoint returned 2xx"
-                    for path in v3_paths:
-                        st, bd = await alexa_raw_delete(path, data)
-                        if st in (200, 204):
-                            break
-                        last_err = f"HTTP {st} on {path}: {bd[:120]}"
-                    else:
-                        raise Exception(last_err)
-                    # Verify the device actually disappeared — phoenix/appliance
-                    # returns 200 as a no-op for unknown v3 UUIDs.
-                    chk_st, chk_body = await alexa_raw_get(
-                        "/api/behaviors/entities?skillId=amzn1.ask.1p.smarthome", data
-                    )
-                    if chk_st == 200 and serial in chk_body:
-                        raise Exception(
-                            "Gerät wird vom Alexa Skill verwaltet und kann nicht über "
-                            "die Web-API dauerhaft gelöscht werden. Gerät in der Skill-Quelle "
-                            "entfernen (z.B. Item in openHAB deaktivieren/löschen)."
-                        )
+                    # Use the official api.amazonalexa.com forget endpoint (same as mobile app).
+                    await forget_v3_endpoint(serial, data)
             results.append({"serial": serial, "name": name, "ok": True})
         except Exception as exc:
             results.append({"serial": serial, "name": name, "ok": False, "error": str(exc)})
@@ -513,8 +557,16 @@ async def delete_probe(request: web.Request) -> web.Response:
         status, body = await alexa_raw_get(path, data)
         result["v3_get_probes"][path] = {"status": status, "body": body[:200]}
 
-    # 5. DELETE probes on all candidates (only when ?delete=1 is passed)
+    # 5. DELETE probes (only when ?delete=1 is passed)
     if request.rel_url.query.get("delete") == "1":
+        # 5a. Official mobile-app forget endpoint via api.amazonalexa.com + LWA Bearer token
+        try:
+            await forget_v3_endpoint(device_id, data)
+            result["forget_endpoint"] = {"ok": True, "api_host": _alexa_api_host(data.get("retailDomain", "amazon.com"))}
+        except Exception as exc:
+            result["forget_endpoint"] = {"ok": False, "error": str(exc)}
+
+        # 5b. Legacy web-API DELETE candidates (kept for comparison)
         all_delete_candidates = [
             f"/api/phoenix/appliance/{sid}",
             f"/api/behaviors/entities/{sid}",
@@ -527,7 +579,7 @@ async def delete_probe(request: web.Request) -> web.Response:
             status, body = await alexa_raw_delete(path, data)
             result["delete_attempts"][path] = {"status": status, "body": body[:200]}
 
-        # Check whether device still exists in behaviors/entities after all DELETEs
+        # Check whether device still exists in behaviors/entities after all attempts
         try:
             payload2 = await alexa_get_json("/api/behaviors/entities?skillId=amzn1.ask.1p.smarthome", data)
             items2 = _extract_smart_home_items(payload2)

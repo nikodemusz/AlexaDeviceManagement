@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.17
+
+- **Feature**: Delete für v3-Smart-Home-Geräte (openHAB3) verwendet jetzt den offiziellen Alexa-API-Endpoint `POST api.amazonalexa.com/v2/endpoints/amzn1.alexa.endpoint.{uuid}/forget` mit LWA Bearer-Token — derselbe Endpoint den die Alexa-App beim Löschen aufruft. Der gespeicherte `refreshToken` aus der Login-Session wird per Token-Exchange gegen einen kurzlebigen Access-Token getauscht. EU-Accounts verwenden `api.eu.amazonalexa.com`, andere Regionen entsprechend.
+- **Debug**: Delete-Probe (`?delete=1`) zeigt jetzt auch das Ergebnis des Forget-Endpoints (`forget_endpoint.ok` + `error` bei Fehler).
+
 ## 1.1.16
 
 - **Debug**: Delete-Probe (`?delete=1`) versucht jetzt 5 zusätzliche Kandidaten: `/api/behaviors/entities/{id}`, `/api/behaviors/entities/{id}?skillId=amzn1.ask.1p.smarthome`, `/api/smarthome/v1/smart-home-devices/{id}`, `/api/phoenix/smarthome/appliance/{id}` — diese Endpoints wurden bisher nicht getestet.
