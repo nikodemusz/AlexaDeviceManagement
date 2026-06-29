@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.18
+
+- **Debug**: Forget-Endpoint wird jetzt in 6 Varianten getestet (ARN-Prefix vs. raw UUID, POST vs. DELETE, leerer Body vs. `{}`). Die Probe zeigt `forget_variants` mit Status jedes Versuchs.
+- **Fix**: Token-Exchange sendet jetzt auch `client_id = device:{deviceId}` und expliziten `Content-Type`-Header.
+- **Fix**: `forget_v3_endpoint` bricht beim ersten erfolgreichen 2xx ab; bei Misserfolg gibt die Fehlermeldung alle getesteten Varianten mit Status aus.
+
 ## 1.1.17
 
 - **Feature**: Delete für v3-Smart-Home-Geräte (openHAB3) verwendet jetzt den offiziellen Alexa-API-Endpoint `POST api.amazonalexa.com/v2/endpoints/amzn1.alexa.endpoint.{uuid}/forget` mit LWA Bearer-Token — derselbe Endpoint den die Alexa-App beim Löschen aufruft. Der gespeicherte `refreshToken` aus der Login-Session wird per Token-Exchange gegen einen kurzlebigen Access-Token getauscht. EU-Accounts verwenden `api.eu.amazonalexa.com`, andere Regionen entsprechend.
