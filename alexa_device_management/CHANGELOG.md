@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.13
+
+- **Bugfix**: Delete für reine v3-Smart-Home-Geräte (openHAB3, keine `legacyAppliance`) probiert jetzt 5 Kandidaten-Endpoints in Reihenfolge und stoppt beim ersten erfolgreichen 2xx: `/api/phoenix/entity/`, `/api/smarthome/v2/entities/`, `/api/smarthome/v1/presentation/entities/`, `/api/phoenix/appliance/`, `/api/phoenix/registration/`. Phoenix v2 behandelte DELETE mit unbekannter UUID als No-Op (immer 200), deshalb galt das Gerät als gelöscht aber tauchte beim Neuladen wieder auf.
+- **Debug**: `delete_probe` GET-Proben auf alle 4 v3-Kandidaten-Endpoints hinzugefügt (Abschnitt `v3_get_probes`).
+- **Debug**: `delete_probe?id=…&delete=1` versucht jetzt DELETE auf alle 5 Kandidaten und prüft danach ob das Gerät noch in behaviors/entities vorhanden ist (`device_still_exists_after_delete`).
+
 ## 1.1.12
 
 - **Bugfix**: Delete für Smart-Home-Geräte (z.B. openHAB) verwendet jetzt die `legacyAppliance.applianceId` (Format `AAA_…`) als Phoenix-Schlüssel, wenn vorhanden — statt der UUID aus der behaviors/entities-API. Phoenix (Alexa Smart Home v2) kennt die v3-UUIDs nicht und hat DELETE deshalb als No-Op behandelt.

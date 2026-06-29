@@ -12,7 +12,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "1.1.12"
+APP_VERSION = "1.1.13"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -146,6 +146,16 @@ async def alexa_raw_get(path: str, data: dict[str, Any]) -> tuple[int, str]:
     base = data.get("websiteApiUrl", "https://alexa.amazon.com").rstrip("/")
     async with aiohttp.ClientSession() as session:
         async with session.get(base + path, headers=alexa_headers(data), allow_redirects=False) as resp:
+            return resp.status, await resp.text()
+
+
+async def alexa_raw_delete(path: str, data: dict[str, Any]) -> tuple[int, str]:
+    """Returns (status, body) without throwing on non-2xx."""
+    if not is_configured():
+        return 0, "Alexa session missing"
+    base = data.get("websiteApiUrl", "https://alexa.amazon.com").rstrip("/")
+    async with aiohttp.ClientSession() as session:
+        async with session.delete(base + path, headers=alexa_headers(data), allow_redirects=False) as resp:
             return resp.status, await resp.text()
 
 
@@ -364,11 +374,32 @@ async def delete_devices(request: web.Request) -> web.Response:
             if source == "echo":
                 await alexa_delete(f"/api/devices-v2/device/{quote(serial, safe='')}", data)
             else:
-                # Prefer legacy applianceId (openHAB/v2 format like AAA_...)
-                # over the behaviors/entities UUID — phoenix uses the legacy format.
                 appliance_id = str(target.get("appliance_id", "")).strip()
-                phoenix_id = appliance_id if (appliance_id and appliance_id != serial) else serial
-                await alexa_delete(f"/api/phoenix/appliance/{quote(phoenix_id, safe='')}", data)
+                sid = quote(serial, safe='')
+                has_legacy_id = appliance_id and appliance_id != serial
+                if has_legacy_id:
+                    # v2 Phoenix device — use the legacy applianceId format (AAA_...)
+                    await alexa_delete(f"/api/phoenix/appliance/{quote(appliance_id, safe='')}", data)
+                else:
+                    # Pure v3 entity (e.g. openHAB3) — no legacy applianceId.
+                    # Try candidate v3 endpoints in order; stop at first real 2xx.
+                    v3_paths = [
+                        f"/api/phoenix/entity/{sid}",
+                        f"/api/smarthome/v2/entities/{sid}",
+                        f"/api/smarthome/v1/presentation/entities/{sid}",
+                        f"/api/phoenix/appliance/{sid}",
+                        f"/api/phoenix/registration/{sid}",
+                    ]
+                    last_err: str = "No candidate endpoint returned 2xx"
+                    deleted = False
+                    for path in v3_paths:
+                        status, body = await alexa_raw_delete(path, data)
+                        if status in (200, 204):
+                            deleted = True
+                            break
+                        last_err = f"HTTP {status} on {path}: {body[:120]}"
+                    if not deleted:
+                        raise Exception(last_err)
             results.append({"serial": serial, "name": name, "ok": True})
         except Exception as exc:
             results.append({"serial": serial, "name": name, "ok": False, "error": str(exc)})
@@ -450,7 +481,6 @@ async def delete_probe(request: web.Request) -> web.Response:
     result["phoenix_list_status"] = list_status
     try:
         parsed = json.loads(list_body)
-        # Show first 3 entries with their ID fields only
         entries = parsed if isinstance(parsed, list) else parsed.get("entities", parsed.get("appliances", []))
         result["phoenix_list_sample"] = [
             {k: v for k, v in (e.items() if isinstance(e, dict) else {}) if k in ("id", "entityId", "applianceId", "friendlyName", "displayName")}
@@ -458,6 +488,37 @@ async def delete_probe(request: web.Request) -> web.Response:
         ]
     except Exception:
         result["phoenix_list_body_raw"] = list_body[:300]
+
+    # 4. GET probes on v3 candidate endpoints
+    v3_candidates = [
+        f"/api/phoenix/entity/{sid}",
+        f"/api/smarthome/v2/entities/{sid}",
+        f"/api/smarthome/v1/presentation/entities/{sid}",
+        f"/api/phoenix/registration/{sid}",
+    ]
+    result["v3_get_probes"] = {}
+    for path in v3_candidates:
+        status, body = await alexa_raw_get(path, data)
+        result["v3_get_probes"][path] = {"status": status, "body": body[:200]}
+
+    # 5. DELETE probes on all candidates (only when ?delete=1 is passed)
+    if request.rel_url.query.get("delete") == "1":
+        all_delete_candidates = [
+            f"/api/phoenix/appliance/{sid}",
+        ] + v3_candidates
+        result["delete_attempts"] = {}
+        for path in all_delete_candidates:
+            status, body = await alexa_raw_delete(path, data)
+            result["delete_attempts"][path] = {"status": status, "body": body[:200]}
+
+        # Check whether device still exists in behaviors/entities after all DELETEs
+        try:
+            payload2 = await alexa_get_json("/api/behaviors/entities?skillId=amzn1.ask.1p.smarthome", data)
+            items2 = _extract_smart_home_items(payload2)
+            result["device_still_exists_after_delete"] = any(item.get("id") == device_id for item in items2)
+            result["total_devices_after_delete"] = len(items2)
+        except Exception as exc:
+            result["post_delete_check_error"] = str(exc)
 
     return web.json_response(result)
 
