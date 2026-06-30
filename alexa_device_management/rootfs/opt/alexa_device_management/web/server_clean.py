@@ -12,7 +12,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "1.1.18"
+APP_VERSION = "1.1.19"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -159,113 +159,61 @@ async def alexa_raw_delete(path: str, data: dict[str, Any]) -> tuple[int, str]:
             return resp.status, await resp.text()
 
 
-def _alexa_api_host(retail_domain: str) -> str:
-    """Map retail domain to the correct api.amazonalexa.com regional host."""
-    d = retail_domain.lower()
-    if any(s in d for s in ("amazon.co.jp", "amazon.com.au", "amazon.in")):
-        return "api.fe.amazonalexa.com"
-    if d != "amazon.com" and d.startswith("amazon."):
-        return "api.eu.amazonalexa.com"
-    return "api.amazonalexa.com"
-
-
-async def get_lwa_access_token(data: dict[str, Any]) -> str:
-    """Exchange the stored refresh token for a short-lived LWA bearer access token."""
-    refresh_token = data.get("refreshToken", "")
-    if not refresh_token:
-        raise Exception("Kein refreshToken in der Session — erneut einloggen")
-    state = read_json(pathlib.Path("/data/alexa_login_state.json"))
-    serial = state.get("serial", "")
-    device_type = state.get("deviceType", oh_style_login.DEVICE_TYPE)
-    device_id = state.get("deviceId", "")
-    form: dict[str, str] = {
-        "app_name": "Amazon Alexa",
-        "app_version": oh_style_login.API_VERSION,
-        "di.os.name": "iOS",
-        "di.os.version": oh_style_login.DI_OS_VERSION,
-        "di.hw.version": "iPhone",
-        "di.sdk.version": oh_style_login.DI_SDK_VERSION,
-        "source_token": refresh_token,
-        "requested_token_type": "access_token",
-        "source_token_type": "refresh_token",
-    }
-    if serial:
-        form["device_serial"] = serial
-        form["device_type"] = device_type
-    if device_id:
-        form["client_id"] = "device:" + device_id
+async def alexa_raw_post(path: str, body: bytes, data: dict[str, Any]) -> tuple[int, str]:
+    """POST with JSON body, cookie auth. Returns (status, body) without throwing."""
+    if not is_configured():
+        return 0, "Alexa session missing"
+    base = data.get("websiteApiUrl", "https://alexa.amazon.com").rstrip("/")
+    headers = alexa_headers(data)
+    headers["Content-Type"] = "application/json; charset=UTF-8"
     async with aiohttp.ClientSession() as session:
-        async with session.post(
-            "https://api.amazon.com/auth/token",
-            data=form,
-            headers={
-                "x-amzn-identity-auth-domain": "api.amazon.com",
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        ) as resp:
-            body = await resp.text()
-            if resp.status != 200:
-                raise Exception(f"Token-Exchange fehlgeschlagen ({resp.status}): {body[:200]}")
-            result = json.loads(body)
-    token = result.get("access_token")
-    if not token:
-        token = (result.get("response", {}).get("tokens", {}).get("bearer") or {}).get("access_token")
-    if not token:
-        raise Exception(f"Kein access_token in der Antwort: {str(result)[:200]}")
-    return token
+        async with session.post(base + path, headers=headers, data=body, allow_redirects=False) as resp:
+            return resp.status, await resp.text()
 
 
-async def _try_forget_variants(uuid: str, access_token: str, api_host: str) -> dict[str, Any]:
-    """Try all known URL/method/body combinations for the forget endpoint. Returns probe dict."""
-    ua = f"AmazonWebView/Amazon Alexa/{oh_style_login.API_VERSION}/iOS/{oh_style_login.DI_OS_VERSION}/iPhone"
-    base_headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Accept": "application/json",
-        "User-Agent": ua,
-    }
-    eid_arn = quote(f"amzn1.alexa.endpoint.{uuid}", safe="")
-    eid_raw = quote(uuid, safe="")
+async def delete_v3_entity_cookie(uuid: str, data: dict[str, Any]) -> dict[str, Any]:
+    """Try all cookie-authenticated candidates to delete a v3 smart home entity.
+
+    Returns a probe dict: keys are "METHOD path", values {"status", "body"}.
+    "_winner" key is set to the first path that returned a genuine 2xx.
+    """
+    sid = quote(uuid, safe="")
+    arn = quote(f"amzn1.alexa.endpoint.{uuid}", safe="")
     results: dict[str, Any] = {}
-    candidates = [
-        ("POST", f"https://{api_host}/v2/endpoints/{eid_arn}/forget", b""),
-        ("POST", f"https://{api_host}/v2/endpoints/{eid_raw}/forget", b""),
-        ("POST", f"https://{api_host}/v2/endpoints/{eid_arn}/forget", b"{}"),
-        ("DELETE", f"https://{api_host}/v2/endpoints/{eid_arn}", b""),
-        ("DELETE", f"https://{api_host}/v2/endpoints/{eid_raw}", b""),
-        ("POST", f"https://{api_host}/v3/endpoints/{eid_arn}/forget", b""),
+
+    # (method, path, body_bytes)
+    candidates: list[tuple[str, str, bytes]] = [
+        # ARN-prefixed phoenix DELETE — different from bare-UUID which is a no-op
+        ("DELETE", f"/api/phoenix/appliance/{arn}", b""),
+        # POST to smarthome with JSON body (DELETE semantics)
+        ("POST", f"/api/smarthome/v1/smart-home-devices/{sid}",
+         json.dumps({"entityId": uuid, "entityType": "APPLIANCE"}).encode()),
+        ("POST", f"/api/smarthome/v1/smart-home-devices/{arn}",
+         json.dumps({"entityId": f"amzn1.alexa.endpoint.{uuid}", "entityType": "APPLIANCE"}).encode()),
+        # Phoenix smarthome appliance POST with applianceId body
+        ("POST", "/api/phoenix/smarthome/appliance",
+         json.dumps({"applianceId": f"amzn1.alexa.endpoint.{uuid}"}).encode()),
+        ("POST", "/api/phoenix/smarthome/appliance",
+         json.dumps({"applianceId": uuid}).encode()),
+        # behaviors/entities with ARN prefix
+        ("DELETE", f"/api/behaviors/entities/{arn}", b""),
+        # behaviors/entities POST forget
+        ("POST", f"/api/behaviors/entities/{sid}/forget", b""),
+        ("POST", f"/api/behaviors/entities/{arn}/forget", b""),
     ]
-    async with aiohttp.ClientSession() as session:
-        for method, url, body in candidates:
-            hdrs = dict(base_headers)
-            hdrs["Content-Length"] = str(len(body))
-            if body:
-                hdrs["Content-Type"] = "application/json"
-            try:
-                async with session.request(method, url, headers=hdrs, data=body) as resp:
-                    rb = await resp.text()
-                    results[f"{method} {url.replace(f'https://{api_host}', '')}"] = {
-                        "status": resp.status, "body": rb[:120],
-                    }
-                    if resp.status in (200, 202, 204):
-                        results["_winner"] = f"{method} {url}"
-                        return results
-            except Exception as exc:
-                results[f"{method} {url.replace(f'https://{api_host}', '')}"] = {"error": str(exc)}
+
+    for method, path, body in candidates:
+        if method == "DELETE":
+            st, bd = await alexa_raw_delete(path, data)
+        else:
+            st, bd = await alexa_raw_post(path, body, data)
+        key = f"{method} {path}"
+        results[key] = {"status": st, "body": bd[:120]}
+        if st in (200, 202, 204):
+            results["_winner"] = key
+            return results
+
     return results
-
-
-async def forget_v3_endpoint(uuid: str, data: dict[str, Any]) -> None:
-    """Call the official Alexa API forget endpoint for a v3 skill-managed entity."""
-    access_token = await get_lwa_access_token(data)
-    retail_domain = data.get("retailDomain", "amazon.com")
-    api_host = _alexa_api_host(retail_domain)
-    variants = await _try_forget_variants(uuid, access_token, api_host)
-    if "_winner" not in variants:
-        # Build a summary of what each candidate returned
-        summary = "; ".join(
-            f"{k}: HTTP {v.get('status', '?')}" for k, v in variants.items() if not k.startswith("_")
-        )
-        raise Exception(f"Alle Forget-Varianten fehlgeschlagen ({api_host}): {summary}")
 
 
 async def alexa_get_json(path: str, data: dict[str, Any]) -> Any:
@@ -491,8 +439,10 @@ async def delete_devices(request: web.Request) -> web.Response:
                     await alexa_delete(f"/api/phoenix/appliance/{quote(appliance_id, safe='')}", data)
                 else:
                     # Pure v3 entity (e.g. openHAB3) — no legacy applianceId.
-                    # Use the official api.amazonalexa.com forget endpoint (same as mobile app).
-                    await forget_v3_endpoint(serial, data)
+                    # Try all cookie-authenticated web-API candidates.
+                    probe = await delete_v3_entity_cookie(serial, data)
+                    if "_winner" not in probe:
+                        raise RuntimeError(f"No delete candidate succeeded for v3 entity {serial!r}. Probe: {probe}")
             results.append({"serial": serial, "name": name, "ok": True})
         except Exception as exc:
             results.append({"serial": serial, "name": name, "ok": False, "error": str(exc)})
@@ -599,30 +549,10 @@ async def delete_probe(request: web.Request) -> web.Response:
 
     # 5. DELETE probes (only when ?delete=1 is passed)
     if request.rel_url.query.get("delete") == "1":
-        # 5a. Official mobile-app forget endpoint via api.amazonalexa.com + LWA Bearer token
-        api_host = _alexa_api_host(data.get("retailDomain", "amazon.com"))
-        try:
-            access_token = await get_lwa_access_token(data)
-            result["forget_token_ok"] = True
-            forget_variants = await _try_forget_variants(device_id, access_token, api_host)
-            result["forget_variants"] = forget_variants
-            result["forget_ok"] = "_winner" in forget_variants
-        except Exception as exc:
-            result["forget_token_ok"] = False
-            result["forget_error"] = str(exc)
-
-        # 5b. Legacy web-API DELETE candidates (kept for comparison)
-        all_delete_candidates = [
-            f"/api/phoenix/appliance/{sid}",
-            f"/api/behaviors/entities/{sid}",
-            f"/api/behaviors/entities/{sid}?skillId=amzn1.ask.1p.smarthome",
-            f"/api/smarthome/v1/smart-home-devices/{sid}",
-            f"/api/phoenix/smarthome/appliance/{sid}",
-        ] + v3_candidates
-        result["delete_attempts"] = {}
-        for path in all_delete_candidates:
-            status, body = await alexa_raw_delete(path, data)
-            result["delete_attempts"][path] = {"status": status, "body": body[:200]}
+        # Cookie-authenticated multi-candidate delete (works for v3 entities like openHAB3)
+        cookie_variants = await delete_v3_entity_cookie(device_id, data)
+        result["cookie_delete_variants"] = cookie_variants
+        result["delete_ok"] = "_winner" in cookie_variants
 
         # Check whether device still exists in behaviors/entities after all attempts
         try:

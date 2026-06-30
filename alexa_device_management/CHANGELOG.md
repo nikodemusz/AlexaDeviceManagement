@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.19
+
+- **Fix**: Delete für v3-Smart-Home-Geräte (openHAB3) verwendet jetzt ausschliesslich cookie-authentifizierte Web-API-Kandidaten statt des LWA Bearer-Token-Flows (`api.amazonalexa.com/forget`), der für Consumer-Token gesperrt ist (403 FORBIDDEN). Es werden 8 Kandidaten der Reihe nach versucht: ARN-gepräfixtes `DELETE /api/phoenix/appliance/`, `POST /api/smarthome/v1/smart-home-devices/` mit Body, `POST /api/phoenix/smarthome/appliance` mit Body (UUID und ARN-Prefix), `DELETE /api/behaviors/entities/` und `POST /api/behaviors/entities/*/forget` (UUID und ARN-Prefix). Der erste 2xx gilt als Erfolg.
+- **Fix**: Dead-Code entfernt: `_alexa_api_host`, `get_lwa_access_token`, `_try_forget_variants`, `forget_v3_endpoint`.
+- **Debug**: Delete-Probe (`?delete=1`) zeigt jetzt `cookie_delete_variants` statt `forget_variants`/`forget_token_ok`.
+
 ## 1.1.18
 
 - **Debug**: Forget-Endpoint wird jetzt in 6 Varianten getestet (ARN-Prefix vs. raw UUID, POST vs. DELETE, leerer Body vs. `{}`). Die Probe zeigt `forget_variants` mit Status jedes Versuchs.
