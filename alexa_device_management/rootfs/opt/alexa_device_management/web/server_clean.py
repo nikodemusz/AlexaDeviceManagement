@@ -12,7 +12,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "1.1.19"
+APP_VERSION = "1.1.20"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -175,17 +175,17 @@ async def delete_v3_entity_cookie(uuid: str, data: dict[str, Any]) -> dict[str, 
     """Try all cookie-authenticated candidates to delete a v3 smart home entity.
 
     Returns a probe dict: keys are "METHOD path", values {"status", "body"}.
-    "_winner" key is set to the first path that returned a genuine 2xx.
+    "_winner" is set only after verifying the device is actually gone from
+    behaviors/entities (phoenix endpoints return 200 as a silent no-op).
     """
     sid = quote(uuid, safe="")
     arn = quote(f"amzn1.alexa.endpoint.{uuid}", safe="")
     results: dict[str, Any] = {}
 
-    # (method, path, body_bytes)
+    # Note: DELETE /api/phoenix/appliance/{uuid} and /{arn} both return 200 as no-ops
+    # for pure v3 entities — excluded from candidates.
     candidates: list[tuple[str, str, bytes]] = [
-        # ARN-prefixed phoenix DELETE — different from bare-UUID which is a no-op
-        ("DELETE", f"/api/phoenix/appliance/{arn}", b""),
-        # POST to smarthome with JSON body (DELETE semantics)
+        # POST to smarthome with JSON body
         ("POST", f"/api/smarthome/v1/smart-home-devices/{sid}",
          json.dumps({"entityId": uuid, "entityType": "APPLIANCE"}).encode()),
         ("POST", f"/api/smarthome/v1/smart-home-devices/{arn}",
@@ -195,9 +195,8 @@ async def delete_v3_entity_cookie(uuid: str, data: dict[str, Any]) -> dict[str, 
          json.dumps({"applianceId": f"amzn1.alexa.endpoint.{uuid}"}).encode()),
         ("POST", "/api/phoenix/smarthome/appliance",
          json.dumps({"applianceId": uuid}).encode()),
-        # behaviors/entities with ARN prefix
+        # behaviors/entities DELETE + POST forget (ARN and bare UUID)
         ("DELETE", f"/api/behaviors/entities/{arn}", b""),
-        # behaviors/entities POST forget
         ("POST", f"/api/behaviors/entities/{sid}/forget", b""),
         ("POST", f"/api/behaviors/entities/{arn}/forget", b""),
     ]
@@ -210,8 +209,19 @@ async def delete_v3_entity_cookie(uuid: str, data: dict[str, Any]) -> dict[str, 
         key = f"{method} {path}"
         results[key] = {"status": st, "body": bd[:120]}
         if st in (200, 202, 204):
-            results["_winner"] = key
-            return results
+            # Verify device is actually gone — some endpoints return 200 as no-op
+            try:
+                payload = await alexa_get_json(
+                    "/api/behaviors/entities?skillId=amzn1.ask.1p.smarthome", data
+                )
+                items = _extract_smart_home_items(payload)
+                device_gone = not any(item.get("id") == uuid for item in items)
+            except Exception:
+                device_gone = False
+            results[key]["verified_deleted"] = device_gone
+            if device_gone:
+                results["_winner"] = key
+                return results
 
     return results
 

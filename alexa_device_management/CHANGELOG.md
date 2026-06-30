@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.20
+
+- **Fix**: `DELETE /api/phoenix/appliance/amzn1.alexa.endpoint.{uuid}` (ARN-Prefix) gibt ebenfalls 200 als No-Op zurück — wie die bare-UUID-Variante. Beide phoenix/appliance-Varianten aus den Kandidaten entfernt. `delete_v3_entity_cookie` prüft jetzt nach jedem 2xx ob das Gerät tatsächlich aus `behaviors/entities` verschwunden ist; erst dann wird `_winner` gesetzt. So werden alle 7 verbleibenden Kandidaten durchprobiert bis eine echte Löschung bestätigt wird.
+
 ## 1.1.19
 
 - **Fix**: Delete für v3-Smart-Home-Geräte (openHAB3) verwendet jetzt ausschliesslich cookie-authentifizierte Web-API-Kandidaten statt des LWA Bearer-Token-Flows (`api.amazonalexa.com/forget`), der für Consumer-Token gesperrt ist (403 FORBIDDEN). Es werden 8 Kandidaten der Reihe nach versucht: ARN-gepräfixtes `DELETE /api/phoenix/appliance/`, `POST /api/smarthome/v1/smart-home-devices/` mit Body, `POST /api/phoenix/smarthome/appliance` mit Body (UUID und ARN-Prefix), `DELETE /api/behaviors/entities/` und `POST /api/behaviors/entities/*/forget` (UUID und ARN-Prefix). Der erste 2xx gilt als Erfolg.
