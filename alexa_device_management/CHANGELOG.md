@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.2
+
+- **Fix**: Umstellung auf die moderne GraphQL-API (`POST /nexus/v1/graphql`). Die Delete-Probe hat gezeigt, dass die komplette Phoenix-v2-API (`GET /api/phoenix*`) für migrierte Accounts nur noch HTTP 400 liefert — Amazon hat sie abgeschaltet; openHAB und alexa-remote2 mussten aus demselben Grund auf GraphQL umstellen. Löschen und Umbenennen lösen das Gerät jetzt zuerst über die GraphQL-`endpoints`-Query auf (liefert `legacyIdentifiers.legacyApplianceIdentifier.applianceId` im Format `SKILL_…`/`AAA_…`) und verwenden diese ID für `DELETE`/`PUT /api/phoenix/appliance/…`. Zusätzlich werden GraphQL-Mutationen (`deleteEndpoint`, `setFriendlyName`, `updateEndpoint`) als Kandidaten probiert. Wie immer gilt ein Versuch erst nach Verifikation gegen `behaviors/entities` als Erfolg.
+- **Debug**: Delete-Probe zeigt neu `graphql_lookup`/`graphql_endpoint` — Status, Fehlermeldungen und den gefundenen Endpoint-Datensatz der GraphQL-API. Falls weiterhin kein Kandidat greift, zeigt diese Ausgabe exakt, welche Schema-Felder die API akzeptiert.
+
 ## 1.2.1
 
 - **Fix**: Löschen von v3-Skill-Geräten (openHAB3) löst jetzt zuerst die echte Phoenix-`applianceId` auf. Phoenix führt Skill-Geräte intern unter einer eigenen ID (Format `SKILL_<base64>_<uuid>` bzw. `AAA_…`), nicht unter der behaviors-UUID — deshalb liefen alle bisherigen Kandidaten auf 404 oder No-Op. Neu: `GET /api/phoenix` wird abgerufen, das verschachtelte (mehrfach JSON-stringifizierte) `networkDetail` durchsucht und das Gerät per `entityId` gefunden; anschließend `DELETE /api/phoenix/appliance/{applianceId}` mit der dort hinterlegten ID — derselbe Weg, den auch alexa-remote2 (ioBroker) verwendet. Die bisherigen Kandidaten bleiben als Fallback, inklusive Verifikation gegen `behaviors/entities`.

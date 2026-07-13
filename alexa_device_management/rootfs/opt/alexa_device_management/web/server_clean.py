@@ -12,7 +12,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.2"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -183,6 +183,77 @@ async def alexa_raw_put(path: str, body: bytes, data: dict[str, Any]) -> tuple[i
             return resp.status, await resp.text()
 
 
+GRAPHQL_PATH = "/nexus/v1/graphql"
+
+ENDPOINTS_QUERY_FULL = """query CustomerSmartHome {
+  endpoints(latencyTolerance: LOW) {
+    items {
+      endpointId
+      friendlyName
+      legacyIdentifiers {
+        chrsIdentifier { entityId }
+        legacyApplianceIdentifier { applianceId applianceKey }
+      }
+    }
+  }
+}"""
+
+ENDPOINTS_QUERY_MINIMAL = """query CustomerSmartHome {
+  endpoints {
+    items {
+      endpointId
+      friendlyName
+      legacyIdentifiers {
+        legacyApplianceIdentifier { applianceId }
+      }
+    }
+  }
+}"""
+
+
+async def alexa_graphql(query: str, variables: dict[str, Any] | None, data: dict[str, Any]) -> tuple[int, Any]:
+    """POST a GraphQL request to the modern /nexus/v1/graphql API."""
+    body = json.dumps({"query": query, "variables": variables or {}}).encode()
+    st, text = await alexa_raw_post(GRAPHQL_PATH, body, data)
+    try:
+        return st, json.loads(text)
+    except json.JSONDecodeError:
+        return st, {"raw": text[:300]}
+
+
+async def graphql_find_endpoint(uuid: str, data: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """Find a smart home endpoint in the GraphQL nexus API by its v3 UUID.
+
+    Amazon is shutting down the legacy phoenix v2 API (GET /api/phoenix now
+    answers 400 for migrated accounts); the GraphQL endpoints query is the
+    replacement and exposes the legacy applianceId via legacyIdentifiers.
+    Returns (endpoint_record_or_None, debug_info).
+    """
+    debug: dict[str, Any] = {}
+    arn = uuid if uuid.startswith("amzn1.alexa.endpoint.") else f"amzn1.alexa.endpoint.{uuid}"
+    for label, query in (("full", ENDPOINTS_QUERY_FULL), ("minimal", ENDPOINTS_QUERY_MINIMAL)):
+        st, payload = await alexa_graphql(query, None, data)
+        info: dict[str, Any] = {"status": st}
+        if isinstance(payload, dict):
+            if payload.get("errors"):
+                info["errors"] = str(payload["errors"])[:300]
+            if "raw" in payload:
+                info["raw"] = payload["raw"][:200]
+            items = (((payload.get("data") or {}).get("endpoints") or {}).get("items")) or []
+            info["item_count"] = len(items)
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                legacy = item.get("legacyIdentifiers") or {}
+                chrs_entity = ((legacy.get("chrsIdentifier") or {}).get("entityId") or "").lower()
+                endpoint_id = str(item.get("endpointId") or "")
+                if endpoint_id == arn or chrs_entity == uuid.lower() or endpoint_id.lower().endswith(uuid.lower()):
+                    debug[label] = info
+                    return item, debug
+        debug[label] = info
+    return None, debug
+
+
 def _walk_phoenix_appliances(value: Any, found: list[dict[str, Any]]) -> None:
     """Collect appliance records from the deeply nested /api/phoenix networkDetail.
 
@@ -242,13 +313,51 @@ async def delete_v3_entity_cookie(uuid: str, data: dict[str, Any]) -> dict[str, 
     behaviors/entities (phoenix endpoints return 200 as a silent no-op).
     """
     sid = quote(uuid, safe="")
-    arn = quote(f"amzn1.alexa.endpoint.{uuid}", safe="")
+    arn_raw = f"amzn1.alexa.endpoint.{uuid}"
+    arn = quote(arn_raw, safe="")
     results: dict[str, Any] = {}
 
     candidates: list[tuple[str, str, bytes]] = []
 
-    # Preferred path: resolve the real Phoenix applianceId (SKILL_..., AAA_...)
-    # via GET /api/phoenix — DELETE with the bare UUID is a silent no-op.
+    # Preferred path: resolve the endpoint via the modern GraphQL nexus API.
+    # legacyIdentifiers.legacyApplianceIdentifier holds the real phoenix
+    # applianceId (SKILL_..., AAA_...) that DELETE /api/phoenix/appliance needs.
+    gql_endpoint, gql_debug = await graphql_find_endpoint(uuid, data)
+    results["_graphql_lookup"] = gql_debug
+    if gql_endpoint:
+        legacy = (gql_endpoint.get("legacyIdentifiers") or {}).get("legacyApplianceIdentifier") or {}
+        gql_debug["endpoint"] = {
+            "endpointId": gql_endpoint.get("endpointId"),
+            "friendlyName": gql_endpoint.get("friendlyName"),
+            "legacyApplianceIdentifier": legacy,
+        }
+        seen: set[str] = set()
+        for key_name in ("applianceId", "applianceKey"):
+            value = str(legacy.get(key_name) or "")
+            if value and value not in seen:
+                seen.add(value)
+                candidates.append((
+                    "DELETE",
+                    f"/api/phoenix/appliance/{quote(value, safe='')} [graphql {key_name}]",
+                    b"",
+                ))
+
+    # GraphQL delete mutations (schema variants; verification decides)
+    candidates += [
+        ("POST", f"{GRAPHQL_PATH} [mutation deleteEndpoint endpointId]",
+         json.dumps({
+             "query": "mutation deleteEndpoint($endpointId: String!) { deleteEndpoint(endpointId: $endpointId) }",
+             "variables": {"endpointId": arn_raw},
+         }).encode()),
+        ("POST", f"{GRAPHQL_PATH} [mutation deleteEndpoint input]",
+         json.dumps({
+             "query": "mutation deleteEndpoint($input: DeleteEndpointInput!) { deleteEndpoint(input: $input) { __typename } }",
+             "variables": {"input": {"endpointId": arn_raw}},
+         }).encode()),
+    ]
+
+    # Legacy path: GET /api/phoenix networkDetail (answers 400 on accounts
+    # already migrated off phoenix v2 — kept for accounts where it still works).
     phoenix_appliance = await phoenix_find_appliance(uuid, data)
     if phoenix_appliance:
         phoenix_id = str(phoenix_appliance.get("applianceId") or "")
@@ -260,7 +369,7 @@ async def delete_v3_entity_cookie(uuid: str, data: dict[str, Any]) -> dict[str, 
         if phoenix_id:
             candidates.append(("DELETE", f"/api/phoenix/appliance/{quote(phoenix_id, safe='')}", b""))
     else:
-        results["_phoenix_lookup"] = "no appliance with this entityId in GET /api/phoenix"
+        results["_phoenix_lookup"] = "no match (GET /api/phoenix unavailable or entityId not present)"
 
     # Note: DELETE /api/phoenix/appliance/{uuid} and /{arn} both return 200 as no-ops
     # for pure v3 entities — excluded from candidates.
@@ -324,8 +433,44 @@ async def rename_smart_home_cookie(
 
     candidates: list[tuple[str, str, bytes]] = []
 
-    # Preferred path: use the real Phoenix applianceId (SKILL_..., AAA_...)
-    # resolved via GET /api/phoenix — endpoints ignore the bare behaviors UUID.
+    # Preferred path: resolve via the modern GraphQL nexus API and use the
+    # legacy phoenix applianceId it reports for PUT /api/phoenix/appliance.
+    gql_endpoint, gql_debug = await graphql_find_endpoint(uuid, data)
+    results["_graphql_lookup"] = gql_debug
+    if gql_endpoint:
+        legacy = (gql_endpoint.get("legacyIdentifiers") or {}).get("legacyApplianceIdentifier") or {}
+        gql_debug["endpoint"] = {
+            "endpointId": gql_endpoint.get("endpointId"),
+            "friendlyName": gql_endpoint.get("friendlyName"),
+            "legacyApplianceIdentifier": legacy,
+        }
+        legacy_id = str(legacy.get("applianceId") or legacy.get("applianceKey") or "")
+        if legacy_id:
+            candidates.append((
+                "PUT", f"/api/phoenix/appliance/{quote(legacy_id, safe='')} [graphql legacy id]",
+                json.dumps({"applianceId": legacy_id, "friendlyName": new_name}).encode(),
+            ))
+
+    # GraphQL rename mutations (schema variants; verification decides)
+    endpoint_id_for_mutation = (
+        str((gql_endpoint or {}).get("endpointId") or "") or arn_raw
+    )
+    candidates += [
+        ("POST", f"{GRAPHQL_PATH} [mutation setFriendlyName]",
+         json.dumps({
+             "query": "mutation setFriendlyName($endpointId: String!, $friendlyName: String!) "
+                      "{ setFriendlyName(endpointId: $endpointId, friendlyName: $friendlyName) }",
+             "variables": {"endpointId": endpoint_id_for_mutation, "friendlyName": new_name},
+         }).encode()),
+        ("POST", f"{GRAPHQL_PATH} [mutation updateEndpoint]",
+         json.dumps({
+             "query": "mutation updateEndpoint($input: UpdateEndpointInput!) "
+                      "{ updateEndpoint(input: $input) { __typename } }",
+             "variables": {"input": {"endpointId": endpoint_id_for_mutation, "friendlyName": new_name}},
+         }).encode()),
+    ]
+
+    # Legacy path: GET /api/phoenix networkDetail (400 on migrated accounts)
     phoenix_appliance = await phoenix_find_appliance(uuid, data)
     if phoenix_appliance:
         phoenix_id = str(phoenix_appliance.get("applianceId") or "")
@@ -361,7 +506,10 @@ async def rename_smart_home_cookie(
 
     for method, path, body in candidates:
         request_path = path.split(" [", 1)[0]
-        st, bd = await alexa_raw_put(request_path, body, data)
+        if method == "POST":
+            st, bd = await alexa_raw_post(request_path, body, data)
+        else:
+            st, bd = await alexa_raw_put(request_path, body, data)
         key = f"{method} {path}"
         results[key] = {"status": st, "body": bd[:120]}
         if st in (200, 202, 204):
@@ -732,7 +880,20 @@ async def delete_probe(request: web.Request) -> web.Response:
     except Exception as exc:
         result["behaviors_error"] = str(exc)
 
-    # 1b. Phoenix networkDetail lookup — the real applianceId phoenix uses
+    # 1b. GraphQL nexus lookup — modern replacement for the phoenix v2 API
+    try:
+        gql_endpoint, gql_debug = await graphql_find_endpoint(device_id, data)
+        result["graphql_lookup"] = gql_debug
+        if gql_endpoint:
+            result["graphql_endpoint"] = {
+                "endpointId": gql_endpoint.get("endpointId"),
+                "friendlyName": gql_endpoint.get("friendlyName"),
+                "legacyIdentifiers": gql_endpoint.get("legacyIdentifiers"),
+            }
+    except Exception as exc:
+        result["graphql_lookup_error"] = str(exc)
+
+    # 1c. Phoenix networkDetail lookup — the real applianceId phoenix uses
     try:
         appliance = await phoenix_find_appliance(device_id, data)
         result["phoenix_network_lookup"] = (
