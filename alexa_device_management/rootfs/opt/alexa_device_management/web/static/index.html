@@ -247,8 +247,89 @@
       }
     }
 
+    async function renameDevice(serial) {
+      const d = _deviceBySerial[serial];
+      if (!d) return;
+      const newName = prompt(`Neuer Name für „${d.name}":`, d.name);
+      if (newName === null) return;
+      const trimmed = newName.trim();
+      if (!trimmed || trimmed === d.name) return;
+      try {
+        const resp = await fetch(`${INGRESS_PATH}/api/devices/rename`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ devices: [{
+            serial: d.serial,
+            source: d.source,
+            name: d.name,
+            new_name: trimmed,
+            device_type: d.source === 'echo' ? (d.raw && d.raw.deviceType) || d.type : '',
+            appliance_id: d.appliance_id || ''
+          }] })
+        });
+        if (!resp.ok) {
+          const errText = await resp.text().catch(() => '');
+          throw new Error(`HTTP ${resp.status}: ${errText}`);
+        }
+        const result = await resp.json();
+        const r = (result.results || [])[0] || {};
+        if (!r.ok) throw new Error(r.error || 'Unbekannter Fehler');
+        d.name = trimmed;
+        const tr = document.querySelector(`.device-table tbody tr[data-serial="${CSS.escape(serial)}"]`);
+        if (tr) tr.querySelector('.col-name').textContent = trimmed;
+        showAlert(`Gerät erfolgreich in „${trimmed}" umbenannt.`, 'success');
+      } catch (err) {
+        showAlert('Fehler beim Umbenennen: ' + err.message, 'error');
+      }
+    }
+
+    function exportCsv() {
+      const visible = [...document.querySelectorAll('.device-table tbody tr')]
+        .filter(tr => tr.style.display !== 'none')
+        .map(tr => _deviceBySerial[tr.dataset.serial])
+        .filter(Boolean);
+      if (!visible.length) { showAlert('Keine Geräte zum Exportieren sichtbar.', 'warning'); return; }
+      const cols = ['name', 'type', 'skill', 'family', 'room', 'serial', 'source', 'online'];
+      const header = ['Name', 'Typ', 'Skill/Connector', 'Hersteller', 'Raum', 'Seriennummer', 'Quelle', 'Online'];
+      const cell = v => {
+        const s = String(v == null ? '' : v);
+        return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      };
+      const lines = [header.join(';')].concat(
+        visible.map(d => cols.map(c => cell(c === 'online' ? (d.online ? 'ja' : 'nein') : d[c])).join(';'))
+      );
+      const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `alexa_geraete_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 100);
+    }
+
     let _allDevices = [];
     let _deviceBySerial = {};
+    let _sortKey = 'name';
+    let _sortDir = 1;
+
+    function sortRows(key) {
+      if (_sortKey === key) { _sortDir = -_sortDir; } else { _sortKey = key; _sortDir = 1; }
+      const tbody = document.querySelector('.device-table tbody');
+      if (!tbody) return;
+      const rows = [...tbody.querySelectorAll('tr')];
+      rows.sort((a, b) => {
+        const da = _deviceBySerial[a.dataset.serial] || {};
+        const db = _deviceBySerial[b.dataset.serial] || {};
+        let va = da[key], vb = db[key];
+        if (key === 'online') { va = da.online ? 1 : 0; vb = db.online ? 1 : 0; return (va - vb) * _sortDir; }
+        return String(va || '').localeCompare(String(vb || ''), 'de', { sensitivity: 'base' }) * _sortDir;
+      });
+      rows.forEach(r => tbody.appendChild(r));
+      document.querySelectorAll('.device-table thead th.sortable').forEach(th => {
+        const arrow = th.querySelector('.sort-arrow');
+        if (arrow) arrow.textContent = th.dataset.sort === _sortKey ? (_sortDir === 1 ? ' ▲' : ' ▼') : '';
+      });
+    }
 
     function distinct(arr, key) {
       return [...new Set(arr.map(d => d[key] || '').filter(Boolean))].sort();
@@ -350,12 +431,16 @@
               ${d.source === 'smart_home' ? '🏠 Smart Home' : '🔵 Echo'}
             </span>
           </td>
+          <td class="col-actions">
+            <button class="btn-icon btn-rename" data-serial="${esc(d.serial)}" title="Gerät umbenennen">✏️</button>
+          </td>
         </tr>
       `).join('');
 
       container.innerHTML = `
         <div class="table-toolbar">
           <span id="selection-info" class="selection-info">${devices.length} Geräte</span>
+          <button id="btn-export" class="btn btn-secondary" onclick="exportCsv()" title="Gefilterte Geräteliste als CSV exportieren">⬇ CSV</button>
           <button id="btn-delete" class="btn btn-danger hidden" onclick="deleteSelected()">🗑 Auswahl löschen</button>
         </div>
         <div class="table-wrapper">
@@ -363,14 +448,15 @@
             <thead>
               <tr>
                 <th class="col-check"><input type="checkbox" id="check-all" title="Alle auswählen" /></th>
-                <th class="col-status" title="Online-Status">●</th>
-                <th class="col-name">Name</th>
-                <th class="col-type">Typ</th>
-                <th class="col-skill">Skill / Connector</th>
-                <th class="col-manufacturer">Hersteller</th>
-                <th class="col-room">Raum</th>
-                <th class="col-serial">Seriennummer</th>
-                <th class="col-source">Quelle</th>
+                <th class="col-status sortable" data-sort="online" title="Online-Status">●<span class="sort-arrow"></span></th>
+                <th class="col-name sortable" data-sort="name">Name<span class="sort-arrow"></span></th>
+                <th class="col-type sortable" data-sort="type">Typ<span class="sort-arrow"></span></th>
+                <th class="col-skill sortable" data-sort="skill">Skill / Connector<span class="sort-arrow"></span></th>
+                <th class="col-manufacturer sortable" data-sort="family">Hersteller<span class="sort-arrow"></span></th>
+                <th class="col-room sortable" data-sort="room">Raum<span class="sort-arrow"></span></th>
+                <th class="col-serial sortable" data-sort="serial">Seriennummer<span class="sort-arrow"></span></th>
+                <th class="col-source sortable" data-sort="source">Quelle<span class="sort-arrow"></span></th>
+                <th class="col-actions"></th>
               </tr>
               <tr class="filter-row">
                 <th class="col-check"></th>
@@ -400,6 +486,7 @@
                     <option value="echo">🔵 Echo</option>
                   </select>
                 </th>
+                <th class="col-actions"></th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -420,6 +507,12 @@
       ['f-name','f-type','f-skill','f-manufacturer','f-room','f-source','f-online'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.addEventListener('input', applyFilters);
+      });
+      document.querySelectorAll('.device-table thead th.sortable').forEach(th => {
+        th.addEventListener('click', () => sortRows(th.dataset.sort));
+      });
+      document.querySelectorAll('.btn-rename').forEach(btn => {
+        btn.addEventListener('click', () => renameDevice(btn.dataset.serial));
       });
       applyFilters();
     }

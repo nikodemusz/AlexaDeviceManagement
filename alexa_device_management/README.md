@@ -16,12 +16,15 @@ This app brings back efficient bulk device management.
 
 ## Features
 
-- View all your Amazon Alexa devices in a clean web UI
-- App overview with add-on version, Alexa region, connection status, and logged-in Amazon user
+- View all your Amazon Alexa devices (Echo and smart home) in a clean, filterable table
+- Rename devices directly from the table (Echo devices and smart home devices)
+- Bulk delete: select multiple devices and remove them from Alexa in one action
+- Sortable columns and per-column filters (name, type, skill/connector, manufacturer, room, source, online status)
+- CSV export of the currently filtered device list
 - Amazon Web Login helper for creating and storing the Alexa web session
+- Built-in debug console (`/debug`) for inspecting the raw Alexa API responses
 - Accessible as a sidebar menu item in Home Assistant OS
 - Runs as a standalone Docker container (no HA integration needed)
-- Configuration via add-on settings (Amazon region and optional session values)
 
 ## Installation
 
@@ -56,9 +59,11 @@ See [CHANGELOG.md](./CHANGELOG.md) for version-specific release notes.
 └─────────────────────────────────────────────────┘
 ```
 
-## Next Steps
+## Feature Status
 
-- [ ] Bulk delete devices
-- [ ] Bulk rename devices
-- [ ] Room management
-- [ ] Do-Not-Disturb controls
+- [x] Device list (Echo + smart home) with filters and sorting
+- [x] Bulk delete devices
+- [x] Rename devices
+- [x] CSV export
+- [ ] Room management (possible future extension)
+- [ ] Do-Not-Disturb controls (possible future extension)

@@ -12,7 +12,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "1.1.20"
+APP_VERSION = "1.2.0"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -171,6 +171,18 @@ async def alexa_raw_post(path: str, body: bytes, data: dict[str, Any]) -> tuple[
             return resp.status, await resp.text()
 
 
+async def alexa_raw_put(path: str, body: bytes, data: dict[str, Any]) -> tuple[int, str]:
+    """PUT with JSON body, cookie auth. Returns (status, body) without throwing."""
+    if not is_configured():
+        return 0, "Alexa session missing"
+    base = data.get("websiteApiUrl", "https://alexa.amazon.com").rstrip("/")
+    headers = alexa_headers(data)
+    headers["Content-Type"] = "application/json; charset=UTF-8"
+    async with aiohttp.ClientSession() as session:
+        async with session.put(base + path, headers=headers, data=body, allow_redirects=False) as resp:
+            return resp.status, await resp.text()
+
+
 async def delete_v3_entity_cookie(uuid: str, data: dict[str, Any]) -> dict[str, Any]:
     """Try all cookie-authenticated candidates to delete a v3 smart home entity.
 
@@ -220,6 +232,61 @@ async def delete_v3_entity_cookie(uuid: str, data: dict[str, Any]) -> dict[str, 
                 device_gone = False
             results[key]["verified_deleted"] = device_gone
             if device_gone:
+                results["_winner"] = key
+                return results
+
+    return results
+
+
+async def rename_smart_home_cookie(
+    uuid: str, appliance_id: str, new_name: str, data: dict[str, Any]
+) -> dict[str, Any]:
+    """Try cookie-authenticated candidates to rename a smart home entity.
+
+    Same strategy as delete_v3_entity_cookie: probe candidates in order and
+    verify against behaviors/entities after each 2xx, because several Alexa
+    endpoints answer 200 as a silent no-op. Returns a probe dict; "_winner"
+    is set once the new name is confirmed.
+    """
+    sid = quote(uuid, safe="")
+    arn_raw = uuid if uuid.startswith("amzn1.alexa.endpoint.") else f"amzn1.alexa.endpoint.{uuid}"
+    arn = quote(arn_raw, safe="")
+    results: dict[str, Any] = {}
+
+    candidates: list[tuple[str, str, bytes]] = [
+        ("PUT", f"/api/phoenix/appliance/{arn}",
+         json.dumps({"applianceId": arn_raw, "friendlyName": new_name}).encode()),
+        ("PUT", f"/api/behaviors/entities/{sid}",
+         json.dumps({"friendlyName": new_name, "displayName": new_name}).encode()),
+        ("PUT", f"/api/behaviors/entities/{arn}",
+         json.dumps({"friendlyName": new_name, "displayName": new_name}).encode()),
+    ]
+    if appliance_id and appliance_id not in (uuid, arn_raw):
+        # v2 Phoenix device with legacy applianceId (AAA_...)
+        candidates.insert(0, (
+            "PUT", f"/api/phoenix/appliance/{quote(appliance_id, safe='')}",
+            json.dumps({"applianceId": appliance_id, "friendlyName": new_name}).encode(),
+        ))
+
+    for method, path, body in candidates:
+        st, bd = await alexa_raw_put(path, body, data)
+        key = f"{method} {path}"
+        results[key] = {"status": st, "body": bd[:120]}
+        if st in (200, 202, 204):
+            try:
+                payload = await alexa_get_json(
+                    "/api/behaviors/entities?skillId=amzn1.ask.1p.smarthome", data
+                )
+                items = _extract_smart_home_items(payload)
+                renamed = any(
+                    item.get("id") == uuid
+                    and new_name in (item.get("displayName"), item.get("friendlyName"))
+                    for item in items
+                )
+            except Exception:
+                renamed = False
+            results[key]["verified_renamed"] = renamed
+            if renamed:
                 results["_winner"] = key
                 return results
 
@@ -456,6 +523,61 @@ async def delete_devices(request: web.Request) -> web.Response:
             results.append({"serial": serial, "name": name, "ok": True})
         except Exception as exc:
             results.append({"serial": serial, "name": name, "ok": False, "error": str(exc)})
+
+    return web.json_response({"results": results})
+
+
+async def rename_devices(request: web.Request) -> web.Response:
+    if not is_configured():
+        raise web.HTTPUnauthorized(text="Alexa session missing")
+    data = session_data()
+    try:
+        body = await request.json()
+    except Exception:
+        raise web.HTTPBadRequest(text="Invalid JSON body")
+    targets = body.get("devices", [])
+    if not isinstance(targets, list) or not targets:
+        raise web.HTTPBadRequest(text="devices list required")
+
+    results: list[dict[str, Any]] = []
+    for target in targets:
+        serial = str(target.get("serial", "")).strip()
+        source = str(target.get("source", "")).strip()
+        new_name = str(target.get("new_name", "")).strip()
+        old_name = str(target.get("name", "")).strip() or serial
+        if not serial or not new_name:
+            results.append({
+                "serial": serial, "name": old_name, "ok": False,
+                "error": "serial und new_name erforderlich",
+            })
+            continue
+        try:
+            if source == "echo":
+                device_type = str(target.get("device_type", "")).strip()
+                if not device_type:
+                    raise RuntimeError("device_type fehlt für Echo-Gerät")
+                payload = json.dumps({
+                    "serialNumber": serial,
+                    "deviceType": device_type,
+                    "accountName": new_name,
+                }).encode()
+                st, bd = await alexa_raw_put(
+                    f"/api/devices-v2/device/{quote(serial, safe='')}", payload, data
+                )
+                if st not in (200, 202, 204):
+                    raise RuntimeError(f"HTTP {st}: {bd[:200]}")
+            else:
+                appliance_id = str(target.get("appliance_id", "")).strip()
+                probe = await rename_smart_home_cookie(serial, appliance_id, new_name, data)
+                if "_winner" not in probe:
+                    raise RuntimeError(
+                        "Umbenennen über die Alexa-Web-API nicht bestätigt. "
+                        "Skill-verwaltete Geräte bitte in der Quelle (z.B. openHAB, "
+                        f"Home Assistant) umbenennen. Probe: {probe}"
+                    )
+            results.append({"serial": serial, "name": old_name, "new_name": new_name, "ok": True})
+        except Exception as exc:
+            results.append({"serial": serial, "name": old_name, "ok": False, "error": str(exc)})
 
     return web.json_response({"results": results})
 
@@ -755,6 +877,7 @@ def create_app() -> web.Application:
     app.router.add_get("/api/devices", devices)
     app.router.add_get("/api/devices-debug", devices_debug)
     app.router.add_post("/api/devices/delete", delete_devices)
+    app.router.add_post("/api/devices/rename", rename_devices)
     app.router.add_get("/api/delete-probe", delete_probe)
     app.router.add_get("/debug", debug_ui)
     app.router.add_get("/api/token-refresh-status", token_refresh_status)

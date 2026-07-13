@@ -262,6 +262,39 @@ body {
 .col-serial { min-width: 140px; }
 .col-serial code { font-size: 11px; color: #636e72; }
 .col-source { min-width: 110px; }
+.col-actions { width: 44px; text-align: center; }
+
+/* Sortable headers */
+.device-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.device-table th.sortable:hover {
+  color: #0098c8;
+}
+
+.sort-arrow {
+  font-size: 9px;
+  color: #00caff;
+}
+
+/* Row action buttons */
+.btn-icon {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  opacity: 0.55;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.btn-icon:hover {
+  opacity: 1;
+  background: #e8f4fd;
+}
 
 .online-dot {
   display: inline-block;

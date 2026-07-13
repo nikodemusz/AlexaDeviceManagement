@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0
+
+- **Feature**: Geräte umbenennen — neuer ✏️-Button in jeder Tabellenzeile. Echo-Geräte werden über `PUT /api/devices-v2/device/{serial}` (mit `accountName`) umbenannt. Smart-Home-Geräte werden nach dem bewährten Kandidaten-Prinzip über cookie-authentifizierte Web-API-Endpunkte versucht (`PUT /api/phoenix/appliance/…`, `PUT /api/behaviors/entities/…`); nach jedem 2xx wird gegen `behaviors/entities` verifiziert, dass der neue Name wirklich übernommen wurde. Falls kein Kandidat bestätigt wird, erscheint der Hinweis, das Gerät in der Skill-Quelle (z.B. openHAB, Home Assistant) umzubenennen.
+- **Feature**: Spalten-Sortierung — Klick auf einen Spaltenkopf sortiert die Tabelle auf-/absteigend (Name, Typ, Skill, Hersteller, Raum, Seriennummer, Quelle, Online-Status). Der aktive Sortierpfeil (▲/▼) wird im Header angezeigt.
+- **Feature**: CSV-Export — neuer Button „⬇ CSV" in der Tabellen-Toolbar exportiert die aktuell gefilterte Geräteliste als Semikolon-getrennte CSV-Datei (UTF-8 mit BOM, direkt in Excel/LibreOffice öffenbar).
+- **Cleanup**: Alte Legacy-Serverdateien entfernt (`server.py`, `server_patched.py`, `server_patched_entry.py`, `server_app_entry.py`, `alexa_openhab_login.py`, `login_result_patch.py`). Aktiv sind nur noch `server_clean.py` und `oh_style_login.py`; der Dockerfile-Normalisierungsblock für die historischen Syntax-Artefakte wurde durch einen einfachen `py_compile`-Check ersetzt.
+- **Docs**: `DOCS.md` und `README.md` auf den aktuellen Stand gebracht — die veraltete LWA-/OAuth-Konfigurationsanleitung wurde durch den tatsächlichen Alexa-Web-Login-Ablauf ersetzt; Funktionsliste aktualisiert.
+
 ## 1.1.20
 
 - **Fix**: `DELETE /api/phoenix/appliance/amzn1.alexa.endpoint.{uuid}` (ARN-Prefix) gibt ebenfalls 200 als No-Op zurück — wie die bare-UUID-Variante. Beide phoenix/appliance-Varianten aus den Kandidaten entfernt. `delete_v3_entity_cookie` prüft jetzt nach jedem 2xx ob das Gerät tatsächlich aus `behaviors/entities` verschwunden ist; erst dann wird `_winner` gesetzt. So werden alle 7 verbleibenden Kandidaten durchprobiert bis eine echte Löschung bestätigt wird.
