@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 from typing import Any
 from urllib.parse import quote
 
@@ -12,7 +13,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.2.3"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -185,14 +186,17 @@ async def alexa_raw_put(path: str, body: bytes, data: dict[str, Any]) -> tuple[i
 
 GRAPHQL_PATH = "/nexus/v1/graphql"
 
+# Schema facts learned from live validation errors (v1.2.2 probes):
+# - endpoints takes no latencyTolerance argument
+# - LegacyIdentifiers has no legacyApplianceIdentifier field
+# - Mutation has no deleteEndpoint field / DeleteEndpointInput type
 ENDPOINTS_QUERY_FULL = """query CustomerSmartHome {
-  endpoints(latencyTolerance: LOW) {
+  endpoints {
     items {
       endpointId
       friendlyName
       legacyIdentifiers {
         chrsIdentifier { entityId }
-        legacyApplianceIdentifier { applianceId applianceKey }
       }
     }
   }
@@ -203,9 +207,6 @@ ENDPOINTS_QUERY_MINIMAL = """query CustomerSmartHome {
     items {
       endpointId
       friendlyName
-      legacyIdentifiers {
-        legacyApplianceIdentifier { applianceId }
-      }
     }
   }
 }"""
@@ -219,6 +220,158 @@ async def alexa_graphql(query: str, variables: dict[str, Any] | None, data: dict
         return st, json.loads(text)
     except json.JSONDecodeError:
         return st, {"raw": text[:300]}
+
+
+_TYPE_REF = "kind name ofType { kind name ofType { kind name ofType { kind name } } }"
+
+INTROSPECT_TYPE_QUERY = (
+    "query Introspect($name: String!) { __type(name: $name) { name kind "
+    "fields { name args { name type { " + _TYPE_REF + " } } type { " + _TYPE_REF + " } } "
+    "inputFields { name type { " + _TYPE_REF + " } } } }"
+)
+
+_GQL_TYPE_CACHE: dict[str, Any] = {}
+
+
+async def gql_introspect_type(type_name: str, data: dict[str, Any]) -> dict[str, Any] | None:
+    """Introspect a GraphQL type; returns its fields/inputFields or None."""
+    if type_name in _GQL_TYPE_CACHE:
+        return _GQL_TYPE_CACHE[type_name]
+    st, payload = await alexa_graphql(INTROSPECT_TYPE_QUERY, {"name": type_name}, data)
+    if st != 200 or not isinstance(payload, dict) or payload.get("errors"):
+        return None
+    type_info = (payload.get("data") or {}).get("__type")
+    if isinstance(type_info, dict):
+        _GQL_TYPE_CACHE[type_name] = type_info
+        return type_info
+    return None
+
+
+def _unwrap_type(type_ref: Any) -> dict[str, Any]:
+    """Innermost named type of a TypeRef (skips NON_NULL / LIST wrappers)."""
+    while isinstance(type_ref, dict) and type_ref.get("ofType") and not type_ref.get("name"):
+        type_ref = type_ref["ofType"]
+    return type_ref if isinstance(type_ref, dict) else {}
+
+
+def _type_has_list(type_ref: Any) -> bool:
+    while isinstance(type_ref, dict):
+        if type_ref.get("kind") == "LIST":
+            return True
+        type_ref = type_ref.get("ofType")
+    return False
+
+
+def _render_type(type_ref: dict[str, Any]) -> str:
+    kind = type_ref.get("kind")
+    if kind == "NON_NULL":
+        return _render_type(type_ref.get("ofType") or {}) + "!"
+    if kind == "LIST":
+        return "[" + _render_type(type_ref.get("ofType") or {}) + "]"
+    return str(type_ref.get("name") or "String")
+
+
+def _fill_value(field_name: str, type_ref: dict[str, Any], values: dict[str, str]) -> Any:
+    """Pick a value for a scalar arg/input field based on its name."""
+    base = _unwrap_type(type_ref)
+    if base.get("kind") != "SCALAR":
+        return None
+    lname = field_name.lower()
+    value: Any = None
+    if (lname == "id" or lname.endswith("id") or lname.endswith("ids")) and "id" in values:
+        value = values["id"]
+    elif "name" in lname and "name" in values:
+        value = values["name"]
+    if value is not None and _type_has_list(type_ref):
+        value = [value]
+    return value
+
+
+def _contains_value(container: Any, needle: str) -> bool:
+    if isinstance(container, dict):
+        return any(_contains_value(v, needle) for v in container.values())
+    if isinstance(container, list):
+        return any(_contains_value(v, needle) for v in container)
+    return container == needle
+
+
+async def gql_execute_mutation(
+    field: dict[str, Any],
+    values: dict[str, str],
+    require: tuple[str, ...],
+    data: dict[str, Any],
+) -> tuple[bool, dict[str, Any]]:
+    """Build and execute a mutation from its introspected signature.
+
+    Fills id-like args/input fields with values["id"] and name-like ones with
+    values["name"]. Safety: refuses to execute unless every semantic in
+    `require` is actually bound into the variables (prevents e.g. running a
+    no-arg deleteAll-style mutation).
+    """
+    declarations: list[str] = []
+    arg_assignments: list[str] = []
+    variables: dict[str, Any] = {}
+
+    for index, arg in enumerate(field.get("args") or []):
+        type_ref = arg.get("type") or {}
+        base = _unwrap_type(type_ref)
+        required = type_ref.get("kind") == "NON_NULL"
+        value: Any = None
+        if base.get("kind") == "INPUT_OBJECT":
+            input_info = await gql_introspect_type(str(base.get("name")), data)
+            input_obj: dict[str, Any] = {}
+            fillable = True
+            for input_field in (input_info or {}).get("inputFields") or []:
+                iref = input_field.get("type") or {}
+                ivalue = _fill_value(str(input_field.get("name") or ""), iref, values)
+                if ivalue is not None:
+                    input_obj[str(input_field["name"])] = ivalue
+                elif iref.get("kind") == "NON_NULL":
+                    fillable = False
+            if not fillable:
+                if required:
+                    return False, {"skipped": f"required input field of {base.get('name')} not fillable"}
+                continue
+            if input_obj:
+                value = [input_obj] if _type_has_list(type_ref) else input_obj
+        else:
+            value = _fill_value(str(arg.get("name") or ""), type_ref, values)
+        if value is None:
+            if required:
+                return False, {"skipped": f"required arg {arg.get('name')} not fillable"}
+            continue
+        var_name = f"v{index}"
+        declarations.append(f"${var_name}: {_render_type(type_ref)}")
+        arg_assignments.append(f"{arg['name']}: ${var_name}")
+        variables[var_name] = value
+
+    for semantic in require:
+        if semantic in values and not _contains_value(variables, values[semantic]):
+            return False, {"skipped": f"safety: {semantic} value not bound to any argument"}
+
+    return_base = _unwrap_type(field.get("type") or {})
+    selection = " { __typename }" if return_base.get("kind") in ("OBJECT", "INTERFACE", "UNION") else ""
+    declaration_str = f"({', '.join(declarations)})" if declarations else ""
+    assignment_str = f"({', '.join(arg_assignments)})" if arg_assignments else ""
+    query = f"mutation M{declaration_str} {{ {field['name']}{assignment_str}{selection} }}"
+
+    st, payload = await alexa_graphql(query, variables, data)
+    accepted = (
+        st == 200 and isinstance(payload, dict)
+        and not payload.get("errors") and bool(payload.get("data"))
+    )
+    return accepted, {"query": query, "status": st, "response": str(payload)[:300]}
+
+
+async def gql_find_mutations(pattern: str, data: dict[str, Any]) -> list[dict[str, Any]]:
+    """All Mutation fields whose name matches the regex pattern."""
+    mutation_type = await gql_introspect_type("Mutation", data)
+    if not mutation_type:
+        return []
+    return [
+        field for field in mutation_type.get("fields") or []
+        if re.search(pattern, str(field.get("name") or ""), re.IGNORECASE)
+    ]
 
 
 async def graphql_find_endpoint(uuid: str, data: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any]]:
@@ -305,6 +458,34 @@ async def phoenix_find_appliance(uuid: str, data: dict[str, Any]) -> dict[str, A
     return None
 
 
+async def _v3_entity_gone(uuid: str, data: dict[str, Any]) -> bool:
+    """True when the entity no longer appears in behaviors/entities."""
+    try:
+        payload = await alexa_get_json(
+            "/api/behaviors/entities?skillId=amzn1.ask.1p.smarthome", data
+        )
+        items = _extract_smart_home_items(payload)
+        return not any(item.get("id") == uuid for item in items)
+    except Exception:
+        return False
+
+
+async def _v3_entity_named(uuid: str, new_name: str, data: dict[str, Any]) -> bool:
+    """True when the entity now carries new_name in behaviors/entities."""
+    try:
+        payload = await alexa_get_json(
+            "/api/behaviors/entities?skillId=amzn1.ask.1p.smarthome", data
+        )
+        items = _extract_smart_home_items(payload)
+        return any(
+            item.get("id") == uuid
+            and new_name in (item.get("displayName"), item.get("friendlyName"))
+            for item in items
+        )
+    except Exception:
+        return False
+
+
 async def delete_v3_entity_cookie(uuid: str, data: dict[str, Any]) -> dict[str, Any]:
     """Try all cookie-authenticated candidates to delete a v3 smart home entity.
 
@@ -319,42 +500,41 @@ async def delete_v3_entity_cookie(uuid: str, data: dict[str, Any]) -> dict[str, 
 
     candidates: list[tuple[str, str, bytes]] = []
 
-    # Preferred path: resolve the endpoint via the modern GraphQL nexus API.
-    # legacyIdentifiers.legacyApplianceIdentifier holds the real phoenix
-    # applianceId (SKILL_..., AAA_...) that DELETE /api/phoenix/appliance needs.
+    # Resolve the exact endpointId via the GraphQL nexus API.
     gql_endpoint, gql_debug = await graphql_find_endpoint(uuid, data)
     results["_graphql_lookup"] = gql_debug
+    endpoint_id = arn_raw
     if gql_endpoint:
-        legacy = (gql_endpoint.get("legacyIdentifiers") or {}).get("legacyApplianceIdentifier") or {}
+        endpoint_id = str(gql_endpoint.get("endpointId") or arn_raw)
         gql_debug["endpoint"] = {
-            "endpointId": gql_endpoint.get("endpointId"),
+            "endpointId": endpoint_id,
             "friendlyName": gql_endpoint.get("friendlyName"),
-            "legacyApplianceIdentifier": legacy,
+            "legacyIdentifiers": gql_endpoint.get("legacyIdentifiers"),
         }
-        seen: set[str] = set()
-        for key_name in ("applianceId", "applianceKey"):
-            value = str(legacy.get(key_name) or "")
-            if value and value not in seen:
-                seen.add(value)
-                candidates.append((
-                    "DELETE",
-                    f"/api/phoenix/appliance/{quote(value, safe='')} [graphql {key_name}]",
-                    b"",
-                ))
 
-    # GraphQL delete mutations (schema variants; verification decides)
-    candidates += [
-        ("POST", f"{GRAPHQL_PATH} [mutation deleteEndpoint endpointId]",
-         json.dumps({
-             "query": "mutation deleteEndpoint($endpointId: String!) { deleteEndpoint(endpointId: $endpointId) }",
-             "variables": {"endpointId": arn_raw},
-         }).encode()),
-        ("POST", f"{GRAPHQL_PATH} [mutation deleteEndpoint input]",
-         json.dumps({
-             "query": "mutation deleteEndpoint($input: DeleteEndpointInput!) { deleteEndpoint(input: $input) { __typename } }",
-             "variables": {"input": {"endpointId": arn_raw}},
-         }).encode()),
-    ]
+    # Schema-driven GraphQL mutations: introspect Mutation, pick delete-ish
+    # fields, build the call from the introspected argument types. Only
+    # executed when the endpoint id is actually bound into the variables.
+    delete_fields = await gql_find_mutations(
+        r"(delete|forget|remove|unlink|deregister)", data
+    )
+    delete_fields = [
+        f for f in delete_fields
+        if re.search(r"endpoint|appliance|device|entity|smarthome", str(f.get("name") or ""), re.IGNORECASE)
+    ][:6]
+    results["_graphql_delete_mutations_found"] = [str(f.get("name")) for f in delete_fields]
+    for field in delete_fields:
+        for id_value in dict.fromkeys([endpoint_id, uuid]):
+            accepted, info = await gql_execute_mutation(
+                field, {"id": id_value}, ("id",), data
+            )
+            results[f"GQL {field['name']} [{id_value[:40]}]"] = info
+            if accepted:
+                gone = await _v3_entity_gone(uuid, data)
+                info["verified_deleted"] = gone
+                if gone:
+                    results["_winner"] = f"GQL {field['name']}"
+                    return results
 
     # Legacy path: GET /api/phoenix networkDetail (answers 400 on accounts
     # already migrated off phoenix v2 — kept for accounts where it still works).
@@ -433,42 +613,35 @@ async def rename_smart_home_cookie(
 
     candidates: list[tuple[str, str, bytes]] = []
 
-    # Preferred path: resolve via the modern GraphQL nexus API and use the
-    # legacy phoenix applianceId it reports for PUT /api/phoenix/appliance.
+    # Resolve the exact endpointId via the GraphQL nexus API.
     gql_endpoint, gql_debug = await graphql_find_endpoint(uuid, data)
     results["_graphql_lookup"] = gql_debug
+    endpoint_id = str((gql_endpoint or {}).get("endpointId") or "") or arn_raw
     if gql_endpoint:
-        legacy = (gql_endpoint.get("legacyIdentifiers") or {}).get("legacyApplianceIdentifier") or {}
         gql_debug["endpoint"] = {
-            "endpointId": gql_endpoint.get("endpointId"),
+            "endpointId": endpoint_id,
             "friendlyName": gql_endpoint.get("friendlyName"),
-            "legacyApplianceIdentifier": legacy,
+            "legacyIdentifiers": gql_endpoint.get("legacyIdentifiers"),
         }
-        legacy_id = str(legacy.get("applianceId") or legacy.get("applianceKey") or "")
-        if legacy_id:
-            candidates.append((
-                "PUT", f"/api/phoenix/appliance/{quote(legacy_id, safe='')} [graphql legacy id]",
-                json.dumps({"applianceId": legacy_id, "friendlyName": new_name}).encode(),
-            ))
 
-    # GraphQL rename mutations (schema variants; verification decides)
-    endpoint_id_for_mutation = (
-        str((gql_endpoint or {}).get("endpointId") or "") or arn_raw
+    # Schema-driven GraphQL rename mutations: only executed when BOTH the
+    # endpoint id and the new name are bound into the variables.
+    rename_fields = await gql_find_mutations(
+        r"rename|friendlyname|((set|update|change).*(name|endpoint|appliance))", data
     )
-    candidates += [
-        ("POST", f"{GRAPHQL_PATH} [mutation setFriendlyName]",
-         json.dumps({
-             "query": "mutation setFriendlyName($endpointId: String!, $friendlyName: String!) "
-                      "{ setFriendlyName(endpointId: $endpointId, friendlyName: $friendlyName) }",
-             "variables": {"endpointId": endpoint_id_for_mutation, "friendlyName": new_name},
-         }).encode()),
-        ("POST", f"{GRAPHQL_PATH} [mutation updateEndpoint]",
-         json.dumps({
-             "query": "mutation updateEndpoint($input: UpdateEndpointInput!) "
-                      "{ updateEndpoint(input: $input) { __typename } }",
-             "variables": {"input": {"endpointId": endpoint_id_for_mutation, "friendlyName": new_name}},
-         }).encode()),
-    ]
+    rename_fields = rename_fields[:6]
+    results["_graphql_rename_mutations_found"] = [str(f.get("name")) for f in rename_fields]
+    for field in rename_fields:
+        accepted, info = await gql_execute_mutation(
+            field, {"id": endpoint_id, "name": new_name}, ("id", "name"), data
+        )
+        results[f"GQL {field['name']}"] = info
+        if accepted:
+            renamed = await _v3_entity_named(uuid, new_name, data)
+            info["verified_renamed"] = renamed
+            if renamed:
+                results["_winner"] = f"GQL {field['name']}"
+                return results
 
     # Legacy path: GET /api/phoenix networkDetail (400 on migrated accounts)
     phoenix_appliance = await phoenix_find_appliance(uuid, data)
@@ -893,7 +1066,27 @@ async def delete_probe(request: web.Request) -> web.Response:
     except Exception as exc:
         result["graphql_lookup_error"] = str(exc)
 
-    # 1c. Phoenix networkDetail lookup — the real applianceId phoenix uses
+    # 1c. GraphQL schema discovery — which mutations/fields actually exist
+    try:
+        mutation_type = await gql_introspect_type("Mutation", data)
+        if mutation_type:
+            names = sorted(str(f.get("name") or "") for f in mutation_type.get("fields") or [])
+            result["graphql_mutation_count"] = len(names)
+            result["graphql_mutations_device_related"] = [
+                n for n in names
+                if re.search(r"endpoint|appliance|device|entity|smart|name", n, re.IGNORECASE)
+            ][:60]
+        else:
+            result["graphql_mutation_introspection"] = "unavailable (introspection disabled or error)"
+        for type_name, key in (("LegacyIdentifiers", "graphql_legacy_identifiers_fields"),
+                               ("Endpoint", "graphql_endpoint_fields")):
+            type_info = await gql_introspect_type(type_name, data)
+            if type_info:
+                result[key] = [str(f.get("name")) for f in (type_info.get("fields") or [])][:60]
+    except Exception as exc:
+        result["graphql_introspection_error"] = str(exc)
+
+    # 1d. Phoenix networkDetail lookup — the real applianceId phoenix uses
     try:
         appliance = await phoenix_find_appliance(device_id, data)
         result["phoenix_network_lookup"] = (

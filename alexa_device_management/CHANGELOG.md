@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.3
+
+- **Feature**: Schema-gesteuertes Löschen/Umbenennen per GraphQL-Introspection. Die 1.2.2-Probe hat gezeigt, dass die Nexus-API lebt, aber ein anderes Schema hat als vermutet (`deleteEndpoint` existiert nicht, `LegacyIdentifiers` hat kein `legacyApplianceIdentifier`). Statt weiter Namen zu raten, fragt das Add-on jetzt das Schema zur Laufzeit ab (`__type`-Introspection): Es sucht alle Mutationen, deren Name nach Löschen (`delete|forget|remove|unlink|deregister` + `endpoint|appliance|device|entity`) bzw. Umbenennen (`rename|friendlyName|set/update…name`) aussieht, konstruiert den Aufruf automatisch aus den introspektierten Argument-Typen (inkl. Input-Objekten und Listen) und führt ihn aus — mit Sicherheitsnetz: Eine Mutation wird nur ausgeführt, wenn die Endpoint-ID (und beim Umbenennen der neue Name) nachweislich in die Variablen gebunden wurde; parameterlose „deleteAll"-artige Mutationen können so nie ausgelöst werden. Erfolg zählt weiterhin erst nach Verifikation gegen `behaviors/entities`.
+- **Fix**: Die `endpoints`-Query verwendet nur noch Felder, die das Live-Schema laut Validierungsfehlern kennt (kein `latencyTolerance`, kein `legacyApplianceIdentifier`).
+- **Debug**: Delete-Probe zeigt neu die Schema-Discovery: Anzahl und geräte-relevante Namen aller verfügbaren Mutationen (`graphql_mutations_device_related`), Felder von `LegacyIdentifiers` und `Endpoint` sowie pro versuchter Mutation die generierte Query und die Antwort.
+
 ## 1.2.2
 
 - **Fix**: Umstellung auf die moderne GraphQL-API (`POST /nexus/v1/graphql`). Die Delete-Probe hat gezeigt, dass die komplette Phoenix-v2-API (`GET /api/phoenix*`) für migrierte Accounts nur noch HTTP 400 liefert — Amazon hat sie abgeschaltet; openHAB und alexa-remote2 mussten aus demselben Grund auf GraphQL umstellen. Löschen und Umbenennen lösen das Gerät jetzt zuerst über die GraphQL-`endpoints`-Query auf (liefert `legacyIdentifiers.legacyApplianceIdentifier.applianceId` im Format `SKILL_…`/`AAA_…`) und verwenden diese ID für `DELETE`/`PUT /api/phoenix/appliance/…`. Zusätzlich werden GraphQL-Mutationen (`deleteEndpoint`, `setFriendlyName`, `updateEndpoint`) als Kandidaten probiert. Wie immer gilt ein Versuch erst nach Verifikation gegen `behaviors/entities` als Erfolg.
