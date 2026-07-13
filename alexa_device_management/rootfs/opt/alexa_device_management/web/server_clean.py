@@ -12,7 +12,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -183,6 +183,57 @@ async def alexa_raw_put(path: str, body: bytes, data: dict[str, Any]) -> tuple[i
             return resp.status, await resp.text()
 
 
+def _walk_phoenix_appliances(value: Any, found: list[dict[str, Any]]) -> None:
+    """Collect appliance records from the deeply nested /api/phoenix networkDetail.
+
+    Several layers of that payload are stringified JSON, so strings that look
+    like JSON are parsed and walked as well.
+    """
+    if isinstance(value, dict):
+        if "applianceId" in value and (
+            "entityId" in value or "applianceKey" in value or "friendlyName" in value
+        ):
+            found.append(value)
+            return
+        for item in value.values():
+            _walk_phoenix_appliances(item, found)
+    elif isinstance(value, list):
+        for item in value:
+            _walk_phoenix_appliances(item, found)
+    elif isinstance(value, str) and value[:1] in ("{", "["):
+        try:
+            _walk_phoenix_appliances(json.loads(value), found)
+        except (json.JSONDecodeError, RecursionError):
+            pass
+
+
+async def phoenix_find_appliance(uuid: str, data: dict[str, Any]) -> dict[str, Any] | None:
+    """Look up the real Phoenix appliance record for a v3 entity UUID.
+
+    Phoenix stores skill devices under its own applianceId (e.g.
+    "SKILL_<base64>_<uuid>" or "AAA_..."), not under the bare behaviors UUID.
+    GET /api/phoenix returns networkDetail with all appliances including their
+    entityId — the only reliable way to map UUID -> deletable applianceId.
+    """
+    st, body = await alexa_raw_get("/api/phoenix", data)
+    if st != 200:
+        return None
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return None
+    found: list[dict[str, Any]] = []
+    _walk_phoenix_appliances(payload, found)
+    uuid_lower = uuid.lower()
+    for appliance in found:
+        entity_id = str(appliance.get("entityId") or "").lower()
+        appliance_key = str(appliance.get("applianceKey") or "").lower()
+        appliance_id = str(appliance.get("applianceId") or "")
+        if uuid_lower in (entity_id, appliance_key) or uuid_lower in appliance_id.lower():
+            return appliance
+    return None
+
+
 async def delete_v3_entity_cookie(uuid: str, data: dict[str, Any]) -> dict[str, Any]:
     """Try all cookie-authenticated candidates to delete a v3 smart home entity.
 
@@ -194,18 +245,35 @@ async def delete_v3_entity_cookie(uuid: str, data: dict[str, Any]) -> dict[str, 
     arn = quote(f"amzn1.alexa.endpoint.{uuid}", safe="")
     results: dict[str, Any] = {}
 
+    candidates: list[tuple[str, str, bytes]] = []
+
+    # Preferred path: resolve the real Phoenix applianceId (SKILL_..., AAA_...)
+    # via GET /api/phoenix — DELETE with the bare UUID is a silent no-op.
+    phoenix_appliance = await phoenix_find_appliance(uuid, data)
+    if phoenix_appliance:
+        phoenix_id = str(phoenix_appliance.get("applianceId") or "")
+        results["_phoenix_lookup"] = {
+            "applianceId": phoenix_id,
+            "entityId": phoenix_appliance.get("entityId"),
+            "friendlyName": phoenix_appliance.get("friendlyName"),
+        }
+        if phoenix_id:
+            candidates.append(("DELETE", f"/api/phoenix/appliance/{quote(phoenix_id, safe='')}", b""))
+    else:
+        results["_phoenix_lookup"] = "no appliance with this entityId in GET /api/phoenix"
+
     # Note: DELETE /api/phoenix/appliance/{uuid} and /{arn} both return 200 as no-ops
     # for pure v3 entities — excluded from candidates.
-    candidates: list[tuple[str, str, bytes]] = [
+    candidates += [
         # POST to smarthome with JSON body
         ("POST", f"/api/smarthome/v1/smart-home-devices/{sid}",
          json.dumps({"entityId": uuid, "entityType": "APPLIANCE"}).encode()),
         ("POST", f"/api/smarthome/v1/smart-home-devices/{arn}",
          json.dumps({"entityId": f"amzn1.alexa.endpoint.{uuid}", "entityType": "APPLIANCE"}).encode()),
         # Phoenix smarthome appliance POST with applianceId body
-        ("POST", "/api/phoenix/smarthome/appliance",
+        ("POST", "/api/phoenix/smarthome/appliance [arn body]",
          json.dumps({"applianceId": f"amzn1.alexa.endpoint.{uuid}"}).encode()),
-        ("POST", "/api/phoenix/smarthome/appliance",
+        ("POST", "/api/phoenix/smarthome/appliance [uuid body]",
          json.dumps({"applianceId": uuid}).encode()),
         # behaviors/entities DELETE + POST forget (ARN and bare UUID)
         ("DELETE", f"/api/behaviors/entities/{arn}", b""),
@@ -214,10 +282,11 @@ async def delete_v3_entity_cookie(uuid: str, data: dict[str, Any]) -> dict[str, 
     ]
 
     for method, path, body in candidates:
+        request_path = path.split(" [", 1)[0]
         if method == "DELETE":
-            st, bd = await alexa_raw_delete(path, data)
+            st, bd = await alexa_raw_delete(request_path, data)
         else:
-            st, bd = await alexa_raw_post(path, body, data)
+            st, bd = await alexa_raw_post(request_path, body, data)
         key = f"{method} {path}"
         results[key] = {"status": st, "body": bd[:120]}
         if st in (200, 202, 204):
@@ -253,7 +322,29 @@ async def rename_smart_home_cookie(
     arn = quote(arn_raw, safe="")
     results: dict[str, Any] = {}
 
-    candidates: list[tuple[str, str, bytes]] = [
+    candidates: list[tuple[str, str, bytes]] = []
+
+    # Preferred path: use the real Phoenix applianceId (SKILL_..., AAA_...)
+    # resolved via GET /api/phoenix — endpoints ignore the bare behaviors UUID.
+    phoenix_appliance = await phoenix_find_appliance(uuid, data)
+    if phoenix_appliance:
+        phoenix_id = str(phoenix_appliance.get("applianceId") or "")
+        results["_phoenix_lookup"] = {
+            "applianceId": phoenix_id,
+            "friendlyName": phoenix_appliance.get("friendlyName"),
+        }
+        if phoenix_id:
+            pid = quote(phoenix_id, safe="")
+            renamed_record = dict(phoenix_appliance)
+            renamed_record["friendlyName"] = new_name
+            candidates += [
+                ("PUT", f"/api/phoenix/appliance/{pid} [simple body]",
+                 json.dumps({"applianceId": phoenix_id, "friendlyName": new_name}).encode()),
+                ("PUT", f"/api/phoenix/appliance/{pid} [full record]",
+                 json.dumps(renamed_record).encode()),
+            ]
+
+    candidates += [
         ("PUT", f"/api/phoenix/appliance/{arn}",
          json.dumps({"applianceId": arn_raw, "friendlyName": new_name}).encode()),
         ("PUT", f"/api/behaviors/entities/{sid}",
@@ -269,7 +360,8 @@ async def rename_smart_home_cookie(
         ))
 
     for method, path, body in candidates:
-        st, bd = await alexa_raw_put(path, body, data)
+        request_path = path.split(" [", 1)[0]
+        st, bd = await alexa_raw_put(request_path, body, data)
         key = f"{method} {path}"
         results[key] = {"status": st, "body": bd[:120]}
         if st in (200, 202, 204):
@@ -639,6 +731,16 @@ async def delete_probe(request: web.Request) -> web.Response:
             result["behaviors_raw_keys"] = "device not found in behaviors/entities"
     except Exception as exc:
         result["behaviors_error"] = str(exc)
+
+    # 1b. Phoenix networkDetail lookup — the real applianceId phoenix uses
+    try:
+        appliance = await phoenix_find_appliance(device_id, data)
+        result["phoenix_network_lookup"] = (
+            {k: str(v)[:150] for k, v in appliance.items() if not isinstance(v, (dict, list))}
+            if appliance else "not found in GET /api/phoenix networkDetail"
+        )
+    except Exception as exc:
+        result["phoenix_network_lookup_error"] = str(exc)
 
     # 2. GET probes on multiple URL formats — find which one phoenix recognises
     arns = [

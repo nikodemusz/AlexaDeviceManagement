@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.1
+
+- **Fix**: Löschen von v3-Skill-Geräten (openHAB3) löst jetzt zuerst die echte Phoenix-`applianceId` auf. Phoenix führt Skill-Geräte intern unter einer eigenen ID (Format `SKILL_<base64>_<uuid>` bzw. `AAA_…`), nicht unter der behaviors-UUID — deshalb liefen alle bisherigen Kandidaten auf 404 oder No-Op. Neu: `GET /api/phoenix` wird abgerufen, das verschachtelte (mehrfach JSON-stringifizierte) `networkDetail` durchsucht und das Gerät per `entityId` gefunden; anschließend `DELETE /api/phoenix/appliance/{applianceId}` mit der dort hinterlegten ID — derselbe Weg, den auch alexa-remote2 (ioBroker) verwendet. Die bisherigen Kandidaten bleiben als Fallback, inklusive Verifikation gegen `behaviors/entities`.
+- **Fix**: Umbenennen von Smart-Home-Geräten nutzt denselben Phoenix-Lookup: `PUT /api/phoenix/appliance/{applianceId}` mit der aufgelösten ID (einfacher Body und vollständiger Appliance-Datensatz mit neuem `friendlyName`), ebenfalls mit Verifikation.
+- **Fix**: Probe-Ergebnisse überschreiben sich nicht mehr gegenseitig, wenn zwei Kandidaten denselben Pfad mit unterschiedlichem Body verwenden (Key-Kollision bei `POST /api/phoenix/smarthome/appliance`).
+- **Debug**: Delete-Probe zeigt neu `phoenix_network_lookup` — den in `GET /api/phoenix` gefundenen Appliance-Datensatz zum Gerät.
+
 ## 1.2.0
 
 - **Feature**: Geräte umbenennen — neuer ✏️-Button in jeder Tabellenzeile. Echo-Geräte werden über `PUT /api/devices-v2/device/{serial}` (mit `accountName`) umbenannt. Smart-Home-Geräte werden nach dem bewährten Kandidaten-Prinzip über cookie-authentifizierte Web-API-Endpunkte versucht (`PUT /api/phoenix/appliance/…`, `PUT /api/behaviors/entities/…`); nach jedem 2xx wird gegen `behaviors/entities` verifiziert, dass der neue Name wirklich übernommen wurde. Falls kein Kandidat bestätigt wird, erscheint der Hinweis, das Gerät in der Skill-Quelle (z.B. openHAB, Home Assistant) umzubenennen.
