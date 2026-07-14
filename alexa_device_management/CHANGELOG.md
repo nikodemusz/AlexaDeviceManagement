@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.5
+
+- **UX**: Live-Fortschritt beim Bulk-Löschen. Die Geräte werden jetzt einzeln nacheinander gelöscht: Jede Zeile wird während des Löschens ausgegraut und verschwindet sofort nach Erfolg, der Gerätezähler in der Info-Karte zählt live herunter, und in der Tabellen-Toolbar läuft eine Fortschrittsanzeige mit („🗑 Lösche 3/17: Gerätename…").
+- **UX**: Neuer Button „✕ Abbrechen" während des Löschvorgangs — stoppt nach dem aktuell laufenden Gerät. Bereits gelöschte Geräte bleiben gelöscht; die Zusammenfassung weist den Abbruch aus.
+- **UX**: Fehler einzelner Geräte brechen den Vorgang nicht mehr ab; sie werden gesammelt und am Ende zusammengefasst gemeldet.
+
 ## 1.2.4
 
 - **Performance**: Winner-Cache — die Mutation, die beim Löschen bzw. Umbenennen zuletzt nachweislich funktioniert hat, wird in `/data/api_hints.json` gespeichert und beim nächsten Mal direkt zuerst ausgeführt (mit Verifikation). Die volle Kandidaten-Leiter läuft nur noch, wenn der gespeicherte Weg nicht mehr funktioniert. Das Löschen weiterer Geräte ist dadurch deutlich schneller.

@@ -209,43 +209,79 @@
       });
     }
 
+    let _deleteAbort = false;
+
+    function updateDeviceCount() {
+      document.getElementById('info-device-count').textContent = `${_allDevices.length}`;
+    }
+
     async function deleteSelected() {
       const targets = selectedDevices();
       if (!targets.length) return;
       const names = targets.map(d => `• ${d.name}`).join('\n');
       if (!confirm(`${targets.length} Gerät(e) dauerhaft aus Alexa löschen?\n\n${names}\n\nDiese Aktion kann nicht rückgängig gemacht werden.`)) return;
-      try {
-        const resp = await fetch(`${INGRESS_PATH}/api/devices/delete`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ devices: targets.map(d => ({ serial: d.serial, source: d.source, name: d.name })) })
-        });
-        if (!resp.ok) {
-          const errText = await resp.text().catch(() => '');
-          throw new Error(`HTTP ${resp.status}: ${errText}`);
-        }
-        const result = await resp.json();
-        const ok = result.results.filter(r => r.ok);
-        const failed = result.results.filter(r => !r.ok);
-        if (ok.length) {
-          const deletedSerials = new Set(ok.map(r => r.serial));
-          document.querySelectorAll('.row-check').forEach(cb => {
-            if (deletedSerials.has(cb.dataset.serial)) cb.closest('tr').remove();
-          });
-          deletedSerials.forEach(s => delete _deviceBySerial[s]);
-          _allDevices = _allDevices.filter(d => !deletedSerials.has(d.serial));
-        }
-        applyFilters();
-        if (failed.length) {
-          const errLines = failed.map(r => `• ${r.name || r.serial}: ${r.error || 'Unbekannter Fehler'}`).join('\n');
-          showAlert(`${ok.length} gelöscht, ${failed.length} Fehler:\n${errLines}`, 'warning');
-        } else {
-          showAlert(`${ok.length} Gerät(e) erfolgreich gelöscht.`, 'success');
-        }
-        if (ok.length) fetchDevices();
-      } catch (err) {
-        showAlert('Fehler beim Löschen: ' + err.message, 'error');
+
+      const btnDelete = document.getElementById('btn-delete');
+      const btnCancel = document.getElementById('btn-cancel-delete');
+      const info = document.getElementById('selection-info');
+      _deleteAbort = false;
+      btnDelete.disabled = true;
+      if (btnCancel) {
+        btnCancel.classList.remove('hidden');
+        btnCancel.disabled = false;
+        btnCancel.textContent = '✕ Abbrechen';
       }
+
+      let okCount = 0;
+      const failed = [];
+      let aborted = false;
+
+      for (let i = 0; i < targets.length; i++) {
+        if (_deleteAbort) { aborted = true; break; }
+        const d = targets[i];
+        if (info) info.textContent = `🗑 Lösche ${i + 1}/${targets.length}: ${d.name}…`;
+        const tr = document.querySelector(`.device-table tbody tr[data-serial="${CSS.escape(d.serial)}"]`);
+        if (tr) tr.classList.add('row-deleting');
+        try {
+          const resp = await fetch(`${INGRESS_PATH}/api/devices/delete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ devices: [{ serial: d.serial, source: d.source, name: d.name }] })
+          });
+          if (!resp.ok) {
+            const errText = await resp.text().catch(() => '');
+            throw new Error(`HTTP ${resp.status}: ${errText}`);
+          }
+          const result = await resp.json();
+          const r = (result.results || [])[0] || {};
+          if (r.ok) {
+            okCount++;
+            if (tr) tr.remove();
+            delete _deviceBySerial[d.serial];
+            _allDevices = _allDevices.filter(x => x.serial !== d.serial);
+            updateDeviceCount();
+          } else {
+            failed.push(r);
+            if (tr) tr.classList.remove('row-deleting');
+          }
+        } catch (err) {
+          failed.push({ name: d.name, error: err.message });
+          if (tr) tr.classList.remove('row-deleting');
+        }
+      }
+
+      btnDelete.disabled = false;
+      if (btnCancel) btnCancel.classList.add('hidden');
+      applyFilters();
+
+      const abortNote = aborted ? ' (abgebrochen)' : '';
+      if (failed.length) {
+        const errLines = failed.map(r => `• ${r.name || r.serial}: ${r.error || 'Unbekannter Fehler'}`).join('\n');
+        showAlert(`${okCount} gelöscht${abortNote}, ${failed.length} Fehler:\n${errLines}`, 'warning');
+      } else {
+        showAlert(`${okCount} Gerät(e) erfolgreich gelöscht${abortNote}.`, 'success');
+      }
+      if (okCount) fetchDevices();
     }
 
     async function renameDevice(serial) {
@@ -458,6 +494,7 @@
           <span id="selection-info" class="selection-info">${devices.length} Geräte</span>
           <button id="btn-export" class="btn btn-secondary" onclick="exportCsv()" title="Gefilterte Geräteliste als CSV exportieren">⬇ CSV</button>
           <button id="btn-delete" class="btn btn-danger hidden" onclick="deleteSelected()">🗑 Auswahl löschen</button>
+          <button id="btn-cancel-delete" class="btn btn-secondary hidden" onclick="_deleteAbort = true; this.disabled = true; this.textContent = '⏳ Stoppe…';">✕ Abbrechen</button>
         </div>
         <div class="table-wrapper">
           <table class="device-table">

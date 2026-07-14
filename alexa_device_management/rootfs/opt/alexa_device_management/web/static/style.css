@@ -279,6 +279,13 @@ body {
   color: #00caff;
 }
 
+/* Row being deleted */
+.row-deleting {
+  opacity: 0.4;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+
 /* Row action buttons */
 .btn-icon {
   border: none;
