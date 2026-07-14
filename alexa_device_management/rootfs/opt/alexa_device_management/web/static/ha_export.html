@@ -10,8 +10,11 @@
     header { position: sticky; top: 0; z-index: 5; display:flex; gap:12px; align-items:center; padding:14px 18px; background:#fff; border-bottom:1px solid #dbe2ea; }
     header h1 { margin:0; font-size:20px; flex:1; }
     a, button { border:0; border-radius:8px; padding:9px 12px; text-decoration:none; cursor:pointer; font-weight:600; }
+    button:disabled { opacity:.55; cursor:wait; }
     .primary { background:#03a9f4; color:white; }
     .secondary { background:#e9eef4; color:#263238; }
+    .restart { background:#f59e0b; color:#fff; }
+    .hidden { display:none !important; }
     main { padding:18px; max-width:1500px; margin:auto; }
     .toolbar { display:grid; grid-template-columns:2fr 1fr 1fr auto auto; gap:10px; margin-bottom:14px; }
     input, select { width:100%; box-sizing:border-box; padding:9px; border:1px solid #cbd5e1; border-radius:8px; background:white; color:#1f2937; }
@@ -31,7 +34,7 @@
     dialog { width:min(900px, 92vw); border:0; border-radius:12px; padding:0; }
     dialog header { position:static; }
     pre { margin:0; padding:16px; max-height:65vh; overflow:auto; background:#111827; color:#e5e7eb; }
-    @media (max-width:900px) { .toolbar { grid-template-columns:1fr; } th:nth-child(3), td:nth-child(3) { display:none; } }
+    @media (max-width:1050px) { header { flex-wrap:wrap; } .toolbar { grid-template-columns:1fr; } th:nth-child(3), td:nth-child(3) { display:none; } }
   </style>
 </head>
 <body>
@@ -39,7 +42,9 @@
   <a class="secondary" href="{{INGRESS_PATH}}/">← Alexa-Bestand</a>
   <h1>Home Assistant → Alexa konfigurieren</h1>
   <button class="secondary" id="btn-preview">YAML-Vorschau</button>
-  <button class="primary" id="btn-save">Speichern</button>
+  <button class="secondary" id="btn-check">Konfiguration prüfen</button>
+  <button class="primary" id="btn-save">Prüfen &amp; speichern</button>
+  <button class="restart hidden" id="btn-restart">Home Assistant neu starten</button>
 </header>
 <main>
   <div class="toolbar">
@@ -70,6 +75,8 @@ let config = {locale:"de-DE", entities:{}};
 function escapeHtml(value) { return String(value ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
 function entityConfig(id) { return config.entities[id] ||= {enabled:false, name:"", display_category:""}; }
 function setStatus(text, ok=true) { const el=document.getElementById('status'); el.textContent=text; el.className='status '+(ok?'ok':'err'); }
+function setBusy(button, busy, text) { if (!button) return; if (busy) { button.dataset.oldText=button.textContent; button.disabled=true; button.textContent=text; } else { button.disabled=false; button.textContent=button.dataset.oldText||button.textContent; } }
+function checkMessage(data) { return data?.check?.message || data?.message || data?.error || `HTTP-Fehler`; }
 function updateCounts() {
   const all = inventory.devices.flatMap(d=>d.entities);
   document.getElementById('device-count').textContent=inventory.devices.length;
@@ -94,9 +101,9 @@ function render() {
     html.push('</tbody></table></section>');
   }
   root.innerHTML=html.join('') || '<div class="chip">Keine passenden Entitäten.</div>';
-  root.querySelectorAll('.enabled').forEach(el=>el.onchange=()=>{entityConfig(el.dataset.id).enabled=el.checked; updateCounts();});
-  root.querySelectorAll('.alexaname').forEach(el=>el.oninput=()=>entityConfig(el.dataset.id).name=el.value);
-  root.querySelectorAll('.category').forEach(el=>el.onchange=()=>entityConfig(el.dataset.id).display_category=el.value);
+  root.querySelectorAll('.enabled').forEach(el=>el.onchange=()=>{entityConfig(el.dataset.id).enabled=el.checked; updateCounts(); document.getElementById('btn-restart').classList.add('hidden');});
+  root.querySelectorAll('.alexaname').forEach(el=>el.oninput=()=>{entityConfig(el.dataset.id).name=el.value; document.getElementById('btn-restart').classList.add('hidden');});
+  root.querySelectorAll('.category').forEach(el=>el.onchange=()=>{entityConfig(el.dataset.id).display_category=el.value; document.getElementById('btn-restart').classList.add('hidden');});
   updateCounts();
 }
 async function load() {
@@ -116,11 +123,33 @@ async function preview() {
   const r=await fetch(`${BASE}/api/ha-export/preview`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}); const data=await r.json();
   document.getElementById('yaml-output').textContent=data.yaml||data.error; document.getElementById('yaml-dialog').showModal();
 }
+async function checkConfig() {
+  const btn=document.getElementById('btn-check'); setBusy(btn,true,'Prüfe…');
+  try {
+    const r=await fetch(`${BASE}/api/ha-export/check-config`,{method:'POST'}); const data=await r.json();
+    if(!r.ok) return setStatus(`Konfigurationsprüfung fehlgeschlagen:\n${checkMessage(data)}`,false);
+    setStatus(`Home-Assistant-Konfiguration ist gültig.\n${checkMessage(data)}`);
+  } catch(e) { setStatus(e.message,false); } finally { setBusy(btn,false); }
+}
 async function save() {
-  if(!confirm('Bestehende packages/alexa.yaml wird gesichert und anschließend ersetzt. Fortfahren?')) return;
-  const r=await fetch(`${BASE}/api/ha-export/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}); const data=await r.json();
-  if(!r.ok) return setStatus(data.error||`HTTP ${r.status}`,false);
-  setStatus(`Gespeichert: ${data.path}\nBackup: ${data.backup||'keines'}\nHome Assistant muss neu gestartet werden.`);
+  if(!confirm('Die neue Alexa-Konfiguration wird temporär geschrieben und die vollständige Home-Assistant-Konfiguration geprüft. Bei einem Fehler wird automatisch zurückgerollt. Fortfahren?')) return;
+  const btn=document.getElementById('btn-save'); setBusy(btn,true,'Prüfe & speichere…');
+  try {
+    const r=await fetch(`${BASE}/api/ha-export/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}); const data=await r.json();
+    if(!r.ok) return setStatus(`${data.error||`HTTP ${r.status}`}\n${checkMessage(data)}${data.rolled_back?'\nRollback wurde durchgeführt.':''}`,false);
+    setStatus(`Konfiguration geprüft und gespeichert.\nDatei: ${data.path}\nBackup: ${data.backup||'keines'}\nPrüfung: ${checkMessage(data)}\nEin Neustart ist erforderlich.`);
+    document.getElementById('btn-restart').classList.remove('hidden');
+  } catch(e) { setStatus(e.message,false); } finally { setBusy(btn,false); }
+}
+async function restartHomeAssistant() {
+  if(!confirm('Home Assistant jetzt neu starten? Die Oberfläche ist kurzzeitig nicht erreichbar.')) return;
+  const btn=document.getElementById('btn-restart'); setBusy(btn,true,'Neustart läuft…');
+  try {
+    const r=await fetch(`${BASE}/api/ha-export/restart`,{method:'POST'}); const data=await r.json();
+    if(!r.ok) { setBusy(btn,false); return setStatus(data.error||`HTTP ${r.status}`,false); }
+    setStatus(data.note||'Home Assistant wird neu gestartet.');
+    setTimeout(()=>window.location.href=`${BASE}/`,2500);
+  } catch(e) { setStatus(e.message,false); setBusy(btn,false); }
 }
 async function suggest() {
   const r=await fetch(`${BASE}/api/ha-export/suggest-names`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({devices:inventory.devices})}); const data=await r.json();
@@ -131,7 +160,9 @@ async function suggest() {
 ['area','domain'].forEach(id=>document.getElementById(id).onchange=render);
 document.getElementById('btn-reload').onclick=load;
 document.getElementById('btn-preview').onclick=preview;
+document.getElementById('btn-check').onclick=checkConfig;
 document.getElementById('btn-save').onclick=save;
+document.getElementById('btn-restart').onclick=restartHomeAssistant;
 document.getElementById('btn-suggest').onclick=suggest;
 load();
 </script>
