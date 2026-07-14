@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import pathlib
 import re
+import time
 from typing import Any
 from urllib.parse import quote
 
@@ -13,12 +15,13 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "1.2.5"
+APP_VERSION = "1.2.6"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
 OPTIONS_PATH = pathlib.Path("/data/options.json")
 HINTS_PATH = pathlib.Path("/data/api_hints.json")
+DELETE_JOB_PATH = pathlib.Path("/data/delete_job.json")
 
 
 def read_json(path: pathlib.Path) -> dict[str, Any]:
@@ -972,6 +975,26 @@ async def token_refresh_status(request: web.Request) -> web.Response:
     return web.json_response({"auto_refresh_active": False, "has_valid_token": is_configured(), "last_error": None})
 
 
+async def _delete_target(target: dict[str, Any], data: dict[str, Any]) -> None:
+    """Delete a single device; raises on failure."""
+    serial = str(target.get("serial", "")).strip()
+    source = str(target.get("source", "")).strip()
+    if not serial:
+        raise RuntimeError("Missing serial")
+    if source == "echo":
+        await alexa_delete(f"/api/devices-v2/device/{quote(serial, safe='')}", data)
+        return
+    appliance_id = str(target.get("appliance_id", "")).strip()
+    if appliance_id and appliance_id != serial:
+        # v2 Phoenix device — use the legacy applianceId format (AAA_...)
+        await alexa_delete(f"/api/phoenix/appliance/{quote(appliance_id, safe='')}", data)
+        return
+    # Pure v3 entity (e.g. openHAB3/Home Assistant skill) — no legacy id.
+    probe = await delete_v3_entity_cookie(serial, data)
+    if "_winner" not in probe:
+        raise RuntimeError(f"No delete candidate succeeded for v3 entity {serial!r}. Probe: {probe}")
+
+
 async def delete_devices(request: web.Request) -> web.Response:
     if not is_configured():
         raise web.HTTPUnauthorized(text="Alexa session missing")
@@ -987,32 +1010,109 @@ async def delete_devices(request: web.Request) -> web.Response:
     results: list[dict[str, Any]] = []
     for target in targets:
         serial = str(target.get("serial", "")).strip()
-        source = str(target.get("source", "")).strip()
         name = str(target.get("name", "")).strip() or serial
-        if not serial:
-            results.append({"serial": serial, "name": name, "ok": False, "error": "Missing serial"})
-            continue
         try:
-            if source == "echo":
-                await alexa_delete(f"/api/devices-v2/device/{quote(serial, safe='')}", data)
-            else:
-                appliance_id = str(target.get("appliance_id", "")).strip()
-                sid = quote(serial, safe='')
-                has_legacy_id = appliance_id and appliance_id != serial
-                if has_legacy_id:
-                    # v2 Phoenix device — use the legacy applianceId format (AAA_...)
-                    await alexa_delete(f"/api/phoenix/appliance/{quote(appliance_id, safe='')}", data)
-                else:
-                    # Pure v3 entity (e.g. openHAB3) — no legacy applianceId.
-                    # Try all cookie-authenticated web-API candidates.
-                    probe = await delete_v3_entity_cookie(serial, data)
-                    if "_winner" not in probe:
-                        raise RuntimeError(f"No delete candidate succeeded for v3 entity {serial!r}. Probe: {probe}")
+            await _delete_target(target, data)
             results.append({"serial": serial, "name": name, "ok": True})
         except Exception as exc:
             results.append({"serial": serial, "name": name, "ok": False, "error": str(exc)})
 
     return web.json_response({"results": results})
+
+
+# ---------------------------------------------------------------------------
+# Server-side bulk delete job: survives page navigation — the browser only
+# starts the job and polls its status.
+
+_DELETE_JOB: dict[str, Any] = {}
+_DELETE_JOB_TASK: asyncio.Task | None = None
+
+
+def _persist_delete_job() -> None:
+    try:
+        DELETE_JOB_PATH.write_text(json.dumps(_DELETE_JOB), encoding="utf-8")
+    except OSError:
+        pass
+
+
+async def _run_delete_job(targets: list[dict[str, Any]], data: dict[str, Any]) -> None:
+    job = _DELETE_JOB
+    try:
+        for target in targets:
+            if job.get("cancel"):
+                job["aborted"] = True
+                break
+            serial = str(target.get("serial") or "")
+            name = str(target.get("name") or serial)
+            job["current"] = name
+            job["current_serial"] = serial
+            try:
+                await _delete_target(target, data)
+                job["ok"] += 1
+                job["deleted"].append({"serial": serial, "name": name})
+            except Exception as exc:
+                job["failed"].append({"serial": serial, "name": name, "error": str(exc)[:500]})
+            job["done"] += 1
+            _persist_delete_job()
+    finally:
+        job["running"] = False
+        job["current"] = None
+        job["current_serial"] = None
+        job["finished_at"] = time.time()
+        _persist_delete_job()
+
+
+async def delete_job_start(request: web.Request) -> web.Response:
+    global _DELETE_JOB_TASK
+    if not is_configured():
+        raise web.HTTPUnauthorized(text="Alexa session missing")
+    try:
+        body = await request.json()
+    except Exception:
+        raise web.HTTPBadRequest(text="Invalid JSON body")
+    targets = body.get("devices", [])
+    if not isinstance(targets, list) or not targets:
+        raise web.HTTPBadRequest(text="devices list required")
+    if _DELETE_JOB.get("running"):
+        return web.json_response({"error": "Es läuft bereits ein Löschvorgang."}, status=409)
+
+    data = session_data()
+    _DELETE_JOB.clear()
+    _DELETE_JOB.update({
+        "running": True,
+        "cancel": False,
+        "aborted": False,
+        "total": len(targets),
+        "done": 0,
+        "ok": 0,
+        "failed": [],
+        "deleted": [],
+        "current": None,
+        "started_at": time.time(),
+        "finished_at": None,
+    })
+    _persist_delete_job()
+    _DELETE_JOB_TASK = asyncio.get_event_loop().create_task(_run_delete_job(list(targets), data))
+    return web.json_response({"started": True, "total": len(targets)})
+
+
+async def delete_job_status(request: web.Request) -> web.Response:
+    if _DELETE_JOB:
+        return web.json_response(_DELETE_JOB)
+    stored = read_json(DELETE_JOB_PATH)
+    if stored.get("running"):
+        # Persisted as running but no in-memory job: the add-on restarted
+        # mid-job — report it as interrupted, not still running.
+        stored["running"] = False
+        stored["interrupted"] = True
+    return web.json_response(stored)
+
+
+async def delete_job_cancel(request: web.Request) -> web.Response:
+    if not _DELETE_JOB.get("running"):
+        return web.json_response({"ok": False, "error": "Kein laufender Löschvorgang."})
+    _DELETE_JOB["cancel"] = True
+    return web.json_response({"ok": True})
 
 
 async def rename_devices(request: web.Request) -> web.Response:
@@ -1408,6 +1508,9 @@ def create_app() -> web.Application:
     app.router.add_get("/api/devices", devices)
     app.router.add_get("/api/devices-debug", devices_debug)
     app.router.add_post("/api/devices/delete", delete_devices)
+    app.router.add_post("/api/devices/delete-job", delete_job_start)
+    app.router.add_get("/api/devices/delete-job", delete_job_status)
+    app.router.add_post("/api/devices/delete-job/cancel", delete_job_cancel)
     app.router.add_post("/api/devices/rename", rename_devices)
     app.router.add_get("/api/delete-probe", delete_probe)
     app.router.add_get("/debug", debug_ui)

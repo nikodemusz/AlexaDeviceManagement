@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.6
+
+- **Feature**: Bulk-Löschen läuft jetzt als serverseitiger Hintergrund-Job im Add-on statt im Browser. Der Vorgang läuft weiter, auch wenn die Seite geschlossen oder verlassen wird.
+- **UX**: Beim Zurückkehren auf die Seite wird ein laufender Löschvorgang automatisch erkannt und der Live-Fortschritt (Zähler, Fortschrittstext, ausgegraute aktuelle Zeile, verschwindende Zeilen) nahtlos weiter angezeigt. Ist der Job in der Zwischenzeit fertig geworden, erscheint einmalig die Zusammenfassung.
+- **API**: Neue Endpunkte `POST /api/devices/delete-job` (Start), `GET /api/devices/delete-job` (Status), `POST /api/devices/delete-job/cancel` (Abbruch). Der Job-Status wird nach `/data/delete_job.json` persistiert; wird das Add-on mitten im Job neu gestartet, wird der Job beim nächsten Statusabruf als „unterbrochen" gemeldet statt fälschlich als laufend.
+- **Schutz**: Es kann immer nur ein Löschvorgang gleichzeitig laufen (HTTP 409 beim Startversuch eines zweiten); die Seite zeigt dann den Fortschritt des laufenden Jobs an.
+
 ## 1.2.5
 
 - **UX**: Live-Fortschritt beim Bulk-Löschen. Die Geräte werden jetzt einzeln nacheinander gelöscht: Jede Zeile wird während des Löschens ausgegraut und verschwindet sofort nach Erfolg, der Gerätezähler in der Info-Karte zählt live herunter, und in der Tabellen-Toolbar läuft eine Fortschrittsanzeige mit („🗑 Lösche 3/17: Gerätename…").

@@ -209,10 +209,89 @@
       });
     }
 
-    let _deleteAbort = false;
+    let _jobPollTimer = null;
 
     function updateDeviceCount() {
       document.getElementById('info-device-count').textContent = `${_allDevices.length}`;
+    }
+
+    function removeDeletedRows(job) {
+      let removed = false;
+      (job.deleted || []).forEach(d => {
+        if (!_deviceBySerial[d.serial]) return;
+        const tr = document.querySelector(`.device-table tbody tr[data-serial="${CSS.escape(d.serial)}"]`);
+        if (tr) tr.remove();
+        delete _deviceBySerial[d.serial];
+        _allDevices = _allDevices.filter(x => x.serial !== d.serial);
+        removed = true;
+      });
+      if (removed) updateDeviceCount();
+    }
+
+    function showJobProgress(job) {
+      const btnDelete = document.getElementById('btn-delete');
+      const btnCancel = document.getElementById('btn-cancel-delete');
+      const info = document.getElementById('selection-info');
+      if (btnDelete) btnDelete.disabled = true;
+      if (btnCancel && btnCancel.classList.contains('hidden')) {
+        btnCancel.classList.remove('hidden');
+        btnCancel.disabled = false;
+        btnCancel.textContent = '✕ Abbrechen';
+      }
+      if (info) {
+        const pos = Math.min(job.done + 1, job.total);
+        info.textContent = `🗑 Lösche ${pos}/${job.total}: ${job.current || '…'}`;
+      }
+      removeDeletedRows(job);
+      const currentRow = job.current_serial
+        ? document.querySelector(`.device-table tbody tr[data-serial="${CSS.escape(job.current_serial)}"]`)
+        : null;
+      if (currentRow) currentRow.classList.add('row-deleting');
+    }
+
+    function finishJobUi(job) {
+      const btnDelete = document.getElementById('btn-delete');
+      const btnCancel = document.getElementById('btn-cancel-delete');
+      if (btnDelete) btnDelete.disabled = false;
+      if (btnCancel) btnCancel.classList.add('hidden');
+      if (!job || !job.total || !job.started_at) return;
+      removeDeletedRows(job);
+      applyFilters();
+      const ackKey = String(job.started_at);
+      if (localStorage.getItem('adm_job_ack') === ackKey) return;
+      localStorage.setItem('adm_job_ack', ackKey);
+      const note = job.aborted ? ' (abgebrochen)' : (job.interrupted ? ' (durch Add-on-Neustart unterbrochen)' : '');
+      const failed = job.failed || [];
+      if (failed.length) {
+        const errLines = failed.map(r => `• ${r.name || r.serial}: ${r.error || 'Unbekannter Fehler'}`).join('\n');
+        showAlert(`${job.ok} gelöscht${note}, ${failed.length} Fehler:\n${errLines}`, 'warning');
+      } else {
+        showAlert(`${job.ok} Gerät(e) erfolgreich gelöscht${note}.`, 'success');
+      }
+      if (job.ok) fetchDevices();
+    }
+
+    async function pollJob() {
+      try {
+        const resp = await fetch(`${INGRESS_PATH}/api/devices/delete-job`);
+        if (!resp.ok) return;
+        const job = await resp.json();
+        if (job.running) {
+          showJobProgress(job);
+          if (!_jobPollTimer) _jobPollTimer = setInterval(pollJob, 2000);
+        } else {
+          if (_jobPollTimer) { clearInterval(_jobPollTimer); _jobPollTimer = null; }
+          finishJobUi(job);
+        }
+      } catch (_) {}
+    }
+
+    async function cancelDeleteJob(btn) {
+      btn.disabled = true;
+      btn.textContent = '⏳ Stoppe…';
+      try {
+        await fetch(`${INGRESS_PATH}/api/devices/delete-job/cancel`, { method: 'POST' });
+      } catch (_) {}
     }
 
     async function deleteSelected() {
@@ -220,68 +299,28 @@
       if (!targets.length) return;
       const names = targets.map(d => `• ${d.name}`).join('\n');
       if (!confirm(`${targets.length} Gerät(e) dauerhaft aus Alexa löschen?\n\n${names}\n\nDiese Aktion kann nicht rückgängig gemacht werden.`)) return;
-
-      const btnDelete = document.getElementById('btn-delete');
-      const btnCancel = document.getElementById('btn-cancel-delete');
-      const info = document.getElementById('selection-info');
-      _deleteAbort = false;
-      btnDelete.disabled = true;
-      if (btnCancel) {
-        btnCancel.classList.remove('hidden');
-        btnCancel.disabled = false;
-        btnCancel.textContent = '✕ Abbrechen';
-      }
-
-      let okCount = 0;
-      const failed = [];
-      let aborted = false;
-
-      for (let i = 0; i < targets.length; i++) {
-        if (_deleteAbort) { aborted = true; break; }
-        const d = targets[i];
-        if (info) info.textContent = `🗑 Lösche ${i + 1}/${targets.length}: ${d.name}…`;
-        const tr = document.querySelector(`.device-table tbody tr[data-serial="${CSS.escape(d.serial)}"]`);
-        if (tr) tr.classList.add('row-deleting');
-        try {
-          const resp = await fetch(`${INGRESS_PATH}/api/devices/delete`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ devices: [{ serial: d.serial, source: d.source, name: d.name }] })
-          });
-          if (!resp.ok) {
-            const errText = await resp.text().catch(() => '');
-            throw new Error(`HTTP ${resp.status}: ${errText}`);
-          }
-          const result = await resp.json();
-          const r = (result.results || [])[0] || {};
-          if (r.ok) {
-            okCount++;
-            if (tr) tr.remove();
-            delete _deviceBySerial[d.serial];
-            _allDevices = _allDevices.filter(x => x.serial !== d.serial);
-            updateDeviceCount();
-          } else {
-            failed.push(r);
-            if (tr) tr.classList.remove('row-deleting');
-          }
-        } catch (err) {
-          failed.push({ name: d.name, error: err.message });
-          if (tr) tr.classList.remove('row-deleting');
+      try {
+        const resp = await fetch(`${INGRESS_PATH}/api/devices/delete-job`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ devices: targets.map(d => ({
+            serial: d.serial, source: d.source, name: d.name, appliance_id: d.appliance_id || ''
+          })) })
+        });
+        if (resp.status === 409) {
+          showAlert('Es läuft bereits ein Löschvorgang — Fortschritt wird angezeigt.', 'warning');
+          pollJob();
+          return;
         }
+        if (!resp.ok) {
+          const errText = await resp.text().catch(() => '');
+          throw new Error(`HTTP ${resp.status}: ${errText}`);
+        }
+        localStorage.removeItem('adm_job_ack');
+        pollJob();
+      } catch (err) {
+        showAlert('Fehler beim Starten des Löschvorgangs: ' + err.message, 'error');
       }
-
-      btnDelete.disabled = false;
-      if (btnCancel) btnCancel.classList.add('hidden');
-      applyFilters();
-
-      const abortNote = aborted ? ' (abgebrochen)' : '';
-      if (failed.length) {
-        const errLines = failed.map(r => `• ${r.name || r.serial}: ${r.error || 'Unbekannter Fehler'}`).join('\n');
-        showAlert(`${okCount} gelöscht${abortNote}, ${failed.length} Fehler:\n${errLines}`, 'warning');
-      } else {
-        showAlert(`${okCount} Gerät(e) erfolgreich gelöscht${abortNote}.`, 'success');
-      }
-      if (okCount) fetchDevices();
     }
 
     async function renameDevice(serial) {
@@ -494,7 +533,7 @@
           <span id="selection-info" class="selection-info">${devices.length} Geräte</span>
           <button id="btn-export" class="btn btn-secondary" onclick="exportCsv()" title="Gefilterte Geräteliste als CSV exportieren">⬇ CSV</button>
           <button id="btn-delete" class="btn btn-danger hidden" onclick="deleteSelected()">🗑 Auswahl löschen</button>
-          <button id="btn-cancel-delete" class="btn btn-secondary hidden" onclick="_deleteAbort = true; this.disabled = true; this.textContent = '⏳ Stoppe…';">✕ Abbrechen</button>
+          <button id="btn-cancel-delete" class="btn btn-secondary hidden" onclick="cancelDeleteJob(this)">✕ Abbrechen</button>
         </div>
         <div class="table-wrapper">
           <table class="device-table">
@@ -596,6 +635,9 @@
     fetchDevices();
     fetchTokenRefreshStatus();
     setInterval(fetchTokenRefreshStatus, 30000);
+    // Resume progress display if a server-side delete job is still running
+    // (e.g. after navigating away and back)
+    setTimeout(pollJob, 800);
 
     window.addEventListener("message", (event) => {
       if (event.data && event.data.type === "oauth_callback") {
