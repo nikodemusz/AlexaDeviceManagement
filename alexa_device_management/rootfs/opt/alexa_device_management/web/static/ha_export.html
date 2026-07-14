@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HA → Alexa</title>
+  <style>
+    :root { color-scheme: light dark; font-family: Arial, sans-serif; }
+    body { margin: 0; background: #f5f7fa; color: #1f2937; }
+    header { position: sticky; top: 0; z-index: 5; display:flex; gap:12px; align-items:center; padding:14px 18px; background:#fff; border-bottom:1px solid #dbe2ea; }
+    header h1 { margin:0; font-size:20px; flex:1; }
+    a, button { border:0; border-radius:8px; padding:9px 12px; text-decoration:none; cursor:pointer; font-weight:600; }
+    button:disabled { opacity:.55; cursor:wait; }
+    .primary { background:#03a9f4; color:white; }
+    .secondary { background:#e9eef4; color:#263238; }
+    .restart { background:#f59e0b; color:#fff; }
+    .hidden { display:none !important; }
+    main { padding:18px; max-width:1500px; margin:auto; }
+    .toolbar { display:grid; grid-template-columns:2fr 1fr 1fr auto auto; gap:10px; margin-bottom:14px; }
+    input, select { width:100%; box-sizing:border-box; padding:9px; border:1px solid #cbd5e1; border-radius:8px; background:white; color:#1f2937; }
+    .summary { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px; }
+    .chip { background:white; border:1px solid #dbe2ea; border-radius:10px; padding:10px 12px; }
+    .device { background:white; border:1px solid #dbe2ea; border-radius:12px; margin-bottom:12px; overflow:hidden; }
+    .device-head { display:grid; grid-template-columns:1fr auto; padding:13px 15px; background:#f8fafc; border-bottom:1px solid #e2e8f0; }
+    .meta { color:#64748b; font-size:12px; margin-top:4px; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { padding:9px 10px; border-bottom:1px solid #edf2f7; text-align:left; vertical-align:middle; }
+    th { font-size:12px; color:#64748b; background:#fbfdff; }
+    .entity-id { font-family:monospace; font-size:12px; color:#475569; }
+    .warn { color:#b45309; }
+    .status { margin:12px 0; padding:11px; border-radius:9px; display:none; white-space:pre-wrap; }
+    .status.ok { display:block; background:#dcfce7; color:#166534; }
+    .status.err { display:block; background:#fee2e2; color:#991b1b; }
+    dialog { width:min(900px, 92vw); border:0; border-radius:12px; padding:0; }
+    dialog header { position:static; }
+    pre { margin:0; padding:16px; max-height:65vh; overflow:auto; background:#111827; color:#e5e7eb; }
+    @media (max-width:1050px) { header { flex-wrap:wrap; } .toolbar { grid-template-columns:1fr; } th:nth-child(3), td:nth-child(3) { display:none; } }
+  </style>
+</head>
+<body>
+<header>
+  <a class="secondary" href="{{INGRESS_PATH}}/">← Alexa-Bestand</a>
+  <h1>Home Assistant → Alexa konfigurieren</h1>
+  <button class="secondary" id="btn-preview">YAML-Vorschau</button>
+  <button class="secondary" id="btn-check">Konfiguration prüfen</button>
+  <button class="primary" id="btn-save">Prüfen &amp; speichern</button>
+  <button class="restart hidden" id="btn-restart">Home Assistant neu starten</button>
+</header>
+<main>
+  <div class="toolbar">
+    <input id="search" placeholder="Gerät, Entität oder Bereich suchen" />
+    <select id="area"><option value="">Alle Bereiche</option></select>
+    <select id="domain"><option value="">Alle Domains</option></select>
+    <button class="secondary" id="btn-suggest">Namen vorschlagen</button>
+    <button class="secondary" id="btn-reload">Neu laden</button>
+  </div>
+  <div class="summary">
+    <div class="chip"><strong id="device-count">0</strong> Geräte</div>
+    <div class="chip"><strong id="entity-count">0</strong> Entitäten</div>
+    <div class="chip"><strong id="selected-count">0</strong> für Alexa ausgewählt</div>
+    <div class="chip">Ausgabe: <code>/config/packages/alexa.yaml</code></div>
+  </div>
+  <div id="status" class="status"></div>
+  <div id="devices">Lade Home-Assistant-Geräte…</div>
+</main>
+<dialog id="yaml-dialog">
+  <header><h1>YAML-Vorschau</h1><button class="secondary" onclick="document.getElementById('yaml-dialog').close()">Schließen</button></header>
+  <pre id="yaml-output"></pre>
+</dialog>
+<script>
+const BASE = "{{INGRESS_PATH}}";
+let inventory = {devices:[], display_categories:[]};
+let config = {locale:"de-DE", entities:{}};
+
+function escapeHtml(value) { return String(value ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
+function entityConfig(id) { return config.entities[id] ||= {enabled:false, name:"", display_category:""}; }
+function setStatus(text, ok=true) { const el=document.getElementById('status'); el.textContent=text; el.className='status '+(ok?'ok':'err'); }
+function setBusy(button, busy, text) { if (!button) return; if (busy) { button.dataset.oldText=button.textContent; button.disabled=true; button.textContent=text; } else { button.disabled=false; button.textContent=button.dataset.oldText||button.textContent; } }
+function checkMessage(data) { return data?.check?.message || data?.message || data?.error || `HTTP-Fehler`; }
+function updateCounts() {
+  const all = inventory.devices.flatMap(d=>d.entities);
+  document.getElementById('device-count').textContent=inventory.devices.length;
+  document.getElementById('entity-count').textContent=all.length;
+  document.getElementById('selected-count').textContent=Object.values(config.entities).filter(x=>x.enabled).length;
+}
+function currentFilters() { return {q:document.getElementById('search').value.toLowerCase(), area:document.getElementById('area').value, domain:document.getElementById('domain').value}; }
+function render() {
+  const {q,area,domain}=currentFilters();
+  const root=document.getElementById('devices');
+  const html=[];
+  for (const device of inventory.devices) {
+    const entities=device.entities.filter(e => (!domain || e.domain===domain) && (!q || `${device.name} ${device.area_name||''} ${e.name} ${e.entity_id}`.toLowerCase().includes(q)));
+    if (!entities.length || (area && device.area_id!==area)) continue;
+    html.push(`<section class="device"><div class="device-head"><div><strong>${escapeHtml(device.name)}</strong><div class="meta">${escapeHtml(device.area_name||'Kein Bereich')}${device.floor_name?' • '+escapeHtml(device.floor_name):''}${device.manufacturer?' • '+escapeHtml(device.manufacturer):''}${device.model?' • '+escapeHtml(device.model):''}</div></div><div>${entities.length} Entitäten</div></div><table><thead><tr><th>Alexa</th><th>Entität</th><th>HA-Name</th><th>Alexa-Name</th><th>Kategorie</th></tr></thead><tbody>`);
+    for (const e of entities) {
+      const c=entityConfig(e.entity_id);
+      const options=inventory.display_categories.map(x=>`<option value="${x}" ${c.display_category===x?'selected':''}>${x}</option>`).join('');
+      const capabilityWarn = e.domain==='switch' && e.device_class && !['switch','outlet'].includes(e.device_class) ? `<div class="warn">Device class: ${escapeHtml(e.device_class)}</div>` : '';
+      html.push(`<tr><td><input class="enabled" data-id="${escapeHtml(e.entity_id)}" type="checkbox" ${c.enabled?'checked':''}></td><td><div>${escapeHtml(e.domain)}</div><div class="entity-id">${escapeHtml(e.entity_id)}</div>${capabilityWarn}</td><td>${escapeHtml(e.name)}</td><td><input class="alexaname" data-id="${escapeHtml(e.entity_id)}" value="${escapeHtml(c.name||'')}"></td><td><select class="category" data-id="${escapeHtml(e.entity_id)}"><option value="">Automatisch</option>${options}</select></td></tr>`);
+    }
+    html.push('</tbody></table></section>');
+  }
+  root.innerHTML=html.join('') || '<div class="chip">Keine passenden Entitäten.</div>';
+  root.querySelectorAll('.enabled').forEach(el=>el.onchange=()=>{entityConfig(el.dataset.id).enabled=el.checked; updateCounts(); document.getElementById('btn-restart').classList.add('hidden');});
+  root.querySelectorAll('.alexaname').forEach(el=>el.oninput=()=>{entityConfig(el.dataset.id).name=el.value; document.getElementById('btn-restart').classList.add('hidden');});
+  root.querySelectorAll('.category').forEach(el=>el.onchange=()=>{entityConfig(el.dataset.id).display_category=el.value; document.getElementById('btn-restart').classList.add('hidden');});
+  updateCounts();
+}
+async function load() {
+  setStatus('Lade Daten…');
+  try {
+    const r=await fetch(`${BASE}/api/ha-export/inventory`); const data=await r.json();
+    if(!r.ok) throw new Error(data.error||`HTTP ${r.status}`);
+    inventory=data; config=data.configuration||config;
+    const areas=[...new Map(inventory.devices.filter(d=>d.area_id).map(d=>[d.area_id,d.area_name])).entries()].sort((a,b)=>(a[1]||'').localeCompare(b[1]||''));
+    document.getElementById('area').innerHTML='<option value="">Alle Bereiche</option>'+areas.map(([id,name])=>`<option value="${escapeHtml(id)}">${escapeHtml(name)}</option>`).join('');
+    const domains=[...new Set(inventory.devices.flatMap(d=>d.entities.map(e=>e.domain)))].sort();
+    document.getElementById('domain').innerHTML='<option value="">Alle Domains</option>'+domains.map(x=>`<option value="${x}">${x}</option>`).join('');
+    document.getElementById('status').className='status'; render();
+  } catch(e) { setStatus(e.message,false); }
+}
+async function preview() {
+  const r=await fetch(`${BASE}/api/ha-export/preview`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}); const data=await r.json();
+  document.getElementById('yaml-output').textContent=data.yaml||data.error; document.getElementById('yaml-dialog').showModal();
+}
+async function checkConfig() {
+  const btn=document.getElementById('btn-check'); setBusy(btn,true,'Prüfe…');
+  try {
+    const r=await fetch(`${BASE}/api/ha-export/check-config`,{method:'POST'}); const data=await r.json();
+    if(!r.ok) return setStatus(`Konfigurationsprüfung fehlgeschlagen:\n${checkMessage(data)}`,false);
+    setStatus(`Home-Assistant-Konfiguration ist gültig.\n${checkMessage(data)}`);
+  } catch(e) { setStatus(e.message,false); } finally { setBusy(btn,false); }
+}
+async function save() {
+  if(!confirm('Die neue Alexa-Konfiguration wird temporär geschrieben und die vollständige Home-Assistant-Konfiguration geprüft. Bei einem Fehler wird automatisch zurückgerollt. Fortfahren?')) return;
+  const btn=document.getElementById('btn-save'); setBusy(btn,true,'Prüfe & speichere…');
+  try {
+    const r=await fetch(`${BASE}/api/ha-export/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}); const data=await r.json();
+    if(!r.ok) return setStatus(`${data.error||`HTTP ${r.status}`}\n${checkMessage(data)}${data.rolled_back?'\nRollback wurde durchgeführt.':''}`,false);
+    setStatus(`Konfiguration geprüft und gespeichert.\nDatei: ${data.path}\nBackup: ${data.backup||'keines'}\nPrüfung: ${checkMessage(data)}\nEin Neustart ist erforderlich.`);
+    document.getElementById('btn-restart').classList.remove('hidden');
+  } catch(e) { setStatus(e.message,false); } finally { setBusy(btn,false); }
+}
+async function restartHomeAssistant() {
+  if(!confirm('Home Assistant jetzt neu starten? Die Oberfläche ist kurzzeitig nicht erreichbar.')) return;
+  const btn=document.getElementById('btn-restart'); setBusy(btn,true,'Neustart läuft…');
+  try {
+    const r=await fetch(`${BASE}/api/ha-export/restart`,{method:'POST'}); const data=await r.json();
+    if(!r.ok) { setBusy(btn,false); return setStatus(data.error||`HTTP ${r.status}`,false); }
+    setStatus(data.note||'Home Assistant wird neu gestartet.');
+    setTimeout(()=>window.location.href=`${BASE}/`,2500);
+  } catch(e) { setStatus(e.message,false); setBusy(btn,false); }
+}
+async function suggest() {
+  const r=await fetch(`${BASE}/api/ha-export/suggest-names`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({devices:inventory.devices})}); const data=await r.json();
+  for(const [id,name] of Object.entries(data.suggestions||{})) if(!entityConfig(id).name) entityConfig(id).name=name;
+  render(); setStatus('Lokale Namensvorschläge wurden eingetragen. Bitte vor dem Speichern prüfen.');
+}
+['search'].forEach(id=>document.getElementById(id).oninput=render);
+['area','domain'].forEach(id=>document.getElementById(id).onchange=render);
+document.getElementById('btn-reload').onclick=load;
+document.getElementById('btn-preview').onclick=preview;
+document.getElementById('btn-check').onclick=checkConfig;
+document.getElementById('btn-save').onclick=save;
+document.getElementById('btn-restart').onclick=restartHomeAssistant;
+document.getElementById('btn-suggest').onclick=suggest;
+load();
+</script>
+</body>
+</html>

@@ -1,5 +1,5 @@
 #!/usr/bin/with-contenv sh
 set -eu
 
-echo "[info] Starting Alexa Device Management clean web server..."
-python3 /opt/alexa_device_management/web/server_clean.py
+echo "[info] Starting Alexa Device Management extended web server..."
+python3 /opt/alexa_device_management/web/server_extended.py

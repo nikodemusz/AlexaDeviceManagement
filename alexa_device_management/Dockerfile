@@ -15,12 +15,16 @@ COPY rootfs /
 # Validate the runtime sources at build time.
 RUN python3 -m py_compile \
     /opt/alexa_device_management/web/server_clean.py \
+    /opt/alexa_device_management/web/server_extended.py \
+    /opt/alexa_device_management/web/ha_export.py \
+    /opt/alexa_device_management/web/ha_export_overrides.py \
+    /opt/alexa_device_management/web/ha_control.py \
     /opt/alexa_device_management/web/oh_style_login.py
 
 LABEL \
     io.hass.name="Alexa Device Management" \
-    io.hass.description="Standalone web UI for managing Amazon Alexa devices" \
+    io.hass.description="Standalone web UI for managing Amazon Alexa devices and configuring Home Assistant exports" \
     io.hass.type="app" \
     org.opencontainers.image.title="Home Assistant App: Alexa Device Management" \
-    org.opencontainers.image.description="Standalone web UI for managing Amazon Alexa smart home devices – a replacement for Amazon's removed bulk-management interface" \
+    org.opencontainers.image.description="Web UI for Alexa device management and Home Assistant to Alexa configuration" \
     org.opencontainers.image.source="https://github.com/nikodemusz/AlexaDeviceManagement"
