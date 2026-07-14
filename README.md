@@ -10,7 +10,16 @@ Apps documentation: <https://developers.home-assistant.io/docs/apps>
 
 | App | Description |
 |-----|-------------|
-| [Alexa Device Management](./alexa_device_management/) | Standalone web UI for managing Amazon Alexa smart home devices |
+| [Alexa Device Management](./alexa_device_management/) | Web UI for managing Amazon Alexa smart-home devices and configuring which Home Assistant entities are exposed through a manual Alexa Smart Home skill |
+
+## Alexa Device Management 1.4
+
+The app contains two independent areas:
+
+- **Alexa device inventory**: list, rename and bulk-delete devices already stored in Alexa.
+- **HA → Alexa export manager**: read Home Assistant devices, entities and areas; select useful entities; edit Alexa names and categories; preview and generate `/config/packages/alexa.yaml`.
+
+The HA export manager does not require an Amazon login. It uses the Home Assistant API available to the app and stores its editor state in `/data/ha_alexa_export.json`. Existing `packages/alexa.yaml` selections are imported automatically on first use. Before writing, the current YAML file is backed up.
 
 ## Installation (HA OS App Installer)
 
@@ -19,3 +28,4 @@ Apps documentation: <https://developers.home-assistant.io/docs/apps>
 3. Add this repository URL: `https://github.com/nikodemusz/AlexaDeviceManagement`.
 4. Install **Alexa Device Management** and start it.
 5. Open **Alexa Devices** from the HA sidebar.
+6. Use **HA → Alexa** in the toolbar to configure the manual Home Assistant Alexa skill export.
