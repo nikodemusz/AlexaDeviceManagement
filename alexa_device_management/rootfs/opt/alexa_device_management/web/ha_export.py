@@ -1,0 +1,286 @@
+"""Home Assistant to Alexa configuration manager.
+
+This module reads Home Assistant registries through the Supervisor proxy and
+creates the packages/alexa.yaml configuration consumed by Home Assistant's
+manual Alexa Smart Home integration.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import pathlib
+import re
+import shutil
+import time
+from typing import Any
+
+import aiohttp
+import yaml
+from aiohttp import web
+
+BASE_DIR = pathlib.Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
+EXPORT_STATE_PATH = pathlib.Path("/data/ha_alexa_export.json")
+ALEXA_YAML_PATH = pathlib.Path("/config/packages/alexa.yaml")
+HA_HTTP_URL = os.environ.get("HA_HTTP_URL", "http://supervisor/core/api")
+HA_WS_URL = os.environ.get("HA_WS_URL", "ws://supervisor/core/websocket")
+SUPERVISOR_TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
+
+DISPLAY_CATEGORIES = [
+    "LIGHT", "SWITCH", "SMARTPLUG", "THERMOSTAT", "TEMPERATURE_SENSOR",
+    "CONTACT_SENSOR", "MOTION_SENSOR", "DOOR", "WINDOW", "GARAGE_DOOR",
+    "INTERIOR_BLIND", "EXTERIOR_BLIND", "CAMERA", "LOCK", "SCENE_TRIGGER",
+    "OTHER",
+]
+
+CATEGORY_BY_DOMAIN = {
+    "light": "LIGHT",
+    "switch": "SWITCH",
+    "climate": "THERMOSTAT",
+    "cover": "INTERIOR_BLIND",
+    "lock": "LOCK",
+    "camera": "CAMERA",
+    "scene": "SCENE_TRIGGER",
+    "script": "SCENE_TRIGGER",
+}
+
+
+def _headers() -> dict[str, str]:
+    if not SUPERVISOR_TOKEN:
+        raise RuntimeError("SUPERVISOR_TOKEN is missing; enable homeassistant_api for the app")
+    return {"Authorization": f"Bearer {SUPERVISOR_TOKEN}", "Content-Type": "application/json"}
+
+
+async def _ws_commands(commands: list[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
+    """Run Home Assistant WebSocket commands and return results by name."""
+    result: dict[str, Any] = {}
+    async with aiohttp.ClientSession(headers=_headers()) as session:
+        async with session.ws_connect(HA_WS_URL, heartbeat=30) as ws:
+            first = await ws.receive_json()
+            if first.get("type") == "auth_required":
+                await ws.send_json({"type": "auth", "access_token": SUPERVISOR_TOKEN})
+                auth = await ws.receive_json()
+                if auth.get("type") != "auth_ok":
+                    raise RuntimeError(f"Home Assistant WebSocket authentication failed: {auth}")
+            elif first.get("type") != "auth_ok":
+                raise RuntimeError(f"Unexpected Home Assistant WebSocket response: {first}")
+
+            pending: dict[int, str] = {}
+            for idx, (name, command) in enumerate(commands, start=1):
+                payload = {"id": idx, **command}
+                pending[idx] = name
+                await ws.send_json(payload)
+
+            while pending:
+                message = await ws.receive_json()
+                message_id = message.get("id")
+                if message_id not in pending:
+                    continue
+                name = pending.pop(message_id)
+                if not message.get("success"):
+                    raise RuntimeError(f"HA command {name} failed: {message.get('error')}")
+                result[name] = message.get("result", [])
+    return result
+
+
+async def _inventory() -> dict[str, Any]:
+    registries = await _ws_commands([
+        ("devices", {"type": "config/device_registry/list"}),
+        ("entities", {"type": "config/entity_registry/list"}),
+        ("areas", {"type": "config/area_registry/list"}),
+        ("floors", {"type": "config/floor_registry/list"}),
+        ("labels", {"type": "config/label_registry/list"}),
+    ])
+
+    async with aiohttp.ClientSession(headers=_headers()) as session:
+        async with session.get(f"{HA_HTTP_URL}/states", timeout=20) as response:
+            response.raise_for_status()
+            states = await response.json()
+
+    states_by_id = {state.get("entity_id"): state for state in states}
+    areas = {area["area_id"]: area for area in registries["areas"]}
+    floors = {floor["floor_id"]: floor for floor in registries.get("floors", [])}
+    devices = {device["id"]: device for device in registries["devices"]}
+
+    grouped: dict[str, dict[str, Any]] = {}
+    for entity in registries["entities"]:
+        entity_id = entity.get("entity_id", "")
+        if not entity_id or entity.get("disabled_by") is not None:
+            continue
+        domain = entity_id.split(".", 1)[0]
+        state = states_by_id.get(entity_id, {})
+        attributes = state.get("attributes", {})
+        device = devices.get(entity.get("device_id"), {})
+        area_id = entity.get("area_id") or device.get("area_id")
+        area = areas.get(area_id, {})
+        floor = floors.get(area.get("floor_id"), {})
+        device_id = entity.get("device_id") or f"entity:{entity_id}"
+        group = grouped.setdefault(device_id, {
+            "device_id": device_id,
+            "name": device.get("name_by_user") or device.get("name") or attributes.get("friendly_name") or entity_id,
+            "manufacturer": device.get("manufacturer"),
+            "model": device.get("model"),
+            "area_id": area_id,
+            "area_name": area.get("name"),
+            "floor_name": floor.get("name"),
+            "entities": [],
+        })
+        group["entities"].append({
+            "entity_id": entity_id,
+            "domain": domain,
+            "name": entity.get("name") or attributes.get("friendly_name") or entity.get("original_name") or entity_id,
+            "original_name": entity.get("original_name"),
+            "platform": entity.get("platform"),
+            "device_class": attributes.get("device_class") or entity.get("device_class"),
+            "state": state.get("state"),
+            "category_suggestion": CATEGORY_BY_DOMAIN.get(domain, "OTHER"),
+            "supported_features": attributes.get("supported_features", 0),
+        })
+
+    device_list = sorted(grouped.values(), key=lambda item: ((item.get("area_name") or ""), item.get("name") or ""))
+    for device in device_list:
+        device["entities"].sort(key=lambda item: item["entity_id"])
+    return {
+        "devices": device_list,
+        "areas": sorted(registries["areas"], key=lambda item: item.get("name", "")),
+        "display_categories": DISPLAY_CATEGORIES,
+    }
+
+
+def _load_state() -> dict[str, Any]:
+    try:
+        return json.loads(EXPORT_STATE_PATH.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return {"locale": "de-DE", "entities": {}}
+
+
+def _save_state(data: dict[str, Any]) -> None:
+    EXPORT_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = EXPORT_STATE_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(EXPORT_STATE_PATH)
+
+
+def _yaml_document(data: dict[str, Any]) -> dict[str, Any]:
+    selected = {
+        entity_id: settings
+        for entity_id, settings in data.get("entities", {}).items()
+        if settings.get("enabled")
+    }
+    smart_home: dict[str, Any] = {
+        "locale": data.get("locale", "de-DE"),
+        "filter": {"include_entities": sorted(selected)},
+    }
+    entity_config: dict[str, Any] = {}
+    for entity_id, settings in sorted(selected.items()):
+        config: dict[str, Any] = {}
+        if settings.get("name"):
+            config["name"] = str(settings["name"]).strip()
+        if settings.get("description"):
+            config["description"] = str(settings["description"]).strip()
+        category = settings.get("display_category")
+        if category:
+            config["display_categories"] = category
+        if config:
+            entity_config[entity_id] = config
+    if entity_config:
+        smart_home["entity_config"] = entity_config
+    return {"alexa": {"smart_home": smart_home}}
+
+
+def _dump_yaml(data: dict[str, Any]) -> str:
+    return yaml.safe_dump(
+        _yaml_document(data),
+        allow_unicode=True,
+        sort_keys=False,
+        default_flow_style=False,
+    )
+
+
+def _suggest_name(entity: dict[str, Any], device: dict[str, Any]) -> str:
+    """Generate a conservative local Alexa-name suggestion without a cloud AI."""
+    raw = str(entity.get("name") or device.get("name") or entity.get("entity_id") or "Gerät")
+    raw = re.sub(r"\b(node|channel|kanal|switch|sensor|device|entity)\b", "", raw, flags=re.I)
+    raw = re.sub(r"\b\d{3,}\b", "", raw)
+    raw = re.sub(r"[_-]+", " ", raw)
+    raw = re.sub(r"\s+", " ", raw).strip(" -_")
+    area = str(device.get("area_name") or "").strip()
+    if area and area.lower() not in raw.lower():
+        raw = f"{raw} {area}".strip()
+    floor = str(device.get("floor_name") or "").strip()
+    if floor and floor.lower() not in raw.lower():
+        raw = f"{raw} {floor}".strip()
+    return raw or entity.get("entity_id", "Gerät")
+
+
+async def page(request: web.Request) -> web.Response:
+    text = (STATIC_DIR / "ha_export.html").read_text(encoding="utf-8")
+    ingress_path = request.headers.get("X-Ingress-Path", "").rstrip("/")
+    return web.Response(text=text.replace("{{INGRESS_PATH}}", ingress_path), content_type="text/html")
+
+
+async def inventory(request: web.Request) -> web.Response:
+    try:
+        data = await _inventory()
+        data["configuration"] = _load_state()
+        return web.json_response(data)
+    except Exception as exc:
+        return web.json_response({"error": str(exc)}, status=500)
+
+
+async def configuration(request: web.Request) -> web.Response:
+    state = _load_state()
+    yaml_text = _dump_yaml(state)
+    existing = None
+    try:
+        existing = ALEXA_YAML_PATH.read_text(encoding="utf-8")
+    except OSError:
+        pass
+    return web.json_response({"configuration": state, "yaml": yaml_text, "existing_yaml": existing})
+
+
+async def preview(request: web.Request) -> web.Response:
+    data = await request.json()
+    return web.json_response({"yaml": _dump_yaml(data), "selected": sum(1 for item in data.get("entities", {}).values() if item.get("enabled"))})
+
+
+async def suggest_names(request: web.Request) -> web.Response:
+    payload = await request.json()
+    suggestions: dict[str, str] = {}
+    for device in payload.get("devices", []):
+        for entity in device.get("entities", []):
+            suggestions[entity["entity_id"]] = _suggest_name(entity, device)
+    return web.json_response({"suggestions": suggestions, "source": "local_rules"})
+
+
+async def save(request: web.Request) -> web.Response:
+    data = await request.json()
+    yaml_text = _dump_yaml(data)
+    # Validate our generated YAML before touching the user's configuration.
+    yaml.safe_load(yaml_text)
+    _save_state(data)
+    ALEXA_YAML_PATH.parent.mkdir(parents=True, exist_ok=True)
+    backup = None
+    if ALEXA_YAML_PATH.exists():
+        backup = ALEXA_YAML_PATH.with_name(f"alexa.yaml.backup-{int(time.time())}")
+        shutil.copy2(ALEXA_YAML_PATH, backup)
+    tmp = ALEXA_YAML_PATH.with_suffix(".yaml.tmp")
+    tmp.write_text(yaml_text, encoding="utf-8")
+    tmp.replace(ALEXA_YAML_PATH)
+    return web.json_response({
+        "ok": True,
+        "path": str(ALEXA_YAML_PATH),
+        "backup": str(backup) if backup else None,
+        "yaml": yaml_text,
+        "restart_required": True,
+    })
+
+
+def register_routes(app: web.Application) -> None:
+    app.router.add_get("/ha-export", page)
+    app.router.add_get("/api/ha-export/inventory", inventory)
+    app.router.add_get("/api/ha-export/config", configuration)
+    app.router.add_post("/api/ha-export/preview", preview)
+    app.router.add_post("/api/ha-export/suggest-names", suggest_names)
+    app.router.add_post("/api/ha-export/save", save)
