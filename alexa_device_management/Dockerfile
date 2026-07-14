@@ -18,6 +18,7 @@ RUN python3 -m py_compile \
     /opt/alexa_device_management/web/server_extended.py \
     /opt/alexa_device_management/web/ha_export.py \
     /opt/alexa_device_management/web/ha_export_overrides.py \
+    /opt/alexa_device_management/web/ha_control.py \
     /opt/alexa_device_management/web/oh_style_login.py
 
 LABEL \
