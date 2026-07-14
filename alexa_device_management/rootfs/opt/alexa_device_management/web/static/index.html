@@ -242,6 +242,7 @@
         } else {
           showAlert(`${ok.length} Gerät(e) erfolgreich gelöscht.`, 'success');
         }
+        if (ok.length) fetchDevices();
       } catch (err) {
         showAlert('Fehler beim Löschen: ' + err.message, 'error');
       }
@@ -278,6 +279,7 @@
         const tr = document.querySelector(`.device-table tbody tr[data-serial="${CSS.escape(serial)}"]`);
         if (tr) tr.querySelector('.col-name').textContent = trimmed;
         showAlert(`Gerät erfolgreich in „${trimmed}" umbenannt.`, 'success');
+        fetchDevices();
       } catch (err) {
         showAlert('Fehler beim Umbenennen: ' + err.message, 'error');
       }
@@ -312,10 +314,10 @@
     let _sortKey = 'name';
     let _sortDir = 1;
 
-    function sortRows(key) {
-      if (_sortKey === key) { _sortDir = -_sortDir; } else { _sortKey = key; _sortDir = 1; }
+    function applySort() {
       const tbody = document.querySelector('.device-table tbody');
-      if (!tbody) return;
+      if (!tbody || !_sortKey) return;
+      const key = _sortKey;
       const rows = [...tbody.querySelectorAll('tr')];
       rows.sort((a, b) => {
         const da = _deviceBySerial[a.dataset.serial] || {};
@@ -329,6 +331,11 @@
         const arrow = th.querySelector('.sort-arrow');
         if (arrow) arrow.textContent = th.dataset.sort === _sortKey ? (_sortDir === 1 ? ' ▲' : ' ▼') : '';
       });
+    }
+
+    function sortRows(key) {
+      if (_sortKey === key) { _sortDir = -_sortDir; } else { _sortKey = key; _sortDir = 1; }
+      applySort();
     }
 
     function distinct(arr, key) {
@@ -398,10 +405,19 @@
       if (btnDelete) btnDelete.classList.toggle('hidden', count === 0);
     }
 
+    const FILTER_IDS = ['f-name','f-type','f-skill','f-manufacturer','f-room','f-source','f-online'];
+
     function renderDevices(devices) {
       _allDevices = devices;
       _deviceBySerial = {};
       devices.forEach(d => { _deviceBySerial[d.serial] = d; });
+      // Preserve active filter values across re-renders (e.g. auto-refresh
+      // after delete/rename)
+      const prevFilters = {};
+      FILTER_IDS.forEach(id => {
+        const el = document.getElementById(id);
+        if (el && el.value) prevFilters[id] = el.value;
+      });
       const container = document.getElementById("device-container");
       if (devices.length === 0) {
         container.innerHTML = `<div class="empty-state"><p>Keine Geräte gefunden.</p></div>`;
@@ -504,9 +520,14 @@
           updateSelectionInfo();
         });
       });
-      ['f-name','f-type','f-skill','f-manufacturer','f-room','f-source','f-online'].forEach(id => {
+      FILTER_IDS.forEach(id => {
         const el = document.getElementById(id);
-        if (el) el.addEventListener('input', applyFilters);
+        if (!el) return;
+        const prev = prevFilters[id];
+        if (prev && (el.tagName !== 'SELECT' || [...el.options].some(o => o.value === prev))) {
+          el.value = prev;
+        }
+        el.addEventListener('input', applyFilters);
       });
       document.querySelectorAll('.device-table thead th.sortable').forEach(th => {
         th.addEventListener('click', () => sortRows(th.dataset.sort));
@@ -515,6 +536,7 @@
         btn.addEventListener('click', () => renameDevice(btn.dataset.serial));
       });
       applyFilters();
+      applySort();
     }
 
     function showAlert(message, type) {

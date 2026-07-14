@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.4
+
+- **Performance**: Winner-Cache — die Mutation, die beim Löschen bzw. Umbenennen zuletzt nachweislich funktioniert hat, wird in `/data/api_hints.json` gespeichert und beim nächsten Mal direkt zuerst ausgeführt (mit Verifikation). Die volle Kandidaten-Leiter läuft nur noch, wenn der gespeicherte Weg nicht mehr funktioniert. Das Löschen weiterer Geräte ist dadurch deutlich schneller.
+- **Performance**: Die abgeschaltete Phoenix-v2-API wird nach dem ersten 400/403/404 für die Prozess-Laufzeit gemerkt und nicht mehr bei jedem Gerät erneut angefragt.
+- **UX**: Nach erfolgreichem Löschen oder Umbenennen wird die Geräteliste automatisch neu geladen — Gerätezähler in der Info-Karte und Filter-Zähler stimmen sofort, ohne manuellen Reload. Aktive Spaltenfilter und die Sortierung bleiben beim Auto-Refresh erhalten.
+
 ## 1.2.3
 
 - **Feature**: Schema-gesteuertes Löschen/Umbenennen per GraphQL-Introspection. Die 1.2.2-Probe hat gezeigt, dass die Nexus-API lebt, aber ein anderes Schema hat als vermutet (`deleteEndpoint` existiert nicht, `LegacyIdentifiers` hat kein `legacyApplianceIdentifier`). Statt weiter Namen zu raten, fragt das Add-on jetzt das Schema zur Laufzeit ab (`__type`-Introspection): Es sucht alle Mutationen, deren Name nach Löschen (`delete|forget|remove|unlink|deregister` + `endpoint|appliance|device|entity`) bzw. Umbenennen (`rename|friendlyName|set/update…name`) aussieht, konstruiert den Aufruf automatisch aus den introspektierten Argument-Typen (inkl. Input-Objekten und Listen) und führt ihn aus — mit Sicherheitsnetz: Eine Mutation wird nur ausgeführt, wenn die Endpoint-ID (und beim Umbenennen der neue Name) nachweislich in die Variablen gebunden wurde; parameterlose „deleteAll"-artige Mutationen können so nie ausgelöst werden. Erfolg zählt weiterhin erst nach Verifikation gegen `behaviors/entities`.

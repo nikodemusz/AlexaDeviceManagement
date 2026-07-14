@@ -13,11 +13,12 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "1.2.3"
+APP_VERSION = "1.2.4"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
 OPTIONS_PATH = pathlib.Path("/data/options.json")
+HINTS_PATH = pathlib.Path("/data/api_hints.json")
 
 
 def read_json(path: pathlib.Path) -> dict[str, Any]:
@@ -31,6 +32,19 @@ def read_json(path: pathlib.Path) -> dict[str, Any]:
 
 def session_data() -> dict[str, Any]:
     return read_json(SESSION_PATH)
+
+
+def read_hint(key: str) -> Any:
+    return read_json(HINTS_PATH).get(key)
+
+
+def write_hint(key: str, value: Any) -> None:
+    hints = read_json(HINTS_PATH)
+    hints[key] = value
+    try:
+        HINTS_PATH.write_text(json.dumps(hints), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def is_configured() -> bool:
@@ -231,6 +245,7 @@ INTROSPECT_TYPE_QUERY = (
 )
 
 _GQL_TYPE_CACHE: dict[str, Any] = {}
+_PHOENIX_UNAVAILABLE = False
 
 
 async def gql_introspect_type(type_name: str, data: dict[str, Any]) -> dict[str, Any] | None:
@@ -439,8 +454,15 @@ async def phoenix_find_appliance(uuid: str, data: dict[str, Any]) -> dict[str, A
     GET /api/phoenix returns networkDetail with all appliances including their
     entityId — the only reliable way to map UUID -> deletable applianceId.
     """
+    global _PHOENIX_UNAVAILABLE
+    if _PHOENIX_UNAVAILABLE:
+        return None
     st, body = await alexa_raw_get("/api/phoenix", data)
     if st != 200:
+        if st in (400, 403, 404, 410):
+            # Legacy phoenix v2 API is shut down for this account — stop
+            # probing it on every request.
+            _PHOENIX_UNAVAILABLE = True
         return None
     try:
         payload = json.loads(body)
@@ -498,6 +520,29 @@ async def delete_v3_entity_cookie(uuid: str, data: dict[str, Any]) -> dict[str, 
     arn = quote(arn_raw, safe="")
     results: dict[str, Any] = {}
 
+    # Fast path: replay the mutation that worked last time (cached in /data)
+    # instead of walking the whole candidate ladder again.
+    hint = read_hint("delete_winner")
+    if isinstance(hint, dict) and hint.get("mutation"):
+        fields = await gql_find_mutations(rf"^{re.escape(str(hint['mutation']))}$", data)
+        if fields:
+            if hint.get("id_kind") == "uuid":
+                id_value = uuid
+            elif hint.get("id_kind") == "endpoint":
+                gql_hit, _ = await graphql_find_endpoint(uuid, data)
+                id_value = str((gql_hit or {}).get("endpointId") or arn_raw)
+            else:
+                id_value = arn_raw
+            accepted, info = await gql_execute_mutation(fields[0], {"id": id_value}, ("id",), data)
+            key = f"GQL {hint['mutation']} [cached winner]"
+            results[key] = info
+            if accepted:
+                gone = await _v3_entity_gone(uuid, data)
+                info["verified_deleted"] = gone
+                if gone:
+                    results["_winner"] = key
+                    return results
+
     candidates: list[tuple[str, str, bytes]] = []
 
     # Resolve the exact endpointId via the GraphQL nexus API.
@@ -534,6 +579,10 @@ async def delete_v3_entity_cookie(uuid: str, data: dict[str, Any]) -> dict[str, 
                 info["verified_deleted"] = gone
                 if gone:
                     results["_winner"] = f"GQL {field['name']}"
+                    write_hint("delete_winner", {
+                        "mutation": str(field["name"]),
+                        "id_kind": "uuid" if id_value == uuid else "endpoint",
+                    })
                     return results
 
     # Legacy path: GET /api/phoenix networkDetail (answers 400 on accounts
@@ -611,6 +660,28 @@ async def rename_smart_home_cookie(
     arn = quote(arn_raw, safe="")
     results: dict[str, Any] = {}
 
+    # Fast path: replay the rename mutation that worked last time.
+    hint = read_hint("rename_winner")
+    if isinstance(hint, dict) and hint.get("mutation"):
+        fields = await gql_find_mutations(rf"^{re.escape(str(hint['mutation']))}$", data)
+        if fields:
+            if hint.get("id_kind") == "uuid":
+                id_value = uuid
+            else:
+                gql_hit, _ = await graphql_find_endpoint(uuid, data)
+                id_value = str((gql_hit or {}).get("endpointId") or arn_raw)
+            accepted, info = await gql_execute_mutation(
+                fields[0], {"id": id_value, "name": new_name}, ("id", "name"), data
+            )
+            key = f"GQL {hint['mutation']} [cached winner]"
+            results[key] = info
+            if accepted:
+                renamed = await _v3_entity_named(uuid, new_name, data)
+                info["verified_renamed"] = renamed
+                if renamed:
+                    results["_winner"] = key
+                    return results
+
     candidates: list[tuple[str, str, bytes]] = []
 
     # Resolve the exact endpointId via the GraphQL nexus API.
@@ -641,6 +712,10 @@ async def rename_smart_home_cookie(
             info["verified_renamed"] = renamed
             if renamed:
                 results["_winner"] = f"GQL {field['name']}"
+                write_hint("rename_winner", {
+                    "mutation": str(field["name"]),
+                    "id_kind": "endpoint",
+                })
                 return results
 
     # Legacy path: GET /api/phoenix networkDetail (400 on migrated accounts)
