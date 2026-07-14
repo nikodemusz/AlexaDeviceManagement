@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from aiohttp import web
 
+import ha_control
 import ha_export
 import ha_export_overrides
 import server_clean
@@ -28,9 +29,11 @@ async def navigation_middleware(request: web.Request, handler):
 def create_app() -> web.Application:
     server_clean.APP_VERSION = APP_VERSION
     ha_export_overrides.install()
+    ha_control.install()
     app = server_clean.create_app()
     app.middlewares.append(navigation_middleware)
     ha_export.register_routes(app)
+    ha_control.register_routes(app)
     return app
 
 
