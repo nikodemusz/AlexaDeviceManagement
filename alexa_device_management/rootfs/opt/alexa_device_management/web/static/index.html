@@ -81,11 +81,17 @@
   <script>
     const INGRESS_PATH = "{{INGRESS_PATH}}";
 
-    async function fetchDevices() {
+    let _lastUpdatedAt = 0;
+
+    async function fetchDevices(force) {
+      const btnRefresh = document.getElementById("btn-refresh");
+      if (force && btnRefresh) { btnRefresh.disabled = true; btnRefresh.textContent = "⏳ Lade…"; }
       try {
-        const resp = await fetch(`${INGRESS_PATH}/api/devices`);
+        const url = `${INGRESS_PATH}/api/devices` + (force ? "?refresh=1" : "");
+        const resp = await fetch(url);
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
+        _lastUpdatedAt = data.updated_at || 0;
         renderDevices(data.devices || []);
         updateDeviceInfo(data.devices || [], data.demo === true || data.source === "demo", data.api_error || data.warning);
         if (data.warnings && data.warnings.length) {
@@ -94,7 +100,20 @@
       } catch (err) {
         updateDeviceInfo([], false, err.message);
         showAlert("Fehler beim Laden der Geräte: " + err.message, "error");
+      } finally {
+        if (btnRefresh) { btnRefresh.disabled = false; btnRefresh.textContent = "↻ Aktualisieren"; }
       }
+    }
+
+    function formatAge(ts) {
+      if (!ts) return "";
+      const secs = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+      if (secs < 60) return "gerade eben";
+      const mins = Math.floor(secs / 60);
+      if (mins < 60) return `vor ${mins} min`;
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24) return `vor ${hrs} h`;
+      return `vor ${Math.floor(hrs / 24)} d`;
     }
 
     async function fetchAppInfo() {
@@ -188,9 +207,14 @@
         document.getElementById("info-device-detail").textContent = `Fehler/Fallback: ${errorMessage}`;
         return;
       }
-      document.getElementById("info-device-detail").textContent = demoMode
-        ? "Demo-Geräte werden angezeigt"
-        : "Geräte aus Alexa geladen";
+      if (demoMode) {
+        document.getElementById("info-device-detail").textContent = "Demo-Geräte werden angezeigt";
+      } else {
+        const age = formatAge(_lastUpdatedAt);
+        document.getElementById("info-device-detail").textContent = age
+          ? `Aus Zwischenspeicher • aktualisiert ${age}`
+          : "Geräte aus Alexa geladen";
+      }
     }
 
     function selectedSerials() {
@@ -628,7 +652,7 @@
       return d.innerHTML;
     }
 
-    document.getElementById("btn-refresh").addEventListener("click", fetchDevices);
+    document.getElementById("btn-refresh").addEventListener("click", () => fetchDevices(true));
     document.getElementById("btn-logout").addEventListener("click", logout);
     fetchConfigStatus();
     fetchAppInfo();

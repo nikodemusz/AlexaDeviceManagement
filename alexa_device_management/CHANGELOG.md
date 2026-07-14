@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.0
+
+- **Feature**: Das Backend hält die Geräteliste jetzt selbst vor (Stale-While-Revalidate). Die Liste wird beim Add-on-Start einmal geladen, alle 15 Minuten im Hintergrund aufgefrischt und in `/data/devices_cache.json` gespeichert. Beim Öffnen der App erscheinen die Geräte dadurch sofort aus dem Zwischenspeicher, statt bei jedem Öffnen erst auf die Alexa-API zu warten.
+- **Feature**: Ist der Zwischenspeicher älter als 60 Sekunden, wird er weiterhin sofort ausgeliefert und parallel im Hintergrund aktualisiert — die App bleibt schnell und die Daten aktuell.
+- **Feature**: Löschen und Umbenennen pflegen den Zwischenspeicher direkt (gelöschte Geräte raus, umbenannte aktualisiert) — kein zusätzlicher Alexa-Abruf nötig, die Liste stimmt sofort.
+- **UX**: Der „↻ Aktualisieren"-Button erzwingt jetzt einen frischen Abruf von Alexa (`?refresh=1`) und zeigt währenddessen „⏳ Lade…". Die Info-Karte zeigt an, wie alt der Zwischenspeicher ist („aktualisiert vor 3 min").
+- **Robustheit**: Ein leeres Ergebnis durch einen vorübergehenden API-Fehler überschreibt einen vorhandenen guten Zwischenspeicher nicht mehr — die zuletzt bekannten Geräte bleiben erhalten.
+
 ## 1.2.6
 
 - **Feature**: Bulk-Löschen läuft jetzt als serverseitiger Hintergrund-Job im Add-on statt im Browser. Der Vorgang läuft weiter, auch wenn die Seite geschlossen oder verlassen wird.

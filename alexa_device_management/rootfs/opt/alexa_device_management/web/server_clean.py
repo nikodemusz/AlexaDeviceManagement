@@ -15,13 +15,18 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "1.2.6"
+APP_VERSION = "1.3.0"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
 OPTIONS_PATH = pathlib.Path("/data/options.json")
 HINTS_PATH = pathlib.Path("/data/api_hints.json")
 DELETE_JOB_PATH = pathlib.Path("/data/delete_job.json")
+DEVICES_CACHE_PATH = pathlib.Path("/data/devices_cache.json")
+
+# Devices cache: served instantly, refreshed in the background
+DEVICES_CACHE_TTL = 60          # seconds before a background refresh is triggered
+DEVICES_REFRESH_INTERVAL = 900  # periodic refresh while the add-on runs
 
 
 def read_json(path: pathlib.Path) -> dict[str, Any]:
@@ -936,10 +941,8 @@ def _normalize_smart_home_device(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def devices(request: web.Request) -> web.Response:
-    if not is_configured():
-        return web.json_response({"devices": [], "demo": False, "source": "not_connected", "warning": "Alexa-Web-Session fehlt. Bitte Alexa verbinden."})
-    data = session_data()
+async def _fetch_devices_from_alexa(data: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
+    """Fetch + normalize the full device list from Alexa. Returns (devices, errors)."""
     devices_by_key: dict[str, dict[str, Any]] = {}
     errors: list[str] = []
 
@@ -965,9 +968,105 @@ async def devices(request: web.Request) -> web.Response:
         errors.append(f"Smart-Home-Geräte: {exc}")
 
     device_list = sorted(devices_by_key.values(), key=lambda d: d.get("name", "").lower())
-    result: dict[str, Any] = {"devices": device_list, "demo": False, "source": "alexa_web"}
-    if errors:
-        result["warnings"] = errors
+    return device_list, errors
+
+
+# ---------------------------------------------------------------------------
+# Devices cache (stale-while-revalidate): the add-on keeps the device list in
+# memory (+ on disk), serves it instantly and refreshes it in the background.
+
+_DEVICES_CACHE: dict[str, Any] = {}
+_DEVICES_REFRESH_LOCK = asyncio.Lock()
+
+
+def _load_devices_cache() -> None:
+    if _DEVICES_CACHE:
+        return
+    stored = read_json(DEVICES_CACHE_PATH)
+    if isinstance(stored.get("devices"), list):
+        _DEVICES_CACHE.update({
+            "devices": stored["devices"],
+            "updated_at": stored.get("updated_at", 0),
+            "warnings": stored.get("warnings", []),
+        })
+
+
+def _persist_devices_cache() -> None:
+    try:
+        DEVICES_CACHE_PATH.write_text(json.dumps({
+            "devices": _DEVICES_CACHE.get("devices", []),
+            "updated_at": _DEVICES_CACHE.get("updated_at", 0),
+            "warnings": _DEVICES_CACHE.get("warnings", []),
+        }), encoding="utf-8")
+    except OSError:
+        pass
+
+
+async def refresh_devices_cache() -> dict[str, Any]:
+    """Fetch fresh devices from Alexa and update the cache. Serialized by a lock."""
+    async with _DEVICES_REFRESH_LOCK:
+        if not is_configured():
+            return _DEVICES_CACHE
+        data = session_data()
+        device_list, errors = await _fetch_devices_from_alexa(data)
+        # Don't overwrite a good cache with an empty list caused by a transient
+        # API error (e.g. session hiccup) — keep the previous devices instead.
+        if not device_list and errors and _DEVICES_CACHE.get("devices"):
+            _DEVICES_CACHE["warnings"] = errors
+            _DEVICES_CACHE["last_error_at"] = time.time()
+            return _DEVICES_CACHE
+        _DEVICES_CACHE["devices"] = device_list
+        _DEVICES_CACHE["warnings"] = errors
+        _DEVICES_CACHE["updated_at"] = time.time()
+        _persist_devices_cache()
+        return _DEVICES_CACHE
+
+
+def _remove_from_cache(serials: list[str]) -> None:
+    if not serials or not _DEVICES_CACHE.get("devices"):
+        return
+    gone = set(serials)
+    _DEVICES_CACHE["devices"] = [
+        d for d in _DEVICES_CACHE["devices"] if d.get("serial") not in gone
+    ]
+    _DEVICES_CACHE["updated_at"] = time.time()
+    _persist_devices_cache()
+
+
+def _rename_in_cache(serial: str, new_name: str) -> None:
+    for d in _DEVICES_CACHE.get("devices", []):
+        if d.get("serial") == serial:
+            d["name"] = new_name
+            _DEVICES_CACHE["updated_at"] = time.time()
+            _persist_devices_cache()
+            return
+
+
+async def devices(request: web.Request) -> web.Response:
+    if not is_configured():
+        return web.json_response({"devices": [], "demo": False, "source": "not_connected", "warning": "Alexa-Web-Session fehlt. Bitte Alexa verbinden."})
+
+    _load_devices_cache()
+    force = request.rel_url.query.get("refresh") == "1"
+    age = time.time() - _DEVICES_CACHE.get("updated_at", 0)
+    has_cache = bool(_DEVICES_CACHE.get("devices")) or _DEVICES_CACHE.get("updated_at")
+
+    if force or not has_cache:
+        # No cache yet (first ever open) or explicit refresh: fetch synchronously.
+        await refresh_devices_cache()
+    elif age > DEVICES_CACHE_TTL and not _DEVICES_REFRESH_LOCK.locked():
+        # Serve stale immediately, refresh in the background.
+        asyncio.get_event_loop().create_task(refresh_devices_cache())
+
+    result: dict[str, Any] = {
+        "devices": _DEVICES_CACHE.get("devices", []),
+        "demo": False,
+        "source": "alexa_web",
+        "cached": True,
+        "updated_at": _DEVICES_CACHE.get("updated_at", 0),
+    }
+    if _DEVICES_CACHE.get("warnings"):
+        result["warnings"] = _DEVICES_CACHE["warnings"]
     return web.json_response(result)
 
 
@@ -1013,6 +1112,7 @@ async def delete_devices(request: web.Request) -> web.Response:
         name = str(target.get("name", "")).strip() or serial
         try:
             await _delete_target(target, data)
+            _remove_from_cache([serial])
             results.append({"serial": serial, "name": name, "ok": True})
         except Exception as exc:
             results.append({"serial": serial, "name": name, "ok": False, "error": str(exc)})
@@ -1050,6 +1150,7 @@ async def _run_delete_job(targets: list[dict[str, Any]], data: dict[str, Any]) -
                 await _delete_target(target, data)
                 job["ok"] += 1
                 job["deleted"].append({"serial": serial, "name": name})
+                _remove_from_cache([serial])
             except Exception as exc:
                 job["failed"].append({"serial": serial, "name": name, "error": str(exc)[:500]})
             job["done"] += 1
@@ -1163,6 +1264,7 @@ async def rename_devices(request: web.Request) -> web.Response:
                         "Skill-verwaltete Geräte bitte in der Quelle (z.B. openHAB, "
                         f"Home Assistant) umbenennen. Probe: {probe}"
                     )
+            _rename_in_cache(serial, new_name)
             results.append({"serial": serial, "name": old_name, "new_name": new_name, "ok": True})
         except Exception as exc:
             results.append({"serial": serial, "name": old_name, "ok": False, "error": str(exc)})
@@ -1500,8 +1602,40 @@ async def debug_ui(request: web.Request) -> web.Response:
     return web.Response(text=html, content_type="text/html")
 
 
+async def _periodic_device_refresh() -> None:
+    """Warm the cache on startup and refresh it periodically in the background."""
+    _load_devices_cache()
+    # Initial warm-up so the very first page open is instant.
+    if is_configured():
+        try:
+            await refresh_devices_cache()
+        except Exception:
+            pass
+    while True:
+        try:
+            await asyncio.sleep(DEVICES_REFRESH_INTERVAL)
+            if is_configured() and not _DELETE_JOB.get("running"):
+                await refresh_devices_cache()
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            continue
+
+
+async def _on_startup(app: web.Application) -> None:
+    app["device_refresh_task"] = asyncio.get_event_loop().create_task(_periodic_device_refresh())
+
+
+async def _on_cleanup(app: web.Application) -> None:
+    task = app.get("device_refresh_task")
+    if task:
+        task.cancel()
+
+
 def create_app() -> web.Application:
     app = web.Application()
+    app.on_startup.append(_on_startup)
+    app.on_cleanup.append(_on_cleanup)
     app.router.add_get("/", index)
     app.router.add_get("/api/app-info", app_info)
     app.router.add_get("/api/config-status", config_status)
