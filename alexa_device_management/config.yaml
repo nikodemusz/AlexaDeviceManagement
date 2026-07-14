@@ -16,6 +16,7 @@ ingress_port: 8099
 panel_icon: "mdi:speaker"
 panel_title: "Alexa Devices"
 homeassistant_api: true
+hassio_api: true
 map:
   - config:rw
 options: {}
