@@ -1,0 +1,161 @@
+/* Mobile and touch usability for the HA -> Alexa export manager. */
+html, body {
+  min-height: 100%;
+  overscroll-behavior-y: contain;
+}
+
+body {
+  -webkit-text-size-adjust: 100%;
+  touch-action: pan-y;
+}
+
+/* Entity tables must be horizontally swipeable inside HA Ingress on iOS/Android. */
+.device-body {
+  position: relative;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto !important;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x pan-y;
+  scrollbar-gutter: stable;
+}
+
+.device-body table {
+  width: max-content;
+  min-width: 980px;
+}
+
+.device-body th,
+.device-body td {
+  white-space: normal;
+}
+
+.device-body input,
+.device-body select,
+.device-body button {
+  touch-action: manipulation;
+}
+
+/* Make horizontally overflowing control groups usable by swiping as well. */
+@media (max-width: 700px) {
+  header {
+    position: sticky;
+    top: 0;
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x;
+    padding: 10px 12px !important;
+    gap: 8px !important;
+  }
+
+  header h1 {
+    flex: 0 0 auto !important;
+    min-width: 210px !important;
+    font-size: 17px !important;
+  }
+
+  header > a,
+  header > button {
+    flex: 0 0 auto;
+    min-height: 42px;
+  }
+
+  main {
+    padding: 10px !important;
+  }
+
+  .toolbar {
+    display: flex !important;
+    overflow-x: auto;
+    overflow-y: hidden;
+    gap: 8px !important;
+    padding-bottom: 5px;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x;
+  }
+
+  .toolbar > * {
+    flex: 0 0 78vw;
+    min-width: 220px;
+  }
+
+  .toolbar > button {
+    flex-basis: auto;
+    min-width: max-content;
+  }
+
+  .bulkbar,
+  .summary {
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 6px;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x;
+  }
+
+  .bulkbar > *,
+  .summary > * {
+    flex: 0 0 auto;
+  }
+
+  .device {
+    overflow: hidden;
+  }
+
+  .device-head {
+    grid-template-columns: auto minmax(0, 1fr) !important;
+  }
+
+  .device-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start !important;
+    overflow-x: auto;
+    flex-wrap: nowrap !important;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x;
+  }
+
+  .device-actions > * {
+    flex: 0 0 auto;
+  }
+
+  .device-body::before {
+    content: "↔ Tabelle seitlich wischen";
+    position: sticky;
+    left: 0;
+    display: inline-block;
+    z-index: 3;
+    margin: 6px 8px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, .82);
+    color: white;
+    font-size: 11px;
+    pointer-events: none;
+  }
+
+  .device-body table {
+    min-width: 920px;
+  }
+
+  input[type="checkbox"] {
+    width: 24px;
+    height: 24px;
+  }
+
+  input,
+  select,
+  button,
+  a {
+    min-height: 42px;
+  }
+}
