@@ -10,7 +10,7 @@ import ha_export
 import ha_export_overrides
 import server_clean
 
-APP_VERSION = "2.2.0-alpha1"
+APP_VERSION = "2.3.0-alpha1"
 
 
 @web.middleware
