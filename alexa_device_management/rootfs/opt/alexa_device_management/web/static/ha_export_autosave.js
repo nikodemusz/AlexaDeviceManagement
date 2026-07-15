@@ -8,6 +8,13 @@
     return window.config || null;
   }
 
+  function statusChip(text, state = '') {
+    const chip = document.getElementById('autosave-state');
+    if (!chip) return;
+    chip.textContent = text;
+    chip.className = `chip ${state}`.trim();
+  }
+
   function mark(text, ok = true) {
     const status = document.getElementById('status');
     if (!status) return;
@@ -23,6 +30,7 @@
       return;
     }
     saving = true;
+    statusChip('Autosave: speichert…', 'warn');
     try {
       const response = await fetch(`${base}/api/ha-export/autosave`, {
         method: 'POST',
@@ -32,7 +40,9 @@
       const result = await response.json();
       if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
       document.body.dataset.configSavedAt = String(Date.now());
+      statusChip('Autosave: gespeichert', 'good');
     } catch (error) {
+      statusChip('Autosave: Fehler', 'warn');
       mark(`Autosave fehlgeschlagen: ${error.message}`, false);
     } finally {
       saving = false;
@@ -45,6 +55,7 @@
 
   function schedule() {
     clearTimeout(timer);
+    statusChip('Autosave: ausstehend', 'warn');
     timer = setTimeout(persist, 450);
   }
 
@@ -53,7 +64,7 @@
   }, true);
 
   document.addEventListener('input', event => {
-    if (event.target.matches('.alexaname')) schedule();
+    if (event.target.matches('.alexaname, .description')) schedule();
   }, true);
 
   document.addEventListener('click', event => {
