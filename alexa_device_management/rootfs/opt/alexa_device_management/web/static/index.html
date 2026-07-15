@@ -105,6 +105,18 @@
       }
     }
 
+    // Keep the table's own scroll area ending at the bottom of the viewport,
+    // so its horizontal scrollbar is always visible where the user is.
+    function sizeTableWrapper() {
+      const wrap = document.querySelector('.table-wrapper');
+      if (!wrap) return;
+      const top = wrap.getBoundingClientRect().top;
+      const h = window.innerHeight - Math.max(top, 0) - 12;
+      wrap.style.maxHeight = Math.max(h, 240) + 'px';
+    }
+    window.addEventListener('resize', sizeTableWrapper);
+    window.addEventListener('scroll', sizeTableWrapper, { passive: true });
+
     function formatAge(ts) {
       if (!ts) return "";
       const secs = Math.max(0, Math.floor(Date.now() / 1000 - ts));
@@ -637,6 +649,7 @@
       });
       applyFilters();
       applySort();
+      sizeTableWrapper();
     }
 
     function showAlert(message, type) {

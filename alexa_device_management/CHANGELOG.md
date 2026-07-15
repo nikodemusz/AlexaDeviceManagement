@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.4.1
+
+- **UX**: Die Gerätetabelle scrollt jetzt in einem eigenen Bereich, der immer am unteren Bildschirmrand endet — der horizontale Scrollbalken ist dadurch jederzeit sichtbar, egal an welcher Stelle der Liste man sich befindet (vorher lag er erst ganz am Ende der Seite).
+- **UX**: Spaltenüberschriften und Filterzeile bleiben beim vertikalen Scrollen durch die Geräteliste stehen (sticky) — inklusive „Alle auswählen"-Checkbox und Sortier-Pfeilen.
+- **Fix**: Farbige Zeilen-Akzente (blau = Echo, grün = Smart Home) an das neue Tabellen-Layout angepasst.
+
+## 1.4.0
+
+- **Feature**: HA → Alexa Export-Manager (PR #41). Neue Seite `/ha-export` (Button „HA → Alexa" in der Toolbar) zum Konfigurieren, welche Home-Assistant-Geräte an Alexa exportiert werden, inklusive Import des bestehenden Alexa-YAML-Pakets, geprüftem Speichern der Konfiguration und Home-Assistant-Neustart aus der Oberfläche.
+
 ## 1.3.0
 
 - **Feature**: Das Backend hält die Geräteliste jetzt selbst vor (Stale-While-Revalidate). Die Liste wird beim Add-on-Start einmal geladen, alle 15 Minuten im Hintergrund aufgefrischt und in `/data/devices_cache.json` gespeichert. Beim Öffnen der App erscheinen die Geräte dadurch sofort aus dem Zwischenspeicher, statt bei jedem Öffnen erst auf die Alexa-API zu warten.

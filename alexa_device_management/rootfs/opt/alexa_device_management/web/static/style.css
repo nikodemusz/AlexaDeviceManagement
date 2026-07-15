@@ -178,21 +178,24 @@ body {
 
 .table-wrapper {
   width: 100%;
-  overflow-x: auto;
+  overflow: auto;
   border-radius: 12px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
   background: #fff;
+  -webkit-overflow-scrolling: touch;
+  /* max-height is set dynamically (sizeTableWrapper) so the horizontal
+     scrollbar always sits at the bottom of the viewport */
 }
 
 .device-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 13px;
 }
 
 .device-table thead tr {
   background: #f8f9fa;
-  border-bottom: 2px solid #e9ecef;
 }
 
 .device-table th {
@@ -204,6 +207,17 @@ body {
   letter-spacing: 0.05em;
   color: #636e72;
   white-space: nowrap;
+}
+
+/* Sticky header + filter row while scrolling vertically inside the wrapper */
+.device-table thead tr:first-child th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #f8f9fa;
+  height: 37px;
+  box-sizing: border-box;
+  box-shadow: inset 0 -1px 0 #e9ecef;
 }
 
 .device-table td {
@@ -220,11 +234,11 @@ body {
   background: #f8f9fa;
 }
 
-.row-echo {
+.row-echo td:first-child {
   border-left: 3px solid #00caff;
 }
 
-.row-smart-home {
+.row-smart-home td:first-child {
   border-left: 3px solid #27ae60;
 }
 
@@ -232,7 +246,10 @@ body {
 .filter-row th {
   padding: 6px 8px;
   background: #f0f4f8;
-  border-bottom: 2px solid #e9ecef;
+  position: sticky;
+  top: 37px;
+  z-index: 2;
+  box-shadow: inset 0 -2px 0 #e9ecef;
 }
 
 .f-input, .f-select {
