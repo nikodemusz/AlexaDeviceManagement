@@ -1,23 +1,64 @@
-"""Home Assistant configuration validation and restart helpers."""
+"""Home Assistant configuration validation, deployment and restart helpers."""
 
 from __future__ import annotations
 
+import os
 import pathlib
-import shutil
+import tempfile
 import time
 from typing import Any
 
 import aiohttp
-import yaml
 from aiohttp import web
 
 import ha_export
+from yaml_generator import GeneratorValidationError
 
 SUPERVISOR_BASE_URL = "http://supervisor"
+DEPLOY_STATUS_PATH = pathlib.Path("/data/alexa_device_management/deploy_status.json")
+
+
+def _atomic_write_bytes(path: pathlib.Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f"{path.name}-", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_name, path)
+        dir_fd = os.open(path.parent, os.O_DIRECTORY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    finally:
+        if os.path.exists(tmp_name):
+            os.unlink(tmp_name)
+
+
+def _write_deploy_status(data: dict[str, Any]) -> None:
+    import json
+
+    try:
+        _atomic_write_bytes(
+            DEPLOY_STATUS_PATH,
+            json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8"),
+        )
+    except OSError:
+        pass
+
+
+def _read_deploy_status() -> dict[str, Any]:
+    import json
+
+    try:
+        return json.loads(DEPLOY_STATUS_PATH.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return {}
 
 
 async def _supervisor_post(path: str, timeout: int = 120) -> tuple[int, dict[str, Any] | str]:
-    """Call a Supervisor API action using the app's Supervisor token."""
     headers = ha_export._headers()
     async with aiohttp.ClientSession(headers=headers) as session:
         async with session.post(
@@ -39,7 +80,6 @@ def _result_message(body: dict[str, Any] | str) -> str:
 
 
 async def check_config() -> dict[str, Any]:
-    """Run Home Assistant's full configuration check through Supervisor."""
     status, body = await _supervisor_post("/core/check", timeout=180)
     success = 200 <= status < 300
     return {
@@ -50,28 +90,33 @@ async def check_config() -> dict[str, Any]:
     }
 
 
-async def checked_save(request: web.Request) -> web.Response:
-    """Write proposed YAML, validate the complete HA config, and roll back on error."""
+async def checked_deploy(request: web.Request) -> web.Response:
+    """Persist browser state, deploy from ConfigStore, validate HA and roll back on failure."""
+    started_at = int(time.time())
+    target = ha_export.ALEXA_YAML_PATH
+    previous_exists = target.exists()
+    previous_bytes = target.read_bytes() if previous_exists else None
+
+    _write_deploy_status({
+        "state": "running",
+        "started_at": started_at,
+        "finished_at": None,
+        "rolled_back": False,
+    })
+
     try:
-        data = await request.json()
-        yaml_text = ha_export._dump_yaml(data)
-        yaml.safe_load(yaml_text)
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = None
 
-        target = ha_export.ALEXA_YAML_PATH
-        target.parent.mkdir(parents=True, exist_ok=True)
-        previous_exists = target.exists()
-        previous_bytes = target.read_bytes() if previous_exists else None
-        backup: pathlib.Path | None = None
+        if isinstance(payload, dict) and payload:
+            ha_export._save_state(payload)
 
-        if previous_exists:
-            backup = target.with_name(f"alexa.yaml.backup-{int(time.time())}")
-            shutil.copy2(target, backup)
-
-        temporary = target.with_suffix(".yaml.tmp")
-        temporary.write_text(yaml_text, encoding="utf-8")
-        temporary.replace(target)
-
+        persisted = ha_export._load_state()
+        deployment = ha_export.YAML_GENERATOR.deploy(persisted)
         check = await check_config()
+
         if not check["ok"]:
             if previous_bytes is None:
                 try:
@@ -79,35 +124,83 @@ async def checked_save(request: web.Request) -> web.Response:
                 except FileNotFoundError:
                     pass
             else:
-                rollback = target.with_suffix(".yaml.rollback")
-                rollback.write_bytes(previous_bytes)
-                rollback.replace(target)
-            return web.json_response(
-                {
-                    "ok": False,
-                    "saved": False,
-                    "rolled_back": True,
-                    "check": check,
-                    "backup": str(backup) if backup else None,
-                    "error": "Home-Assistant-Konfigurationsprüfung fehlgeschlagen; die bisherige Datei wurde wiederhergestellt.",
-                },
-                status=422,
-            )
+                _atomic_write_bytes(target, previous_bytes)
 
-        ha_export._save_state(data)
-        return web.json_response(
-            {
-                "ok": True,
-                "saved": True,
-                "path": str(target),
-                "backup": str(backup) if backup else None,
-                "yaml": yaml_text,
+            result = {
+                "ok": False,
+                "saved": False,
+                "deployed": False,
+                "rolled_back": True,
                 "check": check,
-                "restart_required": True,
+                "backup": deployment.backup,
+                "error": "Home-Assistant-Konfigurationsprüfung fehlgeschlagen; die bisherige Datei wurde wiederhergestellt.",
             }
-        )
+            _write_deploy_status({
+                "state": "failed",
+                "started_at": started_at,
+                "finished_at": int(time.time()),
+                "rolled_back": True,
+                "check": check,
+                "backup": deployment.backup,
+                "error": result["error"],
+            })
+            return web.json_response(result, status=422)
+
+        result = {
+            "ok": True,
+            "saved": True,
+            "deployed": True,
+            "rolled_back": False,
+            "path": deployment.path,
+            "backup": deployment.backup,
+            "yaml": deployment.yaml_text,
+            "selected": deployment.selected_count,
+            "check": check,
+            "restart_required": True,
+        }
+        _write_deploy_status({
+            "state": "success",
+            "started_at": started_at,
+            "finished_at": int(time.time()),
+            "rolled_back": False,
+            "path": deployment.path,
+            "backup": deployment.backup,
+            "selected": deployment.selected_count,
+            "check": check,
+        })
+        return web.json_response(result)
+    except GeneratorValidationError as exc:
+        _write_deploy_status({
+            "state": "failed",
+            "started_at": started_at,
+            "finished_at": int(time.time()),
+            "rolled_back": False,
+            "error": str(exc),
+        })
+        return web.json_response({"ok": False, "error": str(exc)}, status=400)
     except Exception as exc:
-        return web.json_response({"ok": False, "error": str(exc)}, status=500)
+        if target.exists() and previous_bytes is not None:
+            try:
+                _atomic_write_bytes(target, previous_bytes)
+            except OSError:
+                pass
+        elif not previous_exists:
+            try:
+                target.unlink()
+            except FileNotFoundError:
+                pass
+        _write_deploy_status({
+            "state": "failed",
+            "started_at": started_at,
+            "finished_at": int(time.time()),
+            "rolled_back": True,
+            "error": str(exc),
+        })
+        return web.json_response({"ok": False, "rolled_back": True, "error": str(exc)}, status=500)
+
+
+async def deploy_status(request: web.Request) -> web.Response:
+    return web.json_response(_read_deploy_status())
 
 
 async def check_config_endpoint(request: web.Request) -> web.Response:
@@ -119,7 +212,6 @@ async def check_config_endpoint(request: web.Request) -> web.Response:
 
 
 async def restart(request: web.Request) -> web.Response:
-    """Restart Home Assistant Core after explicit confirmation in the UI."""
     try:
         status, body = await _supervisor_post("/core/restart", timeout=30)
         if not 200 <= status < 300:
@@ -140,10 +232,11 @@ async def restart(request: web.Request) -> web.Response:
 
 
 def install() -> None:
-    """Replace the original save handler before ha_export registers its routes."""
-    ha_export.save = checked_save
+    ha_export.save = checked_deploy
 
 
 def register_routes(app: web.Application) -> None:
     app.router.add_post("/api/ha-export/check-config", check_config_endpoint)
+    app.router.add_get("/api/ha-export/deploy-status", deploy_status)
+    app.router.add_post("/api/ha-export/deploy", checked_deploy)
     app.router.add_post("/api/ha-export/restart", restart)
