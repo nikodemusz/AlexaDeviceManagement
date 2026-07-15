@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.0
+
+- **Feature**: HA → Alexa Export-Manager erweitert: Geräte-Vorbereitung, Bulk-Aktionen und Vorschau der Alexa-Capabilities in der Export-Oberfläche (`/ha-export`).
+- **Wartung**: Zusammenführung der UI-Verbesserungen aus 1.4.1 (immer sichtbarer Scrollbalken, Sticky-Tabellenkopf) mit dem Export-Manager.
+
 ## 1.4.1
 
 - **UX**: Die Gerätetabelle scrollt jetzt in einem eigenen Bereich, der immer am unteren Bildschirmrand endet — der horizontale Scrollbalken ist dadurch jederzeit sichtbar, egal an welcher Stelle der Liste man sich befindet (vorher lag er erst ganz am Ende der Seite).
