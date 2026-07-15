@@ -5,12 +5,13 @@ from __future__ import annotations
 from aiohttp import web
 
 import alexa_cache_service
+import discovery_preview
 import ha_control
 import ha_export
 import ha_export_overrides
 import server_clean
 
-APP_VERSION = "2.4.0-alpha1"
+APP_VERSION = "2.5.0-alpha1"
 
 
 @web.middleware
@@ -49,6 +50,10 @@ async def navigation_middleware(request: web.Request, handler):
             + ingress_path
             + '/static/ha_export_bulk.js?v='
             + APP_VERSION
+            + '"></script><script src="'
+            + ingress_path
+            + '/static/ha_export_discovery.js?v='
+            + APP_VERSION
             + '"></script>'
         )
         text = text.replace("let inventory=", "window.inventory=")
@@ -72,6 +77,7 @@ def create_app() -> web.Application:
     alexa_cache_service.register_routes(app, server_clean)
     ha_export.register_routes(app)
     ha_control.register_routes(app)
+    discovery_preview.register_routes(app)
     return app
 
 
