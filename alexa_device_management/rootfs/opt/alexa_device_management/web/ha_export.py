@@ -7,7 +7,6 @@ manual Alexa Smart Home integration.
 
 from __future__ import annotations
 
-import json
 import os
 import pathlib
 import re
@@ -19,13 +18,18 @@ import aiohttp
 import yaml
 from aiohttp import web
 
+from config_store import ConfigStore
+
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
+DATA_DIR = pathlib.Path("/data/alexa_device_management")
 EXPORT_STATE_PATH = pathlib.Path("/data/ha_alexa_export.json")
+CONFIG_PATH = DATA_DIR / "config.json"
 ALEXA_YAML_PATH = pathlib.Path("/config/packages/alexa.yaml")
 HA_HTTP_URL = os.environ.get("HA_HTTP_URL", "http://supervisor/core/api")
 HA_WS_URL = os.environ.get("HA_WS_URL", "ws://supervisor/core/websocket")
 SUPERVISOR_TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
+CONFIG_STORE = ConfigStore(CONFIG_PATH, EXPORT_STATE_PATH, ALEXA_YAML_PATH)
 
 DISPLAY_CATEGORIES = [
     "LIGHT", "SWITCH", "SMARTPLUG", "THERMOSTAT", "TEMPERATURE_SENSOR",
@@ -53,7 +57,6 @@ def _headers() -> dict[str, str]:
 
 
 async def _ws_commands(commands: list[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
-    """Run Home Assistant WebSocket commands and return results by name."""
     result: dict[str, Any] = {}
     async with aiohttp.ClientSession(headers=_headers()) as session:
         async with session.ws_connect(HA_WS_URL, heartbeat=30) as ws:
@@ -149,17 +152,11 @@ async def _inventory() -> dict[str, Any]:
 
 
 def _load_state() -> dict[str, Any]:
-    try:
-        return json.loads(EXPORT_STATE_PATH.read_text(encoding="utf-8"))
-    except (FileNotFoundError, OSError, json.JSONDecodeError):
-        return {"locale": "de-DE", "entities": {}}
+    return CONFIG_STORE.load()
 
 
-def _save_state(data: dict[str, Any]) -> None:
-    EXPORT_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = EXPORT_STATE_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(EXPORT_STATE_PATH)
+def _save_state(data: dict[str, Any]) -> dict[str, Any]:
+    return CONFIG_STORE.save(data)
 
 
 def _yaml_document(data: dict[str, Any]) -> dict[str, Any]:
@@ -199,7 +196,6 @@ def _dump_yaml(data: dict[str, Any]) -> str:
 
 
 def _suggest_name(entity: dict[str, Any], device: dict[str, Any]) -> str:
-    """Generate a conservative local Alexa-name suggestion without a cloud AI."""
     raw = str(entity.get("name") or device.get("name") or entity.get("entity_id") or "Gerät")
     raw = re.sub(r"\b(node|channel|kanal|switch|sensor|device|entity)\b", "", raw, flags=re.I)
     raw = re.sub(r"\b\d{3,}\b", "", raw)
@@ -224,6 +220,7 @@ async def inventory(request: web.Request) -> web.Response:
     try:
         data = await _inventory()
         data["configuration"] = _load_state()
+        data["storage"] = CONFIG_STORE.status()
         return web.json_response(data)
     except Exception as exc:
         return web.json_response({"error": str(exc)}, status=500)
@@ -237,7 +234,21 @@ async def configuration(request: web.Request) -> web.Response:
         existing = ALEXA_YAML_PATH.read_text(encoding="utf-8")
     except OSError:
         pass
-    return web.json_response({"configuration": state, "yaml": yaml_text, "existing_yaml": existing})
+    return web.json_response({
+        "configuration": state,
+        "yaml": yaml_text,
+        "existing_yaml": existing,
+        "storage": CONFIG_STORE.status(),
+    })
+
+
+async def autosave(request: web.Request) -> web.Response:
+    try:
+        data = await request.json()
+        saved = _save_state(data)
+        return web.json_response({"ok": True, "configuration": saved, "storage": CONFIG_STORE.status()})
+    except Exception as exc:
+        return web.json_response({"ok": False, "error": str(exc), "storage": CONFIG_STORE.status()}, status=500)
 
 
 async def preview(request: web.Request) -> web.Response:
@@ -257,9 +268,8 @@ async def suggest_names(request: web.Request) -> web.Response:
 async def save(request: web.Request) -> web.Response:
     data = await request.json()
     yaml_text = _dump_yaml(data)
-    # Validate our generated YAML before touching the user's configuration.
     yaml.safe_load(yaml_text)
-    _save_state(data)
+    saved = _save_state(data)
     ALEXA_YAML_PATH.parent.mkdir(parents=True, exist_ok=True)
     backup = None
     if ALEXA_YAML_PATH.exists():
@@ -270,6 +280,8 @@ async def save(request: web.Request) -> web.Response:
     tmp.replace(ALEXA_YAML_PATH)
     return web.json_response({
         "ok": True,
+        "configuration": saved,
+        "storage": CONFIG_STORE.status(),
         "path": str(ALEXA_YAML_PATH),
         "backup": str(backup) if backup else None,
         "yaml": yaml_text,
@@ -281,6 +293,7 @@ def register_routes(app: web.Application) -> None:
     app.router.add_get("/ha-export", page)
     app.router.add_get("/api/ha-export/inventory", inventory)
     app.router.add_get("/api/ha-export/config", configuration)
+    app.router.add_post("/api/ha-export/autosave", autosave)
     app.router.add_post("/api/ha-export/preview", preview)
     app.router.add_post("/api/ha-export/suggest-names", suggest_names)
     app.router.add_post("/api/ha-export/save", save)
