@@ -51,6 +51,7 @@ async def navigation_middleware(request: web.Request, handler):
             + APP_VERSION
             + '"></script>'
         )
+        text = text.replace("let inventory=", "window.inventory=")
         text = text.replace("let config=", "window.config=")
         if "ha_export_mobile.css" not in text:
             text = text.replace("</head>", stylesheet + "</head>")
