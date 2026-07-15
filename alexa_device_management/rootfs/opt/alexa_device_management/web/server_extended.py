@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from aiohttp import web
 
+import alexa_cache_service
 import ha_control
 import ha_export
 import ha_export_overrides
 import server_clean
 
-APP_VERSION = "2.0.0-alpha1"
+APP_VERSION = "2.0.0-alpha2"
 
 
 @web.middleware
@@ -59,10 +60,12 @@ async def navigation_middleware(request: web.Request, handler):
 
 def create_app() -> web.Application:
     server_clean.APP_VERSION = APP_VERSION
+    alexa_cache_service.install(server_clean)
     ha_export_overrides.install()
     ha_control.install()
     app = server_clean.create_app()
     app.middlewares.append(navigation_middleware)
+    alexa_cache_service.register_routes(app, server_clean)
     ha_export.register_routes(app)
     ha_control.register_routes(app)
     return app
