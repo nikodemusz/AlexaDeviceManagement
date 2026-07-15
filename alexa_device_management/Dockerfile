@@ -17,6 +17,7 @@ RUN python3 -m py_compile \
     /opt/alexa_device_management/web/server_clean.py \
     /opt/alexa_device_management/web/server_extended.py \
     /opt/alexa_device_management/web/config_store.py \
+    /opt/alexa_device_management/web/alexa_cache_service.py \
     /opt/alexa_device_management/web/ha_export.py \
     /opt/alexa_device_management/web/ha_export_overrides.py \
     /opt/alexa_device_management/web/ha_control.py \
