@@ -10,7 +10,7 @@ import ha_export
 import ha_export_overrides
 import server_clean
 
-APP_VERSION = "2.0.0-alpha2"
+APP_VERSION = "2.1.0-alpha1"
 
 
 @web.middleware
@@ -47,7 +47,6 @@ async def navigation_middleware(request: web.Request, handler):
             + APP_VERSION
             + '"></script>'
         )
-        # Expose the existing configuration object to the autosave module.
         text = text.replace("let config=", "window.config=")
         if "ha_export_mobile.css" not in text:
             text = text.replace("</head>", stylesheet + "</head>")
