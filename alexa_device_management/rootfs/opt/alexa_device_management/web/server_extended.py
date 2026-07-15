@@ -9,7 +9,7 @@ import ha_export
 import ha_export_overrides
 import server_clean
 
-APP_VERSION = "1.5.1"
+APP_VERSION = "2.0.0-alpha1"
 
 
 @web.middleware
@@ -29,6 +29,7 @@ async def navigation_middleware(request: web.Request, handler):
             response.text = text.replace(marker, link + marker)
 
     if request.path == "/ha-export":
+        text = response.text or text
         stylesheet = (
             '<link rel="stylesheet" href="'
             + ingress_path
@@ -36,8 +37,22 @@ async def navigation_middleware(request: web.Request, handler):
             + APP_VERSION
             + '">'
         )
+        autosave = (
+            '<script>document.documentElement.dataset.ingressPath='
+            + repr(ingress_path)
+            + ';</script><script src="'
+            + ingress_path
+            + '/static/ha_export_autosave.js?v='
+            + APP_VERSION
+            + '"></script>'
+        )
+        # Expose the existing configuration object to the autosave module.
+        text = text.replace("let config=", "window.config=")
         if "ha_export_mobile.css" not in text:
-            response.text = text.replace("</head>", stylesheet + "</head>")
+            text = text.replace("</head>", stylesheet + "</head>")
+        if "ha_export_autosave.js" not in text:
+            text = text.replace("</body>", autosave + "</body>")
+        response.text = text
 
     return response
 
