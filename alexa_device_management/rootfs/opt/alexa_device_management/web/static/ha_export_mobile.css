@@ -1,4 +1,4 @@
-/* Mobile and touch usability for the HA -> Alexa export manager. */
+/* Touch and small-screen refinements for the HA -> Alexa card editor. */
 html, body {
   min-height: 100%;
   overscroll-behavior-y: contain;
@@ -9,61 +9,38 @@ body {
   touch-action: pan-y;
 }
 
-/* Entity tables must be horizontally swipeable inside HA Ingress on iOS/Android. */
-.device-body {
-  position: relative;
-  display: block;
-  max-width: 100%;
-  overflow-x: auto !important;
-  overflow-y: visible;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior-x: contain;
-  touch-action: pan-x pan-y;
-  scrollbar-gutter: stable;
-}
-
-.device-body table {
-  width: max-content;
-  min-width: 980px;
-}
-
-.device-body th,
-.device-body td {
-  white-space: normal;
-}
-
-.device-body input,
-.device-body select,
-.device-body button {
+button,
+a,
+input,
+select,
+textarea,
+summary {
   touch-action: manipulation;
 }
 
-/* Make horizontally overflowing control groups usable by swiping as well. */
 @media (max-width: 700px) {
   header {
     position: sticky;
     top: 0;
-    display: flex !important;
-    flex-wrap: nowrap !important;
-    overflow-x: auto;
-    overflow-y: hidden;
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior-x: contain;
-    touch-action: pan-x;
-    padding: 10px 12px !important;
-    gap: 8px !important;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    overflow: visible !important;
+    padding: 10px !important;
+    gap: 7px !important;
   }
 
   header h1 {
-    flex: 0 0 auto !important;
-    min-width: 210px !important;
+    grid-column: 1 / -1;
+    min-width: 0 !important;
     font-size: 17px !important;
   }
 
   header > a,
   header > button {
-    flex: 0 0 auto;
+    width: 100%;
     min-height: 42px;
+    padding: 9px 8px;
+    font-size: 13px;
   }
 
   main {
@@ -71,44 +48,35 @@ body {
   }
 
   .toolbar {
-    display: flex !important;
-    overflow-x: auto;
-    overflow-y: hidden;
-    gap: 8px !important;
-    padding-bottom: 5px;
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior-x: contain;
-    touch-action: pan-x;
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    overflow: visible !important;
   }
 
   .toolbar > * {
-    flex: 0 0 78vw;
-    min-width: 220px;
+    min-width: 0 !important;
+    width: 100%;
   }
 
-  .toolbar > button {
-    flex-basis: auto;
-    min-width: max-content;
+  .bulkbar {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    overflow: visible !important;
   }
 
-  .bulkbar,
+  .bulkbar > * {
+    min-height: 42px;
+    width: 100%;
+  }
+
   .summary {
-    flex-wrap: nowrap !important;
-    overflow-x: auto;
-    overflow-y: hidden;
-    padding-bottom: 6px;
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior-x: contain;
-    touch-action: pan-x;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    overflow: visible !important;
   }
 
-  .bulkbar > *,
   .summary > * {
-    flex: 0 0 auto;
-  }
-
-  .device {
-    overflow: hidden;
+    min-width: 0;
   }
 
   .device-head {
@@ -117,45 +85,49 @@ body {
 
   .device-actions {
     grid-column: 1 / -1;
-    justify-content: flex-start !important;
-    overflow-x: auto;
-    flex-wrap: nowrap !important;
-    -webkit-overflow-scrolling: touch;
-    touch-action: pan-x;
+    display: grid !important;
+    grid-template-columns: 1fr;
+    overflow: visible !important;
   }
 
   .device-actions > * {
-    flex: 0 0 auto;
+    width: 100%;
   }
 
-  .device-body::before {
-    content: "↔ Tabelle seitlich wischen";
-    position: sticky;
-    left: 0;
-    display: inline-block;
-    z-index: 3;
-    margin: 6px 8px;
-    padding: 4px 8px;
-    border-radius: 999px;
-    background: rgba(15, 23, 42, .82);
-    color: white;
-    font-size: 11px;
-    pointer-events: none;
+  .entity-grid {
+    grid-template-columns: 1fr !important;
   }
 
-  .device-body table {
-    min-width: 920px;
+  .entity-card {
+    min-width: 0;
+  }
+
+  .fields {
+    grid-template-columns: 1fr !important;
+  }
+
+  .field.full {
+    grid-column: auto !important;
   }
 
   input[type="checkbox"] {
-    width: 24px;
-    height: 24px;
+    width: 26px;
+    height: 26px;
   }
 
   input,
   select,
+  textarea,
   button,
   a {
     min-height: 42px;
+  }
+}
+
+@media (max-width: 420px) {
+  header,
+  .bulkbar,
+  .summary {
+    grid-template-columns: 1fr !important;
   }
 }
