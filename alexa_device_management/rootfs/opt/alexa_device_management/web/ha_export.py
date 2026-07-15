@@ -1,24 +1,17 @@
-"""Home Assistant to Alexa configuration manager.
-
-This module reads Home Assistant registries through the Supervisor proxy and
-creates the packages/alexa.yaml configuration consumed by Home Assistant's
-manual Alexa Smart Home integration.
-"""
+"""Home Assistant to Alexa configuration manager."""
 
 from __future__ import annotations
 
 import os
 import pathlib
 import re
-import shutil
-import time
 from typing import Any
 
 import aiohttp
-import yaml
 from aiohttp import web
 
 from config_store import ConfigStore
+from yaml_generator import AlexaYamlGenerator, GeneratorValidationError
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
@@ -30,6 +23,7 @@ HA_HTTP_URL = os.environ.get("HA_HTTP_URL", "http://supervisor/core/api")
 HA_WS_URL = os.environ.get("HA_WS_URL", "ws://supervisor/core/websocket")
 SUPERVISOR_TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
 CONFIG_STORE = ConfigStore(CONFIG_PATH, EXPORT_STATE_PATH, ALEXA_YAML_PATH)
+YAML_GENERATOR = AlexaYamlGenerator(ALEXA_YAML_PATH)
 
 DISPLAY_CATEGORIES = [
     "LIGHT", "SWITCH", "SMARTPLUG", "THERMOSTAT", "TEMPERATURE_SENSOR",
@@ -39,14 +33,9 @@ DISPLAY_CATEGORIES = [
 ]
 
 CATEGORY_BY_DOMAIN = {
-    "light": "LIGHT",
-    "switch": "SWITCH",
-    "climate": "THERMOSTAT",
-    "cover": "INTERIOR_BLIND",
-    "lock": "LOCK",
-    "camera": "CAMERA",
-    "scene": "SCENE_TRIGGER",
-    "script": "SCENE_TRIGGER",
+    "light": "LIGHT", "switch": "SWITCH", "climate": "THERMOSTAT",
+    "cover": "INTERIOR_BLIND", "lock": "LOCK", "camera": "CAMERA",
+    "scene": "SCENE_TRIGGER", "script": "SCENE_TRIGGER",
 }
 
 
@@ -71,9 +60,8 @@ async def _ws_commands(commands: list[tuple[str, dict[str, Any]]]) -> dict[str, 
 
             pending: dict[int, str] = {}
             for idx, (name, command) in enumerate(commands, start=1):
-                payload = {"id": idx, **command}
                 pending[idx] = name
-                await ws.send_json(payload)
+                await ws.send_json({"id": idx, **command})
 
             while pending:
                 message = await ws.receive_json()
@@ -159,40 +147,8 @@ def _save_state(data: dict[str, Any]) -> dict[str, Any]:
     return CONFIG_STORE.save(data)
 
 
-def _yaml_document(data: dict[str, Any]) -> dict[str, Any]:
-    selected = {
-        entity_id: settings
-        for entity_id, settings in data.get("entities", {}).items()
-        if settings.get("enabled")
-    }
-    smart_home: dict[str, Any] = {
-        "locale": data.get("locale", "de-DE"),
-        "filter": {"include_entities": sorted(selected)},
-    }
-    entity_config: dict[str, Any] = {}
-    for entity_id, settings in sorted(selected.items()):
-        config: dict[str, Any] = {}
-        if settings.get("name"):
-            config["name"] = str(settings["name"]).strip()
-        if settings.get("description"):
-            config["description"] = str(settings["description"]).strip()
-        category = settings.get("display_category")
-        if category:
-            config["display_categories"] = category
-        if config:
-            entity_config[entity_id] = config
-    if entity_config:
-        smart_home["entity_config"] = entity_config
-    return {"alexa": {"smart_home": smart_home}}
-
-
 def _dump_yaml(data: dict[str, Any]) -> str:
-    return yaml.safe_dump(
-        _yaml_document(data),
-        allow_unicode=True,
-        sort_keys=False,
-        default_flow_style=False,
-    )
+    return YAML_GENERATOR.generate(data).yaml_text
 
 
 def _suggest_name(entity: dict[str, Any], device: dict[str, Any]) -> str:
@@ -228,15 +184,15 @@ async def inventory(request: web.Request) -> web.Response:
 
 async def configuration(request: web.Request) -> web.Response:
     state = _load_state()
-    yaml_text = _dump_yaml(state)
-    existing = None
+    generated = YAML_GENERATOR.generate(state)
     try:
         existing = ALEXA_YAML_PATH.read_text(encoding="utf-8")
     except OSError:
-        pass
+        existing = None
     return web.json_response({
         "configuration": state,
-        "yaml": yaml_text,
+        "yaml": generated.yaml_text,
+        "selected": generated.selected_count,
         "existing_yaml": existing,
         "storage": CONFIG_STORE.status(),
     })
@@ -244,16 +200,18 @@ async def configuration(request: web.Request) -> web.Response:
 
 async def autosave(request: web.Request) -> web.Response:
     try:
-        data = await request.json()
-        saved = _save_state(data)
+        saved = _save_state(await request.json())
         return web.json_response({"ok": True, "configuration": saved, "storage": CONFIG_STORE.status()})
     except Exception as exc:
         return web.json_response({"ok": False, "error": str(exc), "storage": CONFIG_STORE.status()}, status=500)
 
 
 async def preview(request: web.Request) -> web.Response:
-    data = await request.json()
-    return web.json_response({"yaml": _dump_yaml(data), "selected": sum(1 for item in data.get("entities", {}).values() if item.get("enabled"))})
+    try:
+        generated = YAML_GENERATOR.generate(await request.json())
+        return web.json_response({"yaml": generated.yaml_text, "selected": generated.selected_count})
+    except GeneratorValidationError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
 
 
 async def suggest_names(request: web.Request) -> web.Response:
@@ -266,27 +224,24 @@ async def suggest_names(request: web.Request) -> web.Response:
 
 
 async def save(request: web.Request) -> web.Response:
-    data = await request.json()
-    yaml_text = _dump_yaml(data)
-    yaml.safe_load(yaml_text)
-    saved = _save_state(data)
-    ALEXA_YAML_PATH.parent.mkdir(parents=True, exist_ok=True)
-    backup = None
-    if ALEXA_YAML_PATH.exists():
-        backup = ALEXA_YAML_PATH.with_name(f"alexa.yaml.backup-{int(time.time())}")
-        shutil.copy2(ALEXA_YAML_PATH, backup)
-    tmp = ALEXA_YAML_PATH.with_suffix(".yaml.tmp")
-    tmp.write_text(yaml_text, encoding="utf-8")
-    tmp.replace(ALEXA_YAML_PATH)
-    return web.json_response({
-        "ok": True,
-        "configuration": saved,
-        "storage": CONFIG_STORE.status(),
-        "path": str(ALEXA_YAML_PATH),
-        "backup": str(backup) if backup else None,
-        "yaml": yaml_text,
-        "restart_required": True,
-    })
+    try:
+        requested = await request.json()
+        saved = _save_state(requested)
+        deployed = YAML_GENERATOR.deploy(saved)
+        return web.json_response({
+            "ok": True,
+            "configuration": saved,
+            "storage": CONFIG_STORE.status(),
+            "path": deployed.path,
+            "backup": deployed.backup,
+            "yaml": deployed.yaml_text,
+            "selected": deployed.selected_count,
+            "restart_required": True,
+        })
+    except GeneratorValidationError as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+    except OSError as exc:
+        return web.json_response({"ok": False, "error": f"YAML deployment failed: {exc}"}, status=500)
 
 
 def register_routes(app: web.Application) -> None:
