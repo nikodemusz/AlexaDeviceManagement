@@ -18,6 +18,7 @@ SUPPORTED_DISPLAY_CATEGORIES = {
     "INTERIOR_BLIND", "EXTERIOR_BLIND", "CAMERA", "LOCK", "SCENE_TRIGGER",
     "OTHER",
 }
+DEFAULT_BACKUP_LIMIT = 10
 
 
 class GeneratorValidationError(ValueError):
@@ -42,8 +43,9 @@ class DeploymentResult:
 class AlexaYamlGenerator:
     """Transforms ConfigStore data into deterministic Home Assistant YAML."""
 
-    def __init__(self, target_path: pathlib.Path) -> None:
+    def __init__(self, target_path: pathlib.Path, backup_limit: int = DEFAULT_BACKUP_LIMIT) -> None:
         self.target_path = target_path
+        self.backup_limit = max(1, int(backup_limit))
 
     def generate(self, data: dict[str, Any]) -> GenerationResult:
         normalized = self._normalize(data)
@@ -89,9 +91,10 @@ class AlexaYamlGenerator:
         backup: pathlib.Path | None = None
         if self.target_path.exists():
             backup = self.target_path.with_name(
-                f"{self.target_path.name}.backup-{int(time.time())}"
+                f"{self.target_path.name}.backup-{time.time_ns()}"
             )
             shutil.copy2(self.target_path, backup)
+            self._rotate_backups()
 
         fd, tmp_name = tempfile.mkstemp(
             prefix=f"{self.target_path.name}-",
@@ -119,6 +122,19 @@ class AlexaYamlGenerator:
             yaml_text=generated.yaml_text,
             selected_count=generated.selected_count,
         )
+
+    def _rotate_backups(self) -> None:
+        pattern = f"{self.target_path.name}.backup-*"
+        backups = sorted(
+            self.target_path.parent.glob(pattern),
+            key=lambda item: item.stat().st_mtime_ns,
+            reverse=True,
+        )
+        for old_backup in backups[self.backup_limit:]:
+            try:
+                old_backup.unlink()
+            except OSError:
+                continue
 
     def _normalize(self, data: Any) -> dict[str, Any]:
         if not isinstance(data, dict):
