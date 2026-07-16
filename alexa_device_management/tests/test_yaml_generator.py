@@ -76,6 +76,22 @@ class AlexaYamlGeneratorTests(unittest.TestCase):
             self.assertEqual(pathlib.Path(result.backup).read_text(encoding="utf-8"), "old: value\n")
             self.assertEqual(target.read_text(encoding="utf-8"), result.yaml_text)
 
+    def test_deploy_rotates_old_backups(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target = pathlib.Path(directory) / "alexa.yaml"
+            target.write_text("initial: true\n", encoding="utf-8")
+            generator = AlexaYamlGenerator(target, backup_limit=3)
+
+            for index in range(6):
+                generator.deploy({
+                    "entities": {
+                        "light.test": {"enabled": True, "name": f"Test {index}"}
+                    }
+                })
+
+            backups = list(target.parent.glob("alexa.yaml.backup-*"))
+            self.assertEqual(len(backups), 3)
+
 
 if __name__ == "__main__":
     unittest.main()
