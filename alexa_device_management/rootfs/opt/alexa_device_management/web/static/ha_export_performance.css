@@ -1,0 +1,26 @@
+/* Keep very large HA entity inventories from blocking the whole Home Assistant UI. */
+#devices {
+  contain: layout style;
+}
+
+.area,
+.device {
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 92px;
+}
+
+.entity-grid {
+  contain: layout style paint;
+}
+
+.entity-card {
+  contain: layout style paint;
+}
+
+/* Off-screen device content is skipped by the browser until it approaches the viewport. */
+@supports (content-visibility: auto) {
+  .device {
+    content-visibility: auto;
+    contain-intrinsic-size: 1px 120px;
+  }
+}
