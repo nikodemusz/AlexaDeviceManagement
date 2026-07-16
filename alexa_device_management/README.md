@@ -1,69 +1,80 @@
 # Alexa Device Management
 
-A standalone Home Assistant OS app that provides a web UI for managing Amazon Alexa
-smart home devices — a replacement for Amazon's removed bulk-management web interface.
+A standalone Home Assistant OS app for managing Amazon Alexa smart-home devices and designing the Home Assistant entities exposed through a manual Alexa Smart Home skill.
 
-This is **not** a Home Assistant integration. It is a standalone app that runs its own
-web server inside a Docker container and is accessible via the HA sidebar (ingress).
-It has nothing to do with HA entities or the device registry.
+This is not a Home Assistant integration. It runs as its own app with an ingress web interface.
 
-## Why?
+## Main areas
 
-Amazon removed their web UI that allowed users to manage Alexa devices in bulk
-(rename, delete, reorganize rooms, etc.). The Alexa phone app only supports
-one-device-at-a-time management, which is impractical for users with many devices.
-This app brings back efficient bulk device management.
+### Alexa inventory
 
-## Features
+- List Echo and smart-home devices
+- Filter and sort large inventories
+- Rename supported devices
+- Bulk-delete devices
+- Export filtered results as CSV
+- Cache Alexa inventory with background refresh
+- Inspect raw responses in the debug console
 
-- View all your Amazon Alexa devices (Echo and smart home) in a clean, filterable table
-- Rename devices directly from the table (Echo devices and smart home devices)
-- Bulk delete: select multiple devices and remove them from Alexa in one action
-- Sortable columns and per-column filters (name, type, skill/connector, manufacturer, room, source, online status)
-- CSV export of the currently filtered device list
-- Amazon Web Login helper for creating and storing the Alexa web session
-- Built-in debug console (`/debug`) for inspecting the raw Alexa API responses
-- Accessible as a sidebar menu item in Home Assistant OS
-- Runs as a standalone Docker container (no HA integration needed)
+### Home Assistant → Alexa designer
+
+- Read devices, entities, areas and floors from Home Assistant
+- Configure Alexa names, descriptions and display categories
+- Responsive entity cards for desktop, tablet and mobile
+- Autosave and bulk editor
+- Discovery preview with duplicate-name and orphan detection
+- Consistency and permission checks
+- Deterministic YAML generation from persistent `config.json`
+- Atomic deployment to `/config/packages/alexa.yaml`
+- Full Home Assistant configuration validation and automatic rollback
+- Persistent deploy, restart and Alexa-discovery lifecycle status
+
+## Data and migration
+
+The designer stores its source configuration in:
+
+```text
+/data/alexa_device_management/config.json
+```
+
+On first use, it can migrate the previous editor state from:
+
+```text
+/data/ha_alexa_export.json
+```
+
+If neither state file exists, an existing `/config/packages/alexa.yaml` is imported. The Alexa login session and Alexa device cache are not replaced by this migration.
+
+Deployments retain the ten newest backups next to `alexa.yaml`. A failed Home Assistant configuration check restores the previous file automatically.
 
 ## Installation
 
 1. Open **Settings → Add-ons → Add-on Store** in Home Assistant OS.
 2. Open the menu (⋮) and choose **Repositories**.
-3. Add: `https://github.com/nikodemusz/AlexaDeviceManagement`
-4. Install **Alexa Device Management** and start it.
+3. Add `https://github.com/nikodemusz/AlexaDeviceManagement`.
+4. Install and start **Alexa Device Management**.
 5. Open **Alexa Devices** from the sidebar.
 
-## Release Notes
+## Recommended upgrade procedure from 1.x
 
-See [CHANGELOG.md](./CHANGELOG.md) for version-specific release notes.
+1. Update the app and open **HA → Alexa**.
+2. Verify the imported entities.
+3. Run **Discovery-Vorschau**.
+4. Run **Konsistenz prüfen**.
+5. Deploy the configuration.
+6. Restart Home Assistant when the lifecycle status requests it.
+7. Start Alexa device discovery and mark it completed in the app.
 
-## Architecture
+## Development validation
 
-```
-┌─────────────────────────────────────────────────┐
-│  Home Assistant OS                               │
-│                                                  │
-│  ┌──────────────────────────────────────────┐   │
-│  │  Alexa Device Management (Add-on/App)    │   │
-│  │                                           │   │
-│  │  ┌─────────────────────────────────────┐ │   │
-│  │  │  Python Web Server (aiohttp)        │ │   │
-│  │  │  • Serves HTML/CSS/JS UI            │ │   │
-│  │  │  • REST API for device data         │ │   │
-│  │  │  • Communicates with Amazon API     │ │   │
-│  │  └─────────────────────────────────────┘ │   │
-│  └──────────────────────────────────────────┘   │
-│                                                  │
-│  ← Ingress (sidebar panel "Alexa Devices") →    │
-└─────────────────────────────────────────────────┘
-```
+The CI workflow performs:
 
-## Feature Status
+- Python compilation
+- Unit tests
+- JavaScript syntax checks
+- App metadata validation
+- Docker image build
 
-- [x] Device list (Echo + smart home) with filters and sorting
-- [x] Bulk delete devices
-- [x] Rename devices
-- [x] CSV export
-- [ ] Room management (possible future extension)
-- [ ] Do-Not-Disturb controls (possible future extension)
+## Release notes
+
+See [CHANGELOG.md](./CHANGELOG.md) and the fragments under [`CHANGELOG.d`](./CHANGELOG.d/).
