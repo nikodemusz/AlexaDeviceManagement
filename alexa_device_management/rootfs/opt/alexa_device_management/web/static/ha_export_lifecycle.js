@@ -1,5 +1,6 @@
 (() => {
   const base = document.documentElement.dataset.ingressPath || '';
+  let refreshInFlight = false;
 
   function ensureUi() {
     const summary = document.querySelector('.summary');
@@ -67,11 +68,16 @@
   }
 
   async function refreshStatus() {
+    if (refreshInFlight || document.hidden) return;
+    refreshInFlight = true;
     try {
-      const response = await fetch(`${base}/api/ha-export/lifecycle-status`);
+      const response = await fetch(`${base}/api/ha-export/lifecycle-status`, {cache: 'no-store'});
       if (!response.ok) return;
       renderStatus(await response.json());
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      refreshInFlight = false;
+    }
   }
 
   async function showGuide() {
@@ -114,7 +120,9 @@
   ensureUi();
   refreshStatus();
   window.addEventListener('focus', refreshStatus);
-  document.addEventListener('change', () => setTimeout(refreshStatus, 700), true);
-  document.addEventListener('input', () => setTimeout(refreshStatus, 700), true);
-  setInterval(refreshStatus, 15000);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refreshStatus();
+  });
+  window.addEventListener('ha-export-status-changed', refreshStatus);
+  setInterval(refreshStatus, 60000);
 })();
