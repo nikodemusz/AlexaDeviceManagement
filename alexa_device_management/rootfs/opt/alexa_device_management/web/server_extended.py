@@ -12,7 +12,7 @@ import ha_export
 import ha_export_overrides
 import server_clean
 
-APP_VERSION = "2.7.0-alpha1"
+APP_VERSION = "2.8.0-rc1"
 
 
 @web.middleware
@@ -35,7 +35,7 @@ async def navigation_middleware(request: web.Request, handler):
         text = response.text or text
         stylesheet = (
             '<link rel="stylesheet" href="' + ingress_path
-            + '/static/ha_export_mobile.css?v=' + APP_VERSION + '">' 
+            + '/static/ha_export_mobile.css?v=' + APP_VERSION + '">'
         )
         scripts = (
             '<script>document.documentElement.dataset.ingressPath=' + repr(ingress_path)
