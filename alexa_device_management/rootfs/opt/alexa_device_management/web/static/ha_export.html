@@ -5,57 +5,72 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>HA → Alexa</title>
   <style>
-    :root { color-scheme: light dark; font-family: Arial, sans-serif; }
-    body { margin:0; background:#f5f7fa; color:#1f2937; }
-    header { position:sticky; top:0; z-index:5; display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:14px 18px; background:#fff; border-bottom:1px solid #dbe2ea; }
-    header h1 { margin:0; font-size:20px; flex:1; min-width:240px; }
-    a, button { border:0; border-radius:8px; padding:9px 12px; text-decoration:none; cursor:pointer; font-weight:600; }
+    :root { color-scheme: light dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:#f3f6f9; color:#1f2937; }
+    header { position:sticky; top:0; z-index:10; display:flex; gap:9px; align-items:center; flex-wrap:wrap; padding:12px 16px; background:#fff; border-bottom:1px solid #dbe2ea; box-shadow:0 2px 10px rgba(15,23,42,.05); }
+    header h1 { margin:0; font-size:19px; flex:1; min-width:220px; }
+    a, button { border:0; border-radius:9px; padding:10px 13px; text-decoration:none; cursor:pointer; font-weight:650; font:inherit; }
     button:disabled { opacity:.55; cursor:wait; }
-    .primary { background:#03a9f4; color:white; }
-    .secondary { background:#e9eef4; color:#263238; }
+    .primary { background:#039be5; color:white; }
+    .secondary { background:#e8eef4; color:#263238; }
     .restart { background:#f59e0b; color:#fff; }
     .danger { background:#fee2e2; color:#991b1b; }
     .hidden { display:none !important; }
-    main { padding:18px; max-width:1600px; margin:auto; }
-    .toolbar { display:grid; grid-template-columns:2fr 1fr 1fr auto auto; gap:10px; margin-bottom:10px; }
-    .bulkbar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
-    input, select { width:100%; box-sizing:border-box; padding:9px; border:1px solid #cbd5e1; border-radius:8px; background:white; color:#1f2937; }
-    .summary { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px; }
-    .chip { background:white; border:1px solid #dbe2ea; border-radius:10px; padding:10px 12px; }
-    .area { margin-bottom:16px; }
+    main { padding:16px; max-width:1500px; margin:auto; }
+    .toolbar { display:grid; grid-template-columns:minmax(260px,2fr) 1fr 1fr auto auto; gap:9px; margin-bottom:10px; }
+    .bulkbar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+    input, select, textarea { width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:9px; background:#fff; color:#1f2937; font:inherit; }
+    textarea { min-height:70px; resize:vertical; }
+    .summary { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+    .chip { background:#fff; border:1px solid #dbe2ea; border-radius:10px; padding:9px 11px; font-size:13px; }
+    .chip.good { border-color:#86efac; background:#f0fdf4; color:#166534; }
+    .chip.warn { border-color:#fcd34d; background:#fffbeb; color:#92400e; }
+    .area { margin-bottom:15px; }
     .area-title { display:flex; align-items:center; gap:8px; cursor:pointer; padding:8px 2px; }
     .area-title h2 { margin:0; font-size:18px; }
-    .device { background:white; border:1px solid #dbe2ea; border-radius:12px; margin-bottom:10px; overflow:hidden; }
-    .device-head { display:grid; grid-template-columns:auto 1fr auto; gap:10px; align-items:center; padding:13px 15px; background:#f8fafc; border-bottom:1px solid #e2e8f0; }
-    .device-head button.toggle { padding:5px 8px; }
-    .device-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
-    .meta { color:#64748b; font-size:12px; margin-top:4px; }
-    table { width:100%; border-collapse:collapse; }
-    th, td { padding:9px 10px; border-bottom:1px solid #edf2f7; text-align:left; vertical-align:middle; }
-    th { font-size:12px; color:#64748b; background:#fbfdff; }
-    .entity-id { font-family:monospace; font-size:12px; color:#475569; }
-    .warn { color:#b45309; font-size:12px; }
-    .muted { color:#64748b; font-size:12px; }
-    .technical { opacity:.62; }
-    .technical td { background:#fafafa; }
-    .capability { font-size:12px; line-height:1.35; }
+    .device { background:#fff; border:1px solid #dbe2ea; border-radius:13px; margin-bottom:10px; overflow:hidden; box-shadow:0 1px 3px rgba(15,23,42,.04); }
+    .device.has-selected { border-color:#38bdf8; box-shadow:0 0 0 1px rgba(56,189,248,.25); }
+    .device-head { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:10px; align-items:center; padding:13px 14px; background:#f8fafc; }
+    .device-head button.toggle { padding:6px 9px; }
+    .device-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end; }
+    .meta, .muted { color:#64748b; font-size:12px; }
+    .entity-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:10px; padding:10px; border-top:1px solid #e2e8f0; }
+    .entity-card { border:1px solid #dbe2ea; border-radius:12px; padding:12px; background:#fff; min-width:0; }
+    .entity-card.selected { border-color:#0ea5e9; background:#f0f9ff; }
+    .entity-card.technical { opacity:.68; background:#fafafa; }
+    .entity-top { display:flex; gap:10px; align-items:flex-start; margin-bottom:10px; }
+    .entity-top input[type=checkbox] { width:24px; height:24px; margin:1px 0 0; flex:0 0 auto; }
+    .entity-title { min-width:0; flex:1; }
+    .entity-title strong { display:block; overflow-wrap:anywhere; }
+    .entity-id { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11px; color:#475569; overflow-wrap:anywhere; margin-top:3px; }
+    .badge { display:inline-block; margin-top:5px; padding:3px 7px; border-radius:999px; background:#e2e8f0; color:#475569; font-size:11px; }
+    .badge.warning { background:#fef3c7; color:#92400e; }
+    .fields { display:grid; grid-template-columns:1fr 1fr; gap:9px; }
+    .field { min-width:0; }
+    .field.full { grid-column:1 / -1; }
+    label { display:block; margin-bottom:4px; font-size:12px; font-weight:650; color:#475569; }
+    details { margin-top:9px; border-top:1px solid #e2e8f0; padding-top:8px; }
+    details summary { cursor:pointer; color:#475569; font-size:12px; font-weight:650; }
+    .capability { margin-top:7px; font-size:12px; line-height:1.4; color:#475569; overflow-wrap:anywhere; }
     .status { margin:12px 0; padding:11px; border-radius:9px; display:none; white-space:pre-wrap; }
     .status.ok { display:block; background:#dcfce7; color:#166534; }
     .status.err { display:block; background:#fee2e2; color:#991b1b; }
-    dialog { width:min(900px,92vw); border:0; border-radius:12px; padding:0; }
+    dialog { width:min(900px,94vw); border:0; border-radius:12px; padding:0; }
     dialog header { position:static; }
     pre { margin:0; padding:16px; max-height:65vh; overflow:auto; background:#111827; color:#e5e7eb; }
-    @media (max-width:1100px) { .toolbar { grid-template-columns:1fr; } .device-head { grid-template-columns:auto 1fr; } .device-actions { grid-column:1 / -1; justify-content:flex-start; } th:nth-child(3),td:nth-child(3){display:none;} }
+    @media (max-width:900px) { .toolbar { grid-template-columns:1fr 1fr; } .toolbar #search { grid-column:1 / -1; } .device-head { grid-template-columns:auto minmax(0,1fr); } .device-actions { grid-column:1 / -1; justify-content:flex-start; } }
+    @media (max-width:620px) { main { padding:10px; } header { padding:10px; } header h1 { order:-1; flex-basis:100%; font-size:17px; } .toolbar { grid-template-columns:1fr; } .toolbar #search { grid-column:auto; } .bulkbar { display:grid; grid-template-columns:1fr 1fr; } .bulkbar button { padding:9px; font-size:13px; } .summary { display:grid; grid-template-columns:1fr 1fr; } .entity-grid { grid-template-columns:1fr; padding:8px; } .fields { grid-template-columns:1fr; } .field.full { grid-column:auto; } .device-head { padding:11px; } .device-actions .prepare { width:100%; } }
   </style>
 </head>
 <body>
 <header>
   <a class="secondary" href="{{INGRESS_PATH}}/">← Alexa-Bestand</a>
-  <h1>Home Assistant → Alexa konfigurieren</h1>
+  <h1>Home Assistant → Alexa</h1>
   <button class="secondary" id="btn-preview">YAML-Vorschau</button>
-  <button class="secondary" id="btn-check">Konfiguration prüfen</button>
-  <button class="primary" id="btn-save">Prüfen &amp; speichern</button>
-  <button class="restart hidden" id="btn-restart">Home Assistant neu starten</button>
+  <button class="secondary" id="btn-check">HA prüfen</button>
+  <button class="primary" id="btn-save">Konfiguration ausrollen</button>
+  <button class="restart hidden" id="btn-restart">HA neu starten</button>
 </header>
 <main>
   <div class="toolbar">
@@ -66,18 +81,19 @@
     <button class="secondary" id="btn-reload">Neu laden</button>
   </div>
   <div class="bulkbar">
-    <button class="secondary" id="btn-enable-visible">Sichtbare sinnvolle Entitäten aktivieren</button>
+    <button class="secondary" id="btn-enable-visible">Sinnvolle sichtbare aktivieren</button>
     <button class="secondary" id="btn-disable-visible">Sichtbare deaktivieren</button>
-    <button class="danger" id="btn-disable-technical">Technische Entitäten deaktivieren</button>
+    <button class="danger" id="btn-disable-technical">Technische deaktivieren</button>
     <button class="secondary" id="btn-expand">Alle aufklappen</button>
     <button class="secondary" id="btn-collapse">Alle einklappen</button>
   </div>
   <div class="summary">
     <div class="chip"><strong id="device-count">0</strong> Geräte</div>
     <div class="chip"><strong id="entity-count">0</strong> Entitäten</div>
-    <div class="chip"><strong id="selected-count">0</strong> für Alexa ausgewählt</div>
-    <div class="chip"><strong id="technical-count">0</strong> technische Entitäten erkannt</div>
-    <div class="chip">Ausgabe: <code>/config/packages/alexa.yaml</code></div>
+    <div class="chip"><strong id="selected-count">0</strong> ausgewählt</div>
+    <div class="chip"><strong id="technical-count">0</strong> technisch</div>
+    <div class="chip" id="autosave-state">Autosave: bereit</div>
+    <div class="chip" id="deploy-state">Deploy: noch nicht geprüft</div>
   </div>
   <div id="status" class="status"></div>
   <div id="devices">Lade Home-Assistant-Geräte…</div>
@@ -91,65 +107,27 @@ let collapsedDevices=new Set();
 let collapsedAreas=new Set();
 
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));}
-function cfg(id){return config.entities[id]||=( {enabled:false,name:"",display_category:""} );}
+function cfg(id){return config.entities[id]||=( {enabled:false,name:"",description:"",display_category:""} );}
 function setStatus(t,ok=true){const e=document.getElementById('status');e.textContent=t;e.className='status '+(ok?'ok':'err');}
 function setBusy(b,x,t){if(!b)return;if(x){b.dataset.old=b.textContent;b.disabled=true;b.textContent=t;}else{b.disabled=false;b.textContent=b.dataset.old||b.textContent;}}
 function checkMessage(d){return d?.check?.message||d?.message||d?.error||'HTTP-Fehler';}
-function isTechnical(e){
-  const id=(e.entity_id||'').toLowerCase(), n=(e.name||'').toLowerCase(), dc=(e.device_class||'').toLowerCase();
-  const badDomain=['button','update','number','select','event'].includes(e.domain);
-  const badWords=['power','energy','leistung','energie','rssi','signal','battery','batterie','voltage','spannung','current','strom','temperature chip','diagnostic','ping','uptime','last seen','firmware','linkquality','illuminance'];
-  return badDomain||badWords.some(w=>id.includes(w)||n.includes(w)||dc.includes(w));
-}
+function isTechnical(e){const id=(e.entity_id||'').toLowerCase(),n=(e.name||'').toLowerCase(),dc=(e.device_class||'').toLowerCase();const badDomain=['button','update','number','select','event'].includes(e.domain);const badWords=['power','energy','leistung','energie','rssi','signal','battery','batterie','voltage','spannung','current','strom','temperature chip','diagnostic','ping','uptime','last seen','firmware','linkquality','illuminance'];return badDomain||badWords.some(w=>id.includes(w)||n.includes(w)||dc.includes(w));}
 function useful(e){return !isTechnical(e)&&['light','switch','cover','climate','lock','camera','scene','script','fan','input_boolean'].includes(e.domain);}
-function categoryFor(e){
-  if(e.domain==='light')return'LIGHT'; if(e.domain==='cover')return e.device_class==='garage'?'GARAGE_DOOR':'INTERIOR_BLIND';
-  if(e.domain==='climate')return'THERMOSTAT'; if(e.domain==='lock')return'LOCK'; if(e.domain==='camera')return'CAMERA';
-  if(['scene','script'].includes(e.domain))return'SCENE_TRIGGER'; if(e.domain==='switch'&&e.device_class==='outlet')return'SMARTPLUG'; return'SWITCH';
-}
-function capabilityFor(e,c){
-  const cat=c.display_category||categoryFor(e); const caps=['Alexa.EndpointHealth'];
-  if(['light','switch','input_boolean','fan'].includes(e.domain))caps.push('Alexa.PowerController');
-  if(e.domain==='light'&&Number(e.supported_features||0)>0)caps.push('Alexa.BrightnessController');
-  if(e.domain==='cover')caps.push('Alexa.RangeController / ModeController');
-  if(e.domain==='climate')caps.push('Alexa.ThermostatController','Alexa.TemperatureSensor');
-  if(e.domain==='lock')caps.push('Alexa.LockController'); if(e.domain==='camera')caps.push('Alexa.CameraStreamController');
-  if(['scene','script'].includes(e.domain))caps.push('Alexa.SceneController');
-  return `${cat}: ${caps.join(', ')}`;
-}
-function suggestedName(e,d){
-  let raw=(e.name||d.name||e.entity_id).replace(/\b(node|channel|kanal|switch|sensor|device|entity)\b/gi,'').replace(/\b\d{3,}\b/g,'').replace(/[_-]+/g,' ').replace(/\s+/g,' ').trim();
-  if(d.area_name&&!raw.toLowerCase().includes(d.area_name.toLowerCase()))raw+=' '+d.area_name;
-  if(d.floor_name&&!raw.toLowerCase().includes(d.floor_name.toLowerCase()))raw+=' '+d.floor_name;
-  return raw.trim();
-}
+function categoryFor(e){if(e.domain==='light')return'LIGHT';if(e.domain==='cover')return e.device_class==='garage'?'GARAGE_DOOR':'INTERIOR_BLIND';if(e.domain==='climate')return'THERMOSTAT';if(e.domain==='lock')return'LOCK';if(e.domain==='camera')return'CAMERA';if(['scene','script'].includes(e.domain))return'SCENE_TRIGGER';if(e.domain==='switch'&&e.device_class==='outlet')return'SMARTPLUG';return'SWITCH';}
+function capabilityFor(e,c){const cat=c.display_category||categoryFor(e),caps=['Alexa.EndpointHealth'];if(['light','switch','input_boolean','fan'].includes(e.domain))caps.push('Alexa.PowerController');if(e.domain==='light'&&Number(e.supported_features||0)>0)caps.push('Alexa.BrightnessController');if(e.domain==='cover')caps.push('Alexa.RangeController / ModeController');if(e.domain==='climate')caps.push('Alexa.ThermostatController','Alexa.TemperatureSensor');if(e.domain==='lock')caps.push('Alexa.LockController');if(e.domain==='camera')caps.push('Alexa.CameraStreamController');if(['scene','script'].includes(e.domain))caps.push('Alexa.SceneController');return `${cat}: ${caps.join(', ')}`;}
+function suggestedName(e,d){let raw=(e.name||d.name||e.entity_id).replace(/\b(node|channel|kanal|switch|sensor|device|entity)\b/gi,'').replace(/\b\d{3,}\b/g,'').replace(/[_-]+/g,' ').replace(/\s+/g,' ').trim();if(d.area_name&&!raw.toLowerCase().includes(d.area_name.toLowerCase()))raw+=' '+d.area_name;if(d.floor_name&&!raw.toLowerCase().includes(d.floor_name.toLowerCase()))raw+=' '+d.floor_name;return raw.trim();}
 function counts(){const all=inventory.devices.flatMap(d=>d.entities);document.getElementById('device-count').textContent=inventory.devices.length;document.getElementById('entity-count').textContent=all.length;document.getElementById('selected-count').textContent=Object.values(config.entities).filter(x=>x.enabled).length;document.getElementById('technical-count').textContent=all.filter(isTechnical).length;}
 function filters(){return{q:document.getElementById('search').value.toLowerCase(),area:document.getElementById('area').value,domain:document.getElementById('domain').value};}
 function visibleDevices(){const f=filters();return inventory.devices.map(d=>({...d,entities:d.entities.filter(e=>(!f.domain||e.domain===f.domain)&&(!f.q||`${d.name} ${d.area_name||''} ${e.name} ${e.entity_id}`.toLowerCase().includes(f.q)))})).filter(d=>d.entities.length&&(!f.area||d.area_id===f.area));}
-function prepareDevice(id){const d=inventory.devices.find(x=>x.device_id===id);if(!d)return;const candidate=d.entities.find(useful)||d.entities.find(e=>!isTechnical(e));if(!candidate)return setStatus('Für dieses Gerät wurde keine sinnvolle steuerbare Entität gefunden.',false);for(const e of d.entities)cfg(e.entity_id).enabled=false;const c=cfg(candidate.entity_id);c.enabled=true;c.name=c.name||suggestedName(candidate,d);c.display_category=c.display_category||categoryFor(candidate);collapsedDevices.delete(id);render();setStatus(`Vorbereitet: ${candidate.entity_id} als „${c.name}“ (${c.display_category}). Bitte Capability-Vorschau prüfen und anschließend speichern.`);}
-function render(){
-  const root=document.getElementById('devices'), groups=new Map();
-  for(const d of visibleDevices()){const key=d.area_name||'Ohne Bereich';if(!groups.has(key))groups.set(key,[]);groups.get(key).push(d);}
-  const html=[];
-  for(const [area,devices] of [...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0]))){const ac=collapsedAreas.has(area);html.push(`<section class="area"><div class="area-title" data-area="${esc(area)}"><button class="secondary">${ac?'▶':'▼'}</button><h2>${esc(area)}</h2><span class="muted">${devices.length} Geräte</span></div><div class="area-body ${ac?'hidden':''}">`);
-    for(const d of devices){const dc=collapsedDevices.has(d.device_id);html.push(`<section class="device"><div class="device-head"><button class="secondary toggle" data-device="${esc(d.device_id)}">${dc?'▶':'▼'}</button><div><strong>${esc(d.name)}</strong><div class="meta">${esc(d.area_name||'Kein Bereich')}${d.floor_name?' • '+esc(d.floor_name):''}${d.manufacturer?' • '+esc(d.manufacturer):''}${d.model?' • '+esc(d.model):''}</div></div><div class="device-actions"><button class="primary prepare" data-device="${esc(d.device_id)}">Ein Gerät für Alexa vorbereiten</button><span class="muted">${d.entities.length} Entitäten</span></div></div><div class="device-body ${dc?'hidden':''}"><table><thead><tr><th>Alexa</th><th>Entität</th><th>HA-Name</th><th>Alexa-Name</th><th>Kategorie</th><th>Capability-Vorschau</th></tr></thead><tbody>`);
-      for(const e of d.entities){const c=cfg(e.entity_id),tech=isTechnical(e),opts=inventory.display_categories.map(x=>`<option value="${x}" ${c.display_category===x?'selected':''}>${x}</option>`).join('');html.push(`<tr class="${tech?'technical':''}"><td><input class="enabled" data-id="${esc(e.entity_id)}" type="checkbox" ${c.enabled?'checked':''}></td><td><div>${esc(e.domain)}</div><div class="entity-id">${esc(e.entity_id)}</div>${tech?'<div class="warn">Technische/diagnostische Entität</div>':''}</td><td>${esc(e.name)}</td><td><input class="alexaname" data-id="${esc(e.entity_id)}" value="${esc(c.name||'')}"></td><td><select class="category" data-id="${esc(e.entity_id)}"><option value="">Automatisch (${categoryFor(e)})</option>${opts}</select></td><td class="capability">${esc(capabilityFor(e,c))}</td></tr>`);}
-      html.push('</tbody></table></div></section>');}
-    html.push('</div></section>');}
-  root.innerHTML=html.join('')||'<div class="chip">Keine passenden Entitäten.</div>';
-  root.querySelectorAll('.area-title').forEach(el=>el.onclick=()=>{const a=el.dataset.area;collapsedAreas.has(a)?collapsedAreas.delete(a):collapsedAreas.add(a);render();});
-  root.querySelectorAll('.toggle').forEach(el=>el.onclick=()=>{const id=el.dataset.device;collapsedDevices.has(id)?collapsedDevices.delete(id):collapsedDevices.add(id);render();});
-  root.querySelectorAll('.prepare').forEach(el=>el.onclick=()=>prepareDevice(el.dataset.device));
-  root.querySelectorAll('.enabled').forEach(el=>el.onchange=()=>{cfg(el.dataset.id).enabled=el.checked;counts();document.getElementById('btn-restart').classList.add('hidden');});
-  root.querySelectorAll('.alexaname').forEach(el=>el.oninput=()=>{cfg(el.dataset.id).name=el.value;document.getElementById('btn-restart').classList.add('hidden');});
-  root.querySelectorAll('.category').forEach(el=>el.onchange=()=>{cfg(el.dataset.id).display_category=el.value;render();document.getElementById('btn-restart').classList.add('hidden');}); counts();
-}
-async function load(){setStatus('Lade Daten…');try{const r=await fetch(`${BASE}/api/ha-export/inventory`),data=await r.json();if(!r.ok)throw new Error(data.error||`HTTP ${r.status}`);inventory=data;config=data.configuration||config;const areas=[...new Map(inventory.devices.filter(d=>d.area_id).map(d=>[d.area_id,d.area_name])).entries()].sort((a,b)=>(a[1]||'').localeCompare(b[1]||''));document.getElementById('area').innerHTML='<option value="">Alle Bereiche</option>'+areas.map(([id,n])=>`<option value="${esc(id)}">${esc(n)}</option>`).join('');const domains=[...new Set(inventory.devices.flatMap(d=>d.entities.map(e=>e.domain)))].sort();document.getElementById('domain').innerHTML='<option value="">Alle Domains</option>'+domains.map(x=>`<option value="${x}">${x}</option>`).join('');document.getElementById('status').className='status';render();}catch(e){setStatus(e.message,false);}}
+function prepareDevice(id){const d=inventory.devices.find(x=>x.device_id===id);if(!d)return;const candidate=d.entities.find(useful)||d.entities.find(e=>!isTechnical(e));if(!candidate)return setStatus('Für dieses Gerät wurde keine sinnvolle steuerbare Entität gefunden.',false);for(const e of d.entities)cfg(e.entity_id).enabled=false;const c=cfg(candidate.entity_id);c.enabled=true;c.name=c.name||suggestedName(candidate,d);c.display_category=c.display_category||categoryFor(candidate);collapsedDevices.delete(id);render();setStatus(`Vorbereitet: ${candidate.entity_id} als „${c.name}“ (${c.display_category}).`);}
+function render(){const root=document.getElementById('devices'),groups=new Map();for(const d of visibleDevices()){const key=d.area_name||'Ohne Bereich';if(!groups.has(key))groups.set(key,[]);groups.get(key).push(d);}const html=[];for(const [area,devices] of [...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0]))){const ac=collapsedAreas.has(area);html.push(`<section class="area"><div class="area-title" data-area="${esc(area)}"><button class="secondary">${ac?'▶':'▼'}</button><h2>${esc(area)}</h2><span class="muted">${devices.length} Geräte</span></div><div class="area-body ${ac?'hidden':''}">`);for(const d of devices){const dc=collapsedDevices.has(d.device_id),selected=d.entities.some(e=>cfg(e.entity_id).enabled);html.push(`<section class="device ${selected?'has-selected':''}"><div class="device-head"><button class="secondary toggle" data-device="${esc(d.device_id)}">${dc?'▶':'▼'}</button><div><strong>${esc(d.name)}</strong><div class="meta">${esc(d.area_name||'Kein Bereich')}${d.floor_name?' • '+esc(d.floor_name):''}${d.manufacturer?' • '+esc(d.manufacturer):''}${d.model?' • '+esc(d.model):''}</div></div><div class="device-actions"><button class="primary prepare" data-device="${esc(d.device_id)}">Für Alexa vorbereiten</button><span class="muted">${d.entities.length} Entitäten</span></div></div><div class="entity-grid ${dc?'hidden':''}">`);for(const e of d.entities){const c=cfg(e.entity_id),tech=isTechnical(e),opts=inventory.display_categories.map(x=>`<option value="${x}" ${c.display_category===x?'selected':''}>${x}</option>`).join('');html.push(`<article class="entity-card ${tech?'technical':''} ${c.enabled?'selected':''}"><div class="entity-top"><input class="enabled" data-id="${esc(e.entity_id)}" type="checkbox" ${c.enabled?'checked':''}><div class="entity-title"><strong>${esc(e.name)}</strong><div class="entity-id">${esc(e.entity_id)}</div><span class="badge">${esc(e.domain)}</span>${tech?'<span class="badge warning">technisch</span>':''}</div></div><div class="fields"><div class="field"><label>Alexa-Name</label><input class="alexaname" data-id="${esc(e.entity_id)}" value="${esc(c.name||'')}" placeholder="Name für Sprachsteuerung"></div><div class="field"><label>Kategorie</label><select class="category" data-id="${esc(e.entity_id)}"><option value="">Automatisch (${categoryFor(e)})</option>${opts}</select></div><div class="field full"><label>Beschreibung</label><textarea class="description" data-id="${esc(e.entity_id)}" placeholder="Optional">${esc(c.description||'')}</textarea></div></div><details><summary>Technische Details und Capabilities</summary><div class="capability">${esc(capabilityFor(e,c))}</div><div class="capability">Plattform: ${esc(e.platform||'unbekannt')} · Zustand: ${esc(e.state||'unbekannt')} · Device class: ${esc(e.device_class||'—')}</div></details></article>`);}html.push('</div></section>');}html.push('</div></section>');}root.innerHTML=html.join('')||'<div class="chip">Keine passenden Entitäten.</div>';root.querySelectorAll('.area-title').forEach(el=>el.onclick=()=>{const a=el.dataset.area;collapsedAreas.has(a)?collapsedAreas.delete(a):collapsedAreas.add(a);render();});root.querySelectorAll('.toggle').forEach(el=>el.onclick=()=>{const id=el.dataset.device;collapsedDevices.has(id)?collapsedDevices.delete(id):collapsedDevices.add(id);render();});root.querySelectorAll('.prepare').forEach(el=>el.onclick=()=>prepareDevice(el.dataset.device));root.querySelectorAll('.enabled').forEach(el=>el.onchange=()=>{cfg(el.dataset.id).enabled=el.checked;render();document.getElementById('btn-restart').classList.add('hidden');});root.querySelectorAll('.alexaname').forEach(el=>el.oninput=()=>{cfg(el.dataset.id).name=el.value;document.getElementById('btn-restart').classList.add('hidden');});root.querySelectorAll('.description').forEach(el=>el.oninput=()=>{cfg(el.dataset.id).description=el.value;document.getElementById('btn-restart').classList.add('hidden');});root.querySelectorAll('.category').forEach(el=>el.onchange=()=>{cfg(el.dataset.id).display_category=el.value;render();document.getElementById('btn-restart').classList.add('hidden');});counts();}
+async function loadDeployStatus(){try{const r=await fetch(`${BASE}/api/ha-export/deploy-status`),d=await r.json();const e=document.getElementById('deploy-state');if(d.ok){e.textContent=`Deploy: erfolgreich · ${d.selected_count??0} Entitäten`;e.className='chip good';}else if(d.rolled_back){e.textContent='Deploy: zurückgerollt';e.className='chip warn';}else{e.textContent='Deploy: noch nicht erfolgreich';}}catch(_){}}
+async function load(){setStatus('Lade Daten…');try{const r=await fetch(`${BASE}/api/ha-export/inventory`),data=await r.json();if(!r.ok)throw new Error(data.error||`HTTP ${r.status}`);inventory=data;config=data.configuration||config;const areas=[...new Map(inventory.devices.filter(d=>d.area_id).map(d=>[d.area_id,d.area_name])).entries()].sort((a,b)=>(a[1]||'').localeCompare(b[1]||''));document.getElementById('area').innerHTML='<option value="">Alle Bereiche</option>'+areas.map(([id,n])=>`<option value="${esc(id)}">${esc(n)}</option>`).join('');const domains=[...new Set(inventory.devices.flatMap(d=>d.entities.map(e=>e.domain)))].sort();document.getElementById('domain').innerHTML='<option value="">Alle Domains</option>'+domains.map(x=>`<option value="${x}">${x}</option>`).join('');document.getElementById('status').className='status';render();loadDeployStatus();}catch(e){setStatus(e.message,false);}}
 async function preview(){const r=await fetch(`${BASE}/api/ha-export/preview`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}),d=await r.json();document.getElementById('yaml-output').textContent=d.yaml||d.error;document.getElementById('yaml-dialog').showModal();}
 async function checkConfig(){const b=document.getElementById('btn-check');setBusy(b,true,'Prüfe…');try{const r=await fetch(`${BASE}/api/ha-export/check-config`,{method:'POST'}),d=await r.json();if(!r.ok)return setStatus(`Konfigurationsprüfung fehlgeschlagen:\n${checkMessage(d)}`,false);setStatus(`Home-Assistant-Konfiguration ist gültig.\n${checkMessage(d)}`);}catch(e){setStatus(e.message,false);}finally{setBusy(b,false);}}
-async function save(){if(!Object.values(config.entities).some(x=>x.enabled))return setStatus('Es ist noch keine Entität für Alexa ausgewählt.',false);if(!confirm('Die Alexa-Konfiguration wird geschrieben und vollständig geprüft. Bei einem Fehler erfolgt ein automatischer Rollback.'))return;const b=document.getElementById('btn-save');setBusy(b,true,'Prüfe & speichere…');try{const r=await fetch(`${BASE}/api/ha-export/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}),d=await r.json();if(!r.ok)return setStatus(`${d.error||`HTTP ${r.status}`}\n${checkMessage(d)}${d.rolled_back?'\nRollback wurde durchgeführt.':''}`,false);setStatus(`Konfiguration geprüft und gespeichert.\nDatei: ${d.path}\nBackup: ${d.backup||'keines'}\nPrüfung: ${checkMessage(d)}\nJetzt Home Assistant neu starten und anschließend in Alexa eine Gerätesuche auslösen.`);document.getElementById('btn-restart').classList.remove('hidden');}catch(e){setStatus(e.message,false);}finally{setBusy(b,false);}}
+async function save(){if(!Object.values(config.entities).some(x=>x.enabled))return setStatus('Es ist noch keine Entität für Alexa ausgewählt.',false);if(!confirm('Persistente Konfiguration als alexa.yaml ausrollen und Home Assistant vollständig prüfen?'))return;const b=document.getElementById('btn-save');setBusy(b,true,'Rolle aus…');try{const r=await fetch(`${BASE}/api/ha-export/deploy`,{method:'POST'}),d=await r.json();if(!r.ok)return setStatus(`${d.error||`HTTP ${r.status}`}\n${checkMessage(d)}${d.rolled_back?'\nRollback wurde durchgeführt.':''}`,false);setStatus(`Konfiguration erfolgreich ausgerollt.\nDatei: ${d.path}\nBackup: ${d.backup||'keines'}\nPrüfung: ${checkMessage(d)}`);document.getElementById('btn-restart').classList.remove('hidden');loadDeployStatus();}catch(e){setStatus(e.message,false);}finally{setBusy(b,false);}}
 async function restartHA(){if(!confirm('Home Assistant jetzt neu starten?'))return;const b=document.getElementById('btn-restart');setBusy(b,true,'Neustart läuft…');try{const r=await fetch(`${BASE}/api/ha-export/restart`,{method:'POST'}),d=await r.json();if(!r.ok){setBusy(b,false);return setStatus(d.error||`HTTP ${r.status}`,false);}setStatus(d.note||'Home Assistant wird neu gestartet.');setTimeout(()=>location.href=`${BASE}/`,2500);}catch(e){setStatus(e.message,false);setBusy(b,false);}}
-async function suggest(){const r=await fetch(`${BASE}/api/ha-export/suggest-names`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({devices:inventory.devices})}),d=await r.json();for(const[id,n]of Object.entries(d.suggestions||{}))if(!cfg(id).name)cfg(id).name=n;render();setStatus('Namensvorschläge wurden eingetragen. Bitte vor dem Speichern prüfen.');}
+async function suggest(){const r=await fetch(`${BASE}/api/ha-export/suggest-names`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({devices:inventory.devices})}),d=await r.json();for(const[id,n]of Object.entries(d.suggestions||{}))if(!cfg(id).name)cfg(id).name=n;render();setStatus('Namensvorschläge wurden eingetragen.');}
 function bulk(mode){for(const d of visibleDevices())for(const e of d.entities){if(mode==='enable'&&useful(e)){const c=cfg(e.entity_id);c.enabled=true;c.name=c.name||suggestedName(e,d);c.display_category=c.display_category||categoryFor(e);}if(mode==='disable')cfg(e.entity_id).enabled=false;if(mode==='technical'&&isTechnical(e))cfg(e.entity_id).enabled=false;}render();}
 ['search'].forEach(id=>document.getElementById(id).oninput=render);['area','domain'].forEach(id=>document.getElementById(id).onchange=render);
 document.getElementById('btn-reload').onclick=load;document.getElementById('btn-preview').onclick=preview;document.getElementById('btn-check').onclick=checkConfig;document.getElementById('btn-save').onclick=save;document.getElementById('btn-restart').onclick=restartHA;document.getElementById('btn-suggest').onclick=suggest;document.getElementById('btn-enable-visible').onclick=()=>bulk('enable');document.getElementById('btn-disable-visible').onclick=()=>bulk('disable');document.getElementById('btn-disable-technical').onclick=()=>bulk('technical');document.getElementById('btn-expand').onclick=()=>{collapsedDevices.clear();collapsedAreas.clear();render();};document.getElementById('btn-collapse').onclick=()=>{inventory.devices.forEach(d=>collapsedDevices.add(d.device_id));visibleDevices().forEach(d=>collapsedAreas.add(d.area_name||'Ohne Bereich'));render();};
