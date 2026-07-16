@@ -23,23 +23,28 @@
   }
 
   async function persist() {
-    const payload = currentConfig();
-    if (!payload) return;
+    const config = currentConfig();
+    if (!config) return;
     if (saving) {
       queued = true;
       return;
     }
+
     saving = true;
     statusChip('Autosave: speichert…', 'warn');
     try {
+      // Create the JSON snapshot only after the user stopped editing. This keeps
+      // serialization of large configurations away from the input event itself.
+      const payload = JSON.stringify(config);
       const response = await fetch(`${base}/api/ha-export/autosave`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload),
+        body: payload,
       });
       const result = await response.json();
       if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
       document.body.dataset.configSavedAt = String(Date.now());
+      document.body.dataset.configDirty = 'false';
       statusChip('Autosave: gespeichert', 'good');
     } catch (error) {
       statusChip('Autosave: Fehler', 'warn');
@@ -48,7 +53,7 @@
       saving = false;
       if (queued) {
         queued = false;
-        persist();
+        schedule();
       }
     }
   }
@@ -56,7 +61,7 @@
   function schedule() {
     clearTimeout(timer);
     statusChip('Autosave: ausstehend', 'warn');
-    timer = setTimeout(persist, 450);
+    timer = setTimeout(persist, 1000);
   }
 
   document.addEventListener('change', event => {
@@ -75,7 +80,7 @@
 
   window.addEventListener('pagehide', () => {
     const payload = currentConfig();
-    if (!payload || !navigator.sendBeacon) return;
+    if (!payload || !navigator.sendBeacon || document.body.dataset.configDirty === 'false') return;
     navigator.sendBeacon(`${base}/api/ha-export/autosave`, new Blob([JSON.stringify(payload)], {type: 'application/json'}));
   });
 })();
