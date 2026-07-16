@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.8.2-rc1
+
+- **Fix**: Eine Request-Flut der Lifecycle-Prüfung wurde beseitigt. Zuvor löste praktisch jedes `input`- und `change`-Ereignis einen verzögerten Statusabruf aus; beim Tippen entstanden dadurch viele parallele Requests.
+- **Performance**: Lifecycle-Abfragen werden jetzt dedupliziert, bei ausgeblendeter Seite ausgesetzt und nur noch bei Fokus, expliziten Statusänderungen sowie alle 60 Sekunden ausgeführt.
+- **Performance**: Große Geräte- und Entity-Listen nutzen CSS-Containment und `content-visibility`, sodass außerhalb des sichtbaren Bereichs liegende Karten nicht sofort vollständig berechnet und gezeichnet werden.
+- **Performance**: Die HA→Alexa-Konfigurationsseite belastet dadurch die gesamte Home-Assistant-Oberfläche deutlich weniger.
+
 ## 2.8.1-rc1
 
 - **Performance**: Die HA→Alexa-Gerätekonfiguration reagiert jetzt unmittelbar auf Checkboxen, Namensfelder, Beschreibungen und Kategorien. Einzelne Änderungen lösen kein vollständiges Neurendern aller Geräte und Entitäten mehr aus.
