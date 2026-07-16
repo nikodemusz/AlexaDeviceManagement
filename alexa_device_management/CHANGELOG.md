@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.8.3-rc1
+
+- **Fix**: Die aktuelle HA→Alexa-Konfiguration wird beim Ausrollen jetzt direkt aus dem Editor an `/api/ha-export/deploy` gesendet.
+- **Fix**: Das Schreiben von `alexa.yaml` hängt nicht mehr davon ab, ob der verzögerte Autosave bereits abgeschlossen wurde.
+- **Fix**: Der veraltete Deployment-Aufruf ohne Request-Body wird abgefangen, damit keine leere oder veraltete persistente Konfiguration ausgerollt wird.
+- **Diagnose**: Die Rückmeldung zeigt geschriebenen Pfad, Backup, Anzahl ausgewählter Entitäten und Ergebnis der Home-Assistant-Konfigurationsprüfung.
+
 ## 2.8.2-rc1
 
 - **Fix**: Eine Request-Flut der Lifecycle-Prüfung wurde beseitigt. Zuvor löste praktisch jedes `input`- und `change`-Ereignis einen verzögerten Statusabruf aus; beim Tippen entstanden dadurch viele parallele Requests.
