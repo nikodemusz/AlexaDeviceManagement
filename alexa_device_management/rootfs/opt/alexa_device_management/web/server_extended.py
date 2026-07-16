@@ -12,7 +12,7 @@ import ha_export
 import ha_export_overrides
 import server_clean
 
-APP_VERSION = "2.8.0-rc1"
+APP_VERSION = "2.8.1-rc1"
 
 
 @web.middleware
@@ -44,6 +44,7 @@ async def navigation_middleware(request: web.Request, handler):
             + '"></script><script src="' + ingress_path + '/static/ha_export_discovery.js?v=' + APP_VERSION
             + '"></script><script src="' + ingress_path + '/static/ha_export_consistency.js?v=' + APP_VERSION
             + '"></script><script src="' + ingress_path + '/static/ha_export_lifecycle.js?v=' + APP_VERSION
+            + '"></script><script src="' + ingress_path + '/static/ha_export_performance.js?v=' + APP_VERSION
             + '"></script>'
         )
         text = text.replace("let inventory=", "window.inventory=")
