@@ -19,8 +19,7 @@
   }
 
   async function deployCurrentConfiguration(event) {
-    event.preventDefault();
-    event.stopImmediatePropagation();
+    event?.preventDefault();
 
     const config = window.config;
     if (!config?.entities || !Object.values(config.entities).some(item => item?.enabled)) {
@@ -33,15 +32,23 @@
     const oldText = button.textContent;
     button.disabled = true;
     button.textContent = 'Rolle aus…';
+    setStatus('Deployment gestartet. alexa.yaml wird geschrieben und anschließend von Home Assistant geprüft.');
+
     try {
-      // Send the current in-memory editor state directly. Deployment must never
-      // depend on whether the delayed autosave has already finished.
       const response = await fetch(`${base}/api/ha-export/deploy`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(config),
       });
-      const result = await response.json();
+
+      const responseText = await response.text();
+      let result;
+      try {
+        result = responseText ? JSON.parse(responseText) : {};
+      } catch (_) {
+        throw new Error(`Ungültige Serverantwort (HTTP ${response.status}): ${responseText || 'leer'}`);
+      }
+
       if (!response.ok || !result.ok) {
         setStatus(
           `${result.error || `HTTP ${response.status}`}\n${checkMessage(result)}`
@@ -75,6 +82,7 @@
     }
   }
 
-  // Capture phase ensures the obsolete inline handler cannot send an empty body.
-  button.addEventListener('click', deployCurrentConfiguration, true);
+  // The page's original handler sends no request body. Replace it completely so
+  // deployment always receives the current editor state and always reports progress.
+  button.onclick = deployCurrentConfiguration;
 })();
