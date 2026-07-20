@@ -5,6 +5,7 @@ from __future__ import annotations
 from aiohttp import web
 
 import alexa_cache_service
+import alexa_endpoint_inventory
 import consistency_check
 import discovery_preview
 import ha_control
@@ -12,7 +13,7 @@ import ha_export
 import ha_export_overrides
 import server_clean
 
-APP_VERSION = "2.8.6-rc1"
+APP_VERSION = "2.9.0-rc1"
 
 
 @web.middleware
@@ -29,7 +30,21 @@ async def navigation_middleware(request: web.Request, handler):
         marker = '<a class="btn btn-secondary" href="' + ingress_path + '/debug" title="Debug-Konsole">🛠 Debug</a>'
         link = '<a class="btn btn-primary" href="' + ingress_path + '/ha-export" title="Home-Assistant-Geräte für Alexa konfigurieren">HA → Alexa</a>'
         if marker in text and link not in text:
-            response.text = text.replace(marker, link + marker)
+            text = text.replace(marker, link + marker)
+
+        endpoint_stylesheet = (
+            '<link rel="stylesheet" href="' + ingress_path
+            + '/static/alexa_endpoint_inventory.css?v=' + APP_VERSION + '">'
+        )
+        endpoint_script = (
+            '<script src="' + ingress_path
+            + '/static/alexa_endpoint_inventory.js?v=' + APP_VERSION + '"></script>'
+        )
+        if "alexa_endpoint_inventory.css" not in text:
+            text = text.replace("</head>", endpoint_stylesheet + "</head>")
+        if "alexa_endpoint_inventory.js" not in text:
+            text = text.replace("</body>", endpoint_script + "</body>")
+        response.text = text
 
     if request.path == "/ha-export":
         text = response.text or text
@@ -64,6 +79,7 @@ async def navigation_middleware(request: web.Request, handler):
 
 def create_app() -> web.Application:
     server_clean.APP_VERSION = APP_VERSION
+    alexa_endpoint_inventory.install(server_clean)
     alexa_cache_service.install(server_clean)
     ha_export_overrides.install()
     ha_control.install()
