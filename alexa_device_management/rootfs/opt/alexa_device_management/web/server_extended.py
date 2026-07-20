@@ -6,6 +6,7 @@ from aiohttp import web
 
 import alexa_cache_service
 import alexa_endpoint_inventory
+import alexa_room_enrichment
 import consistency_check
 import discovery_preview
 import ha_control
@@ -13,7 +14,7 @@ import ha_export
 import ha_export_overrides
 import server_clean
 
-APP_VERSION = "2.9.0-rc1"
+APP_VERSION = "2.10.0-rc1"
 
 
 @web.middleware
@@ -39,6 +40,8 @@ async def navigation_middleware(request: web.Request, handler):
         endpoint_script = (
             '<script src="' + ingress_path
             + '/static/alexa_endpoint_inventory.js?v=' + APP_VERSION + '"></script>'
+            + '<script src="' + ingress_path
+            + '/static/device_table_labels.js?v=' + APP_VERSION + '"></script>'
         )
         if "alexa_endpoint_inventory.css" not in text:
             text = text.replace("</head>", endpoint_stylesheet + "</head>")
@@ -80,6 +83,7 @@ async def navigation_middleware(request: web.Request, handler):
 def create_app() -> web.Application:
     server_clean.APP_VERSION = APP_VERSION
     alexa_endpoint_inventory.install(server_clean)
+    alexa_room_enrichment.install(server_clean)
     alexa_cache_service.install(server_clean)
     ha_export_overrides.install()
     ha_control.install()
