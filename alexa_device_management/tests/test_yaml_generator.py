@@ -62,7 +62,7 @@ class AlexaYamlGeneratorTests(unittest.TestCase):
                 }
             })
 
-    def test_deploy_creates_backup_and_replaces_atomically(self) -> None:
+    def test_deploy_replaces_atomically_without_backup_files(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             target = pathlib.Path(directory) / "alexa.yaml"
             target.write_text("old: value\n", encoding="utf-8")
@@ -72,25 +72,17 @@ class AlexaYamlGeneratorTests(unittest.TestCase):
             })
 
             self.assertTrue(target.exists())
-            self.assertIsNotNone(result.backup)
-            self.assertEqual(pathlib.Path(result.backup).read_text(encoding="utf-8"), "old: value\n")
+            self.assertIsNone(result.backup)
             self.assertEqual(target.read_text(encoding="utf-8"), result.yaml_text)
+            self.assertEqual(list(target.parent.glob("alexa.yaml.backup-*")), [])
 
-    def test_deploy_rotates_old_backups(self) -> None:
+    def test_deploy_rejects_empty_selection(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             target = pathlib.Path(directory) / "alexa.yaml"
-            target.write_text("initial: true\n", encoding="utf-8")
-            generator = AlexaYamlGenerator(target, backup_limit=3)
-
-            for index in range(6):
-                generator.deploy({
-                    "entities": {
-                        "light.test": {"enabled": True, "name": f"Test {index}"}
-                    }
-                })
-
-            backups = list(target.parent.glob("alexa.yaml.backup-*"))
-            self.assertEqual(len(backups), 3)
+            generator = AlexaYamlGenerator(target)
+            with self.assertRaises(GeneratorValidationError):
+                generator.deploy({"entities": {"light.test": {"enabled": False}}})
+            self.assertFalse(target.exists())
 
 
 if __name__ == "__main__":
