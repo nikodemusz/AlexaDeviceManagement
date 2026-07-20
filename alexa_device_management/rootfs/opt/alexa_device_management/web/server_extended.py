@@ -16,7 +16,7 @@ import ha_export_overrides
 import oh_style_login
 import server_clean
 
-APP_VERSION = "2.11.3-rc1"
+APP_VERSION = "2.11.4-rc1"
 
 
 async def alexa_login_start(request: web.Request) -> web.StreamResponse:
@@ -35,8 +35,6 @@ async def navigation_middleware(request: web.Request, handler):
     ingress_path = request.headers.get("X-Ingress-Path", "").rstrip("/")
 
     if request.path == "/":
-        # /auth/login is intercepted by Home Assistant on some ingress/reverse-proxy
-        # combinations and returns 401 before the request reaches this app.
         text = text.replace(ingress_path + "/auth/login", ingress_path + "/alexa-login")
         text = text.replace("<code>/auth/login</code>", "<code>/alexa-login</code>")
 
