@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import os
 import pathlib
-import shutil
 import tempfile
-import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -18,7 +16,6 @@ SUPPORTED_DISPLAY_CATEGORIES = {
     "INTERIOR_BLIND", "EXTERIOR_BLIND", "CAMERA", "LOCK", "SCENE_TRIGGER",
     "OTHER",
 }
-DEFAULT_BACKUP_LIMIT = 10
 
 
 class GeneratorValidationError(ValueError):
@@ -43,9 +40,11 @@ class DeploymentResult:
 class AlexaYamlGenerator:
     """Transforms ConfigStore data into deterministic Home Assistant YAML."""
 
-    def __init__(self, target_path: pathlib.Path, backup_limit: int = DEFAULT_BACKUP_LIMIT) -> None:
+    def __init__(self, target_path: pathlib.Path, backup_limit: int = 0) -> None:
         self.target_path = target_path
-        self.backup_limit = max(1, int(backup_limit))
+        # Kept for API compatibility. Deployment rollback is handled in memory by
+        # ha_control, so persistent backup files are deliberately not created.
+        self.backup_limit = 0
 
     def generate(self, data: dict[str, Any]) -> GenerationResult:
         normalized = self._normalize(data)
@@ -86,15 +85,13 @@ class AlexaYamlGenerator:
 
     def deploy(self, data: dict[str, Any]) -> DeploymentResult:
         generated = self.generate(data)
-        self.target_path.parent.mkdir(parents=True, exist_ok=True)
+        if generated.selected_count < 1:
+            raise GeneratorValidationError("No enabled entities selected for Alexa export")
+        if not generated.yaml_text.strip():
+            raise GeneratorValidationError("Generated Alexa YAML is empty")
 
-        backup: pathlib.Path | None = None
-        if self.target_path.exists():
-            backup = self.target_path.with_name(
-                f"{self.target_path.name}.backup-{time.time_ns()}"
-            )
-            shutil.copy2(self.target_path, backup)
-            self._rotate_backups()
+        self.target_path.parent.mkdir(parents=True, exist_ok=True)
+        expected_bytes = generated.yaml_text.encode("utf-8")
 
         fd, tmp_name = tempfile.mkstemp(
             prefix=f"{self.target_path.name}-",
@@ -102,8 +99,8 @@ class AlexaYamlGenerator:
             dir=str(self.target_path.parent),
         )
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                handle.write(generated.yaml_text)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(expected_bytes)
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(tmp_name, self.target_path)
@@ -116,25 +113,27 @@ class AlexaYamlGenerator:
             if os.path.exists(tmp_name):
                 os.unlink(tmp_name)
 
+        try:
+            actual_bytes = self.target_path.read_bytes()
+        except OSError as exc:
+            raise OSError(f"Written Alexa YAML cannot be read back: {exc}") from exc
+        if actual_bytes != expected_bytes:
+            raise OSError(
+                f"Alexa YAML write verification failed: expected {len(expected_bytes)} bytes, "
+                f"read back {len(actual_bytes)} bytes"
+            )
+
+        print(
+            f"[ha-export] wrote {len(actual_bytes)} bytes with "
+            f"{generated.selected_count} entities to {self.target_path}",
+            flush=True,
+        )
         return DeploymentResult(
             path=str(self.target_path),
-            backup=str(backup) if backup else None,
+            backup=None,
             yaml_text=generated.yaml_text,
             selected_count=generated.selected_count,
         )
-
-    def _rotate_backups(self) -> None:
-        pattern = f"{self.target_path.name}.backup-*"
-        backups = sorted(
-            self.target_path.parent.glob(pattern),
-            key=lambda item: item.stat().st_mtime_ns,
-            reverse=True,
-        )
-        for old_backup in backups[self.backup_limit:]:
-            try:
-                old_backup.unlink()
-            except OSError:
-                continue
 
     def _normalize(self, data: Any) -> dict[str, Any]:
         if not isinstance(data, dict):
@@ -168,7 +167,6 @@ class AlexaYamlGenerator:
                 "description": str(raw_settings.get("description") or "").strip(),
                 "display_category": category,
             }
-
         return {"locale": locale, "entities": entities}
 
     @staticmethod
