@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from urllib.parse import urljoin
 
 from aiohttp import web
@@ -10,10 +11,26 @@ from yarl import URL
 import oh_style_login
 
 
+def _external_url(request: web.Request, path: str) -> str:
+    """Return an ingress-relative URL instead of trusting internal proxy hosts.
+
+    Home Assistant forwards X-Forwarded-Host as ``homeassistant:8123`` in some
+    ingress/reverse-proxy setups. Building an absolute redirect from that header
+    sends the browser to an internal address. A root-relative URL keeps the
+    browser's actual external origin (for example https://ha.example.de) while
+    preserving the authenticated ingress prefix.
+    """
+    ingress_path = request.headers.get("X-Ingress-Path", "")
+    if not re.fullmatch(r"[a-zA-Z0-9/_-]*", ingress_path):
+        ingress_path = ""
+    normalized_path = path if path.startswith("/") else "/" + path
+    return ingress_path.rstrip("/") + normalized_path
+
+
 def _result_page(request: web.Request, success: bool, message: str) -> web.Response:
     title = "Alexa login successful" if success else "Alexa login failed"
     icon = "✅" if success else "❌"
-    app_url = oh_style_login.external_url(request, "/")
+    app_url = _external_url(request, "/")
     import html
     body = (
         "<!doctype html><html><head><meta charset='utf-8'>"
@@ -53,7 +70,6 @@ async def _proxy(request: web.Request) -> web.StreamResponse:
         "User-Agent": f"AmazonWebView/Amazon Alexa/{oh_style_login.API_VERSION}/iOS/{oh_style_login.DI_OS_VERSION}/iPhone",
         "Accept": request.headers.get("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"),
         "Accept-Language": request.headers.get("Accept-Language", "de-DE,de;q=0.9,en;q=0.8"),
-        # Amazon must receive an Amazon URL here, never the Home Assistant ingress URL.
         "Referer": str(target_url.with_query(None)),
     }
     if request.headers.get("Origin"):
@@ -79,8 +95,6 @@ async def _proxy(request: web.Request) -> web.StreamResponse:
         status = response.status
 
     if status in {301, 302, 303, 307, 308} and location:
-        # Amazon increasingly returns relative redirects. Resolve them against the
-        # actual request URL instead of incorrectly falling back to www.amazon.com.
         resolved = urljoin(target, location)
         if "/ap/maplanding" in resolved:
             token = oh_style_login.extract_access_token(resolved)
@@ -109,4 +123,5 @@ async def _proxy(request: web.Request) -> web.StreamResponse:
 
 
 def install() -> None:
+    oh_style_login.external_url = _external_url
     oh_style_login.proxy = _proxy
