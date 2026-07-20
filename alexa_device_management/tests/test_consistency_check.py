@@ -4,7 +4,7 @@ import sys
 WEB = Path(__file__).parents[1] / "rootfs/opt/alexa_device_management/web"
 sys.path.insert(0, str(WEB))
 
-from consistency_check import analyse, _packages_enabled
+from consistency_check import analyse, _load_home_assistant_yaml, _packages_enabled
 
 
 def inventory(*entity_ids):
@@ -60,6 +60,33 @@ def test_permission_and_packages_errors():
 
 
 def test_packages_detection():
-    assert _packages_enabled({"homeassistant": {"packages": "!include_dir_named packages"}})
+    assert _packages_enabled({"homeassistant": {"packages": "packages"}})
     assert _packages_enabled({"homeassistant": {"packages": {"alexa": "x"}}})
     assert not _packages_enabled({"homeassistant": {}})
+
+
+def test_home_assistant_include_dir_named_is_loaded(tmp_path):
+    configuration = tmp_path / "configuration.yaml"
+    configuration.write_text(
+        "homeassistant:\n  packages: !include_dir_named packages\ndefault_config:\n",
+        encoding="utf-8",
+    )
+
+    document = _load_home_assistant_yaml(configuration)
+
+    assert document["homeassistant"]["packages"] == "packages"
+    assert _packages_enabled(document)
+
+
+def test_other_home_assistant_include_tags_are_tolerated(tmp_path):
+    configuration = tmp_path / "configuration.yaml"
+    configuration.write_text(
+        "frontend:\n  themes: !include_dir_merge_named themes\n"
+        "homeassistant:\n  packages: !include_dir_merge_named packages\n",
+        encoding="utf-8",
+    )
+
+    document = _load_home_assistant_yaml(configuration)
+
+    assert document["frontend"]["themes"] == "themes"
+    assert _packages_enabled(document)
