@@ -18,6 +18,34 @@ STATUS_PATH = pathlib.Path("/data/alexa_device_management/consistency_status.jso
 CONFIGURATION_YAML_PATH = pathlib.Path("/config/configuration.yaml")
 
 
+class HomeAssistantYamlLoader(yaml.SafeLoader):
+    """Safe YAML loader that accepts Home Assistant's custom !include tags."""
+
+
+def _construct_home_assistant_tag(
+    loader: HomeAssistantYamlLoader,
+    tag_suffix: str,
+    node: yaml.Node,
+) -> Any:
+    """Preserve the value of unknown HA tags without executing custom code."""
+    if isinstance(node, yaml.ScalarNode):
+        return loader.construct_scalar(node)
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node)
+    if isinstance(node, yaml.MappingNode):
+        return loader.construct_mapping(node)
+    return None
+
+
+HomeAssistantYamlLoader.add_multi_constructor("!", _construct_home_assistant_tag)
+
+
+def _load_home_assistant_yaml(path: pathlib.Path) -> dict[str, Any]:
+    """Load HA YAML while tolerating tags such as !include_dir_named."""
+    document = yaml.load(path.read_text(encoding="utf-8"), Loader=HomeAssistantYamlLoader) or {}
+    return document if isinstance(document, dict) else {}
+
+
 def _finding(code: str, severity: str, message: str, **details: Any) -> dict[str, Any]:
     return {"code": code, "severity": severity, "message": message, **details}
 
@@ -47,12 +75,12 @@ def _packages_enabled(document: Any) -> bool:
     homeassistant = document.get("homeassistant")
     if not isinstance(homeassistant, dict):
         return False
+    if "packages" not in homeassistant:
+        return any(str(key).startswith("packages") for key in homeassistant)
     packages = homeassistant.get("packages")
-    if isinstance(packages, str):
-        return "packages" in packages
-    if isinstance(packages, dict):
-        return True
-    return any(str(key).startswith("packages") for key in homeassistant)
+    # Home Assistant accepts tagged scalars, mappings and include results here.
+    # Presence of a non-null value is sufficient; the HA config check validates it.
+    return packages is not None
 
 
 def analyse(
@@ -172,7 +200,7 @@ async def run_check(request: web.Request) -> web.Response:
         except (OSError, yaml.YAMLError):
             deployed_document = {}
         try:
-            configuration_document = yaml.safe_load(CONFIGURATION_YAML_PATH.read_text(encoding="utf-8")) or {}
+            configuration_document = _load_home_assistant_yaml(CONFIGURATION_YAML_PATH)
         except (OSError, yaml.YAMLError):
             configuration_document = {}
         parent = ha_export.ALEXA_YAML_PATH.parent
