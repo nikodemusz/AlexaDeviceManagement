@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.11.3-rc1
+
+- **Fix**: Der Amazon-Alexa-Login verwendet nicht mehr den unter Home-Assistant-Ingress problematischen Pfad `/auth/login`, sondern startet direkt über `/alexa-login`.
+- **Fix**: Dadurch wird ein vorgelagerter `401 Unauthorized` vermieden, bevor der Request das Add-on erreicht.
+
 ## 2.8.3-rc1
 
 - **Fix**: Die aktuelle HA→Alexa-Konfiguration wird beim Ausrollen jetzt direkt aus dem Editor an `/api/ha-export/deploy` gesendet.
