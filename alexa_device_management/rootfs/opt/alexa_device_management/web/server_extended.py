@@ -13,9 +13,15 @@ import discovery_preview
 import ha_control
 import ha_export
 import ha_export_overrides
+import oh_style_login
 import server_clean
 
-APP_VERSION = "2.11.2-rc1"
+APP_VERSION = "2.11.3-rc1"
+
+
+async def alexa_login_start(request: web.Request) -> web.StreamResponse:
+    """Start the Amazon login without using Home Assistant's reserved /auth/login path."""
+    return await oh_style_login.start(request)
 
 
 @web.middleware
@@ -29,6 +35,11 @@ async def navigation_middleware(request: web.Request, handler):
     ingress_path = request.headers.get("X-Ingress-Path", "").rstrip("/")
 
     if request.path == "/":
+        # /auth/login is intercepted by Home Assistant on some ingress/reverse-proxy
+        # combinations and returns 401 before the request reaches this app.
+        text = text.replace(ingress_path + "/auth/login", ingress_path + "/alexa-login")
+        text = text.replace("<code>/auth/login</code>", "<code>/alexa-login</code>")
+
         marker = '<a class="btn btn-secondary" href="' + ingress_path + '/debug" title="Debug-Konsole">🛠 Debug</a>'
         link = '<a class="btn btn-primary" href="' + ingress_path + '/ha-export" title="Home-Assistant-Geräte für Alexa konfigurieren">HA → Alexa</a>'
         if marker in text and link not in text:
@@ -95,6 +106,7 @@ def create_app() -> web.Application:
     ha_control.install()
     app = server_clean.create_app()
     app.middlewares.append(navigation_middleware)
+    app.router.add_get("/alexa-login", alexa_login_start)
     alexa_cache_service.register_routes(app, server_clean)
     alexa_group_manager.register_routes(app, server_clean, ha_export.CONFIG_STORE)
     ha_export.register_routes(app)
