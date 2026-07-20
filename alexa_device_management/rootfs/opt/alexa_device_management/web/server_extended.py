@@ -1,12 +1,12 @@
 """Extended app entry point with Home Assistant Alexa export manager."""
 
 from __future__ import annotations
-
 from aiohttp import web
 
 import alexa_cache_service
 import alexa_endpoint_inventory
 import alexa_group_manager
+import alexa_login_proxy_fix
 import alexa_room_enrichment
 import consistency_check
 import discovery_preview
@@ -15,7 +15,7 @@ import ha_export
 import ha_export_overrides
 import server_clean
 
-APP_VERSION = "2.11.1-rc1"
+APP_VERSION = "2.11.2-rc1"
 
 
 @web.middleware
@@ -87,6 +87,7 @@ async def navigation_middleware(request: web.Request, handler):
 
 def create_app() -> web.Application:
     server_clean.APP_VERSION = APP_VERSION
+    alexa_login_proxy_fix.install()
     alexa_endpoint_inventory.install(server_clean)
     alexa_room_enrichment.install(server_clean)
     alexa_cache_service.install(server_clean)
