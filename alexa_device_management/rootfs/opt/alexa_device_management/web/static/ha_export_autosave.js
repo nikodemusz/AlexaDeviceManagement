@@ -65,15 +65,15 @@
   }
 
   document.addEventListener('change', event => {
-    if (event.target.matches('.enabled, .category')) schedule();
+    if (event.target.matches('.enabled, .category, .group-sync-control')) schedule();
   }, true);
 
   document.addEventListener('input', event => {
-    if (event.target.matches('.alexaname, .description')) schedule();
+    if (event.target.matches('.alexaname, .description, .alexagroup')) schedule();
   }, true);
 
   document.addEventListener('click', event => {
-    if (event.target.matches('.prepare, #btn-enable-visible, #btn-disable-visible, #btn-disable-technical')) {
+    if (event.target.matches('.prepare, #btn-enable-visible, #btn-disable-visible, #btn-disable-technical, #btn-copy-ha-areas')) {
       setTimeout(schedule, 0);
     }
   }, true);

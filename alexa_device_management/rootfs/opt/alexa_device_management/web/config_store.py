@@ -18,7 +18,7 @@ import yaml
 class ConfigStore:
     """Thread-safe JSON store with atomic writes and YAML migration."""
 
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 3
 
     def __init__(self, path: pathlib.Path, legacy_path: pathlib.Path, alexa_yaml_path: pathlib.Path) -> None:
         self.path = path
@@ -33,6 +33,11 @@ class ConfigStore:
             "schema_version": ConfigStore.SCHEMA_VERSION,
             "locale": "de-DE",
             "entities": {},
+            "group_sync": {
+                "enabled": True,
+                "create_missing": True,
+                "remove_from_other_groups": False,
+            },
             "ui": {"collapsed_devices": [], "collapsed_areas": []},
             "updated_at": None,
         }
@@ -97,6 +102,13 @@ class ConfigStore:
             result["locale"] = str(data.get("locale") or "de-DE")
             result["entities"] = data.get("entities") if isinstance(data.get("entities"), dict) else {}
             result["ui"] = data.get("ui") if isinstance(data.get("ui"), dict) else result["ui"]
+            raw_group_sync = data.get("group_sync")
+            if isinstance(raw_group_sync, dict):
+                result["group_sync"] = {
+                    "enabled": bool(raw_group_sync.get("enabled", True)),
+                    "create_missing": bool(raw_group_sync.get("create_missing", True)),
+                    "remove_from_other_groups": bool(raw_group_sync.get("remove_from_other_groups", False)),
+                }
             result["updated_at"] = data.get("updated_at")
         result["schema_version"] = self.SCHEMA_VERSION
         return result
@@ -116,6 +128,7 @@ class ConfigStore:
                     "name": current.get("name", ""),
                     "description": current.get("description", ""),
                     "display_category": current.get("display_categories", ""),
+                    "alexa_group": "",
                 }
         except (OSError, yaml.YAMLError, AttributeError, TypeError):
             pass

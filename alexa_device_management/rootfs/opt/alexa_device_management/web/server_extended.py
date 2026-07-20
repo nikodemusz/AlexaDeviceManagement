@@ -6,6 +6,7 @@ from aiohttp import web
 
 import alexa_cache_service
 import alexa_endpoint_inventory
+import alexa_group_manager
 import alexa_room_enrichment
 import consistency_check
 import discovery_preview
@@ -14,7 +15,7 @@ import ha_export
 import ha_export_overrides
 import server_clean
 
-APP_VERSION = "2.10.0-rc1"
+APP_VERSION = "2.11.0-rc1"
 
 
 @web.middleware
@@ -38,10 +39,13 @@ async def navigation_middleware(request: web.Request, handler):
             + '/static/alexa_endpoint_inventory.css?v=' + APP_VERSION + '">'
         )
         endpoint_script = (
-            '<script src="' + ingress_path
+            '<script>document.documentElement.dataset.ingressPath=' + repr(ingress_path) + ';</script>'
+            + '<script src="' + ingress_path
             + '/static/alexa_endpoint_inventory.js?v=' + APP_VERSION + '"></script>'
             + '<script src="' + ingress_path
             + '/static/device_table_labels.js?v=' + APP_VERSION + '"></script>'
+            + '<script src="' + ingress_path
+            + '/static/alexa_group_manager.js?v=' + APP_VERSION + '"></script>'
         )
         if "alexa_endpoint_inventory.css" not in text:
             text = text.replace("</head>", endpoint_stylesheet + "</head>")
@@ -66,6 +70,7 @@ async def navigation_middleware(request: web.Request, handler):
             + '"></script><script src="' + ingress_path + '/static/ha_export_lifecycle.js?v=' + APP_VERSION
             + '"></script><script src="' + ingress_path + '/static/ha_export_performance.js?v=' + APP_VERSION
             + '"></script><script src="' + ingress_path + '/static/ha_export_deploy_fix.js?v=' + APP_VERSION
+            + '"></script><script src="' + ingress_path + '/static/alexa_group_manager.js?v=' + APP_VERSION
             + '"></script>'
         )
         text = text.replace("let inventory=", "window.inventory=")
@@ -90,6 +95,7 @@ def create_app() -> web.Application:
     app = server_clean.create_app()
     app.middlewares.append(navigation_middleware)
     alexa_cache_service.register_routes(app, server_clean)
+    alexa_group_manager.register_routes(app, server_clean, ha_export.CONFIG_STORE)
     ha_export.register_routes(app)
     ha_control.register_routes(app)
     discovery_preview.register_routes(app)
