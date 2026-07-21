@@ -6,7 +6,7 @@ from aiohttp import web
 import alexa_cache_service
 import alexa_endpoint_inventory
 import alexa_group_manager
-import alexa_login_proxy_fix
+import alexa_login_ingress_fix
 import alexa_room_enrichment
 import consistency_check
 import discovery_preview
@@ -16,7 +16,7 @@ import ha_export_overrides
 import oh_style_login
 import server_clean
 
-APP_VERSION = "2.11.4-rc1"
+APP_VERSION = "2.11.5-rc1"
 
 
 async def alexa_login_start(request: web.Request) -> web.StreamResponse:
@@ -96,7 +96,7 @@ async def navigation_middleware(request: web.Request, handler):
 
 def create_app() -> web.Application:
     server_clean.APP_VERSION = APP_VERSION
-    alexa_login_proxy_fix.install()
+    alexa_login_ingress_fix.install()
     alexa_endpoint_inventory.install(server_clean)
     alexa_room_enrichment.install(server_clean)
     alexa_cache_service.install(server_clean)
