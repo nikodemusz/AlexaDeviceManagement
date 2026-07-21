@@ -32,8 +32,8 @@ from yarl import URL
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
 STATE_PATH = pathlib.Path("/data/alexa_login_state.json")
 
-API_VERSION = "2.2.556530.0"
-DI_OS_VERSION = "16.6"
+API_VERSION = "2.2.623270.0"
+DI_OS_VERSION = "18.3.2"
 DI_SDK_VERSION = "6.12.4"
 DEVICE_TYPE = "A2IVLV5VM2W81"
 DEFAULT_RETAIL_DOMAIN = "amazon.com"
@@ -42,13 +42,24 @@ DEFAULT_ALEXA_API = "https://alexa.amazon.com"
 AMAZON_PROXY_HOSTS = (
     "www.amazon.com",
     "amazon.com",
+    "www.amazon.de",
+    "amazon.de",
+    "www.amazon.co.uk",
+    "www.amazon.fr",
+    "www.amazon.it",
+    "www.amazon.es",
     "images-na.ssl-images-amazon.com",
     "m.media-amazon.com",
     "m.media-amazon.de",
     "images-eu.ssl-images-amazon.com",
     "fls-na.amazon.com",
+    "fls-eu.amazon.com",
     "completion.amazon.com",
+    "completion.amazon.de",
     "unagi-na.amazon.com",
+    "unagi-eu.amazon.com",
+    "api.amazon.com",
+    "ap.amazon.com",
 )
 
 
@@ -164,7 +175,7 @@ async def reset_proxy_session(app: web.Application) -> aiohttp.ClientSession:
 
 
 def seed_login_cookies(session: aiohttp.ClientSession, state: dict[str, Any]) -> None:
-    map_md_json = '{"device_user_dictionary":[],"device_registration_data":{"software_version":"1"},"app_identifier":{"app_version":"2.2.443692","bundle_id":"com.amazon.echo"}}'
+    map_md_json = json.dumps({"device_user_dictionary": [], "device_registration_data": {"software_version": "1"}, "app_identifier": {"app_version": API_VERSION, "bundle_id": "com.amazon.echo"}}, separators=(",", ":"))
     session.cookie_jar.update_cookies(
         {
             "map-md": base64.b64encode(map_md_json.encode()).decode(),

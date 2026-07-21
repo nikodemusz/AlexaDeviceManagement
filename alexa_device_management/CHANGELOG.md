@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.11.8-rc1
+
+- **Fix Login**: `map-md`-Cookie enthielt eine veraltete hardcodierte App-Version (`2.2.443692`) statt der aktuellen `API_VERSION` — Amazon vergleicht diesen Wert intern.
+- **Fix Login**: `API_VERSION` auf `2.2.623270.0` und `DI_OS_VERSION` auf `18.3.2` (iOS 18) aktualisiert — Amazon lehnt sehr alte iOS-Versionen für neue Gerät-Registrierungen zunehmend ab.
+- **Fix Login**: `AMAZON_PROXY_HOSTS` um EU-Domains erweitert (`www.amazon.de`, `.co.uk`, `.fr`, `.it`, `.es`, `completion.amazon.de`, `fls-eu`, `unagi-eu`, `api.amazon.com`) — fehlende Hosts führten dazu dass Links im Login-Flow nicht durch den Proxy umgeleitet wurden.
+
 ## 2.11.5-rc1
 
 - **Fix**: Der Amazon-Login verwendet wieder den historisch funktionierenden Proxy-Ablauf aus den frühen Versionen.
