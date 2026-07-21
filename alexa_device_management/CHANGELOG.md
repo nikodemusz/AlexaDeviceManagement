@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.11.5-rc1
+
+- **Fix**: Der Amazon-Login verwendet wieder den historisch funktionierenden Proxy-Ablauf aus den frühen Versionen.
+- **Fix**: Nur die URL-Erzeugung wurde angepasst: Browser-Weiterleitungen bleiben relativ im aktiven Home-Assistant-Ingress und verwenden niemals interne Hosts wie `homeassistant:8123`.
+- **Cleanup**: Der zuletzt ergänzte vollständige Proxy-Ersatz wurde entfernt, da er den bewährten Login-Ablauf verändert und 500-Fehler ausgelöst hat.
+
 ## 2.11.3-rc1
 
 - **Fix**: Der Amazon-Alexa-Login verwendet nicht mehr den unter Home-Assistant-Ingress problematischen Pfad `/auth/login`, sondern startet direkt über `/alexa-login`.
