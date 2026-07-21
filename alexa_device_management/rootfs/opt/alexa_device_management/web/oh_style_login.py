@@ -106,7 +106,7 @@ def proxied_url(request: web.Request, target_url: str, default_host: str = "www.
         host = default_host
         path = target_url if target_url.startswith("/") else "/" + target_url
         query = ""
-    local = f"/auth/alexa-app/proxy/{host}{path}"
+    local = f"/alexa-auth/proxy/{host}{path}"
     if query:
         local += "?" + query
     return external_url(request, local)
@@ -367,12 +367,12 @@ def rewrite_html(request: web.Request, text: str, current_host: str = "www.amazo
         flags=re.I,
     )
 
-    local_root = external_url(request, f"/auth/alexa-app/proxy/{current_host}/")
+    local_root = external_url(request, f"/alexa-auth/proxy/{current_host}/")
     result = re.sub(r"=([\"'])/(?!/)", lambda m: f"={m.group(1)}{local_root}", result)
     result = re.sub(r"=([\"'])&#x2F;", lambda m: f"={m.group(1)}{local_root}", result)
 
     for host in AMAZON_PROXY_HOSTS:
-        root = external_url(request, f"/auth/alexa-app/proxy/{host}/")
+        root = external_url(request, f"/alexa-auth/proxy/{host}/")
         result = result.replace(f"https://{host}/", root)
         result = result.replace(f"http://{host}/", root)
         result = result.replace(f"https://{host}:443/", root)
@@ -432,5 +432,5 @@ async def cleanup(app: web.Application) -> None:
 
 
 def setup_routes(app: web.Application) -> None:
-    app.router.add_route("*", "/auth/alexa-app/{tail:.*}", proxy)
+    app.router.add_route("*", "/alexa-auth/{tail:.*}", proxy)
     app.on_cleanup.append(cleanup)

@@ -16,7 +16,7 @@
       <div class="toolbar-actions">
         <span id="config-status" class="status-badge"></span>
         <span id="refresh-status" class="status-badge hidden" title="Automatischer Token-Refresh"></span>
-        <a id="btn-login" class="btn btn-primary hidden" title="Alexa-Web-Session verbinden" href="{{INGRESS_PATH}}/auth/login" target="_blank" rel="noopener">🔑 Alexa verbinden</a>
+        <a id="btn-login" class="btn btn-primary hidden" title="Alexa-Web-Session verbinden" href="{{INGRESS_PATH}}/alexa-login" target="_blank" rel="noopener">🔑 Alexa verbinden</a>
         <button id="btn-logout" class="btn btn-danger hidden" title="Abmelden">⏏ Abmelden</button>
         <button id="btn-refresh" class="btn btn-secondary" title="Geräteliste aktualisieren">↻ Aktualisieren</button>
         <a class="btn btn-secondary" href="{{INGRESS_PATH}}/debug" title="Debug-Konsole">🛠 Debug</a>
@@ -60,13 +60,13 @@
         <div class="login-steps">
           <h3>Ablauf:</h3>
           <ol>
-            <li>Der Browser öffnet direkt den lokalen Login-Start <code>/auth/login</code>.</li>
+            <li>Der Browser öffnet direkt den lokalen Login-Start <code>/alexa-login</code>.</li>
             <li>Der Server leitet auf den Alexa-App-Login-Proxy weiter.</li>
             <li>Amazon liefert nach erfolgreicher Anmeldung den Token an <code>/ap/maplanding</code> zurück.</li>
             <li>Die App speichert daraus die lokale Alexa-Web-Session und lädt danach die Geräteliste.</li>
           </ol>
         </div>
-        <a id="btn-start-login" class="btn btn-primary btn-large" href="{{INGRESS_PATH}}/auth/login" target="_blank" rel="noopener">
+        <a id="btn-start-login" class="btn btn-primary btn-large" href="{{INGRESS_PATH}}/alexa-login" target="_blank" rel="noopener">
           🔑 Alexa-Web-Session verbinden
         </a>
         <p id="login-hint" class="login-hint">Klicke auf den Link, um den Amazon-Login in einem neuen Tab zu starten.</p>
@@ -173,7 +173,7 @@
     async function logout() {
       if (!confirm("Möchtest du dich wirklich abmelden? Die gespeicherte Alexa-Web-Session wird gelöscht.")) return;
       try {
-        const resp = await fetch(`${INGRESS_PATH}/auth/logout`, { method: "POST" });
+        const resp = await fetch(`${INGRESS_PATH}/api/logout`, { method: "POST" });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         showAlert("Erfolgreich abgemeldet.", "success");
         fetchConfigStatus();

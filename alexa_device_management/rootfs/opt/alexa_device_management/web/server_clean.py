@@ -15,7 +15,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "2.11.8-rc1"
+APP_VERSION = "2.11.9-rc1"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -107,7 +107,7 @@ async def logout(request: web.Request) -> web.Response:
 
 
 async def auth_login(request: web.Request) -> web.StreamResponse:
-    raise web.HTTPFound(oh_style_login.external_url(request, "/auth/alexa-app/start"))
+    raise web.HTTPFound(oh_style_login.external_url(request, "/alexa-auth/start"))
 
 
 async def auth_session(request: web.Request) -> web.Response:
@@ -1436,7 +1436,7 @@ async def debug_ui(request: web.Request) -> web.Response:
     endpoints = [
         ("/api/app-info",             "App-Info"),
         ("/api/config-status",        "Config-Status"),
-        ("/auth/session",             "Session"),
+        ("/api/auth-session",         "Session"),
         ("/api/token-refresh-status", "Token-Refresh"),
         ("/api/devices",              "Geräteliste"),
         ("/api/devices-debug",        "Geräte Rohdaten"),
@@ -1649,9 +1649,9 @@ def create_app() -> web.Application:
     app.router.add_get("/api/delete-probe", delete_probe)
     app.router.add_get("/debug", debug_ui)
     app.router.add_get("/api/token-refresh-status", token_refresh_status)
-    app.router.add_get("/auth/login", auth_login)
-    app.router.add_get("/auth/session", auth_session)
-    app.router.add_post("/auth/logout", logout)
+    app.router.add_get("/alexa-login", auth_login)
+    app.router.add_get("/api/auth-session", auth_session)
+    app.router.add_post("/api/logout", logout)
     app.router.add_static("/static/", STATIC_DIR)
     oh_style_login.setup_routes(app)
     return app

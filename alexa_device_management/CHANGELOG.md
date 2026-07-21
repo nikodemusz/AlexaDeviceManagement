@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.11.9-rc1
+
+- **Fix Login (HA Companion App)**: Alle Login-Routen aus dem `/auth/`-Namespace verschoben. Die HA Companion App und der HA HTTP-Server interceptieren alle `/auth/*`-Pfade als eigene Auth-Endpunkte und gaben 401 zurück, bevor der Request das Add-on erreichte. Neue Pfade: `/alexa-login` (start), `/alexa-auth/...` (Proxy), `/api/auth-session`, `/api/logout`.
+
 ## 2.11.8-rc1
 
 - **Fix Login**: `map-md`-Cookie enthielt eine veraltete hardcodierte App-Version (`2.2.443692`) statt der aktuellen `API_VERSION` — Amazon vergleicht diesen Wert intern.
