@@ -361,7 +361,7 @@ def rewrite_html(request: web.Request, text: str, current_host: str = "www.amazo
         return f"={quote}{proxied_url(request, scheme + '://' + host + path)}"
 
     result = re.sub(
-        r"=([\"'])https?://([a-z0-9.-]+)((?:/|&#x2F;)[^\"']*)",
+        r"=([\"'])(https?)://([a-z0-9.-]+)((?:/|&#x2F;)[^\"']*)",
         repl_absolute,
         result,
         flags=re.I,
@@ -379,8 +379,15 @@ def rewrite_html(request: web.Request, text: str, current_host: str = "www.amazo
     )
 
     local_root = external_url(request, f"/alexa-auth/proxy/{current_host}/")
-    result = re.sub(r"=([\"'])/(?!/)", lambda m: f"={m.group(1)}{local_root}", result)
-    result = re.sub(r"=([\"'])&#x2F;", lambda m: f"={m.group(1)}{local_root}", result)
+
+    def repl_relative_path(m: re.Match[str]) -> str:
+        quote, rest = m.group(1), m.group(2)
+        if "/alexa-auth/proxy/" in rest:
+            return m.group(0)
+        return f"={quote}{local_root}{rest}"
+
+    result = re.sub(r"=([\"'])/(?!/)([^\"']*)", repl_relative_path, result)
+    result = re.sub(r"=([\"'])&#x2F;([^\"']*)", repl_relative_path, result)
 
     for host in AMAZON_PROXY_HOSTS:
         root = external_url(request, f"/alexa-auth/proxy/{host}/")
