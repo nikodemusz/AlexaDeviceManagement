@@ -367,6 +367,17 @@ def rewrite_html(request: web.Request, text: str, current_host: str = "www.amazo
         flags=re.I,
     )
 
+    def repl_protocol_relative(match: re.Match[str]) -> str:
+        quote, host, path = match.groups()
+        return f"={quote}{proxied_url(request, 'https://' + host + path)}"
+
+    result = re.sub(
+        r"=([\"'])//([a-z0-9.-]+)((?:/|&#x2F;)[^\"']*)",
+        repl_protocol_relative,
+        result,
+        flags=re.I,
+    )
+
     local_root = external_url(request, f"/alexa-auth/proxy/{current_host}/")
     result = re.sub(r"=([\"'])/(?!/)", lambda m: f"={m.group(1)}{local_root}", result)
     result = re.sub(r"=([\"'])&#x2F;", lambda m: f"={m.group(1)}{local_root}", result)
