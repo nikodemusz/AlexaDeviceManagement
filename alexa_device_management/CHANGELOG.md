@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.11.10-rc1
+
+- **Fix Login (neuer Tab / 401 via Companion App)**: Login-Buttons öffnen keinen neuen Tab mehr (`target="_blank"` entfernt). Ein neues Fenster verliert die HA-Session bei Remote-/Nabu-Casa-Zugriff → 401. Login läuft jetzt im selben WebView.
+- **Fix Login (Amazon-Fehlerseite lokal)**: Protokoll-relative URLs (`//host/path`) in Amazon-Login-Seiten werden jetzt durch den Proxy umgeschrieben. Vorher wurden `action="//www.amazon.com/ap/signin"`-Formularaktionen wegen `(?!/)` im Regex übersprungen, was dazu führte, dass der Browser direkt zu Amazon postete — Amazon sah eine nicht authentifizierte Anfrage und zeigte die „There was a problem"-Seite.
+
 ## 2.11.9-rc1
 
 - **Fix Login (HA Companion App)**: Alle Login-Routen aus dem `/auth/`-Namespace verschoben. Die HA Companion App und der HA HTTP-Server interceptieren alle `/auth/*`-Pfade als eigene Auth-Endpunkte und gaben 401 zurück, bevor der Request das Add-on erreichte. Neue Pfade: `/alexa-login` (start), `/alexa-auth/...` (Proxy), `/api/auth-session`, `/api/logout`.
