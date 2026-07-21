@@ -2,37 +2,20 @@
 
 from __future__ import annotations
 from aiohttp import web
-from yarl import URL
 
 import alexa_cache_service
 import alexa_endpoint_inventory
 import alexa_group_manager
 import alexa_login_ingress_fix
-import alexa_login_rewrite_fix
 import alexa_room_enrichment
 import consistency_check
 import discovery_preview
 import ha_control
 import ha_export
 import ha_export_overrides
-import oh_style_login
 import server_clean
 
-APP_VERSION = "2.11.7-rc1"
-
-
-async def alexa_login_start(request: web.Request) -> web.StreamResponse:
-    """Start Amazon login with a guaranteed ingress-relative redirect."""
-    session = await oh_style_login.reset_proxy_session(request.app)
-    state = oh_style_login.new_state()
-    oh_style_login.seed_login_cookies(session, state)
-    login_url = URL(oh_style_login.build_openhab_login_url(state))
-
-    ingress_path = request.headers.get("X-Ingress-Path", "").rstrip("/")
-    local = f"{ingress_path}/auth/alexa-app/proxy/{login_url.host}{login_url.raw_path}"
-    if login_url.raw_query_string:
-        local += "?" + login_url.raw_query_string
-    raise web.HTTPFound(local)
+APP_VERSION = "2.11.10-rc1"
 
 
 @web.middleware
@@ -108,7 +91,6 @@ async def navigation_middleware(request: web.Request, handler):
 def create_app() -> web.Application:
     server_clean.APP_VERSION = APP_VERSION
     alexa_login_ingress_fix.install()
-    alexa_login_rewrite_fix.install()
     alexa_endpoint_inventory.install(server_clean)
     alexa_room_enrichment.install(server_clean)
     alexa_cache_service.install(server_clean)
@@ -116,7 +98,6 @@ def create_app() -> web.Application:
     ha_control.install()
     app = server_clean.create_app()
     app.middlewares.append(navigation_middleware)
-    app.router.add_get("/alexa-login", alexa_login_start)
     alexa_cache_service.register_routes(app, server_clean)
     alexa_group_manager.register_routes(app, server_clean, ha_export.CONFIG_STORE)
     ha_export.register_routes(app)

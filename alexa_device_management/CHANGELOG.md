@@ -2,8 +2,10 @@
 
 ## 2.11.10-rc1
 
+- **Fix Version**: `server_extended.py` (der tatsächliche Einstiegspunkt) zeigte noch `2.11.7-rc1`, weil es `server_clean.APP_VERSION` mit seinem eigenen Wert überschreibt. Auf `2.11.10-rc1` aktualisiert.
 - **Fix Login (neuer Tab / 401 via Companion App)**: Login-Buttons öffnen keinen neuen Tab mehr (`target="_blank"` entfernt). Ein neues Fenster verliert die HA-Session bei Remote-/Nabu-Casa-Zugriff → 401. Login läuft jetzt im selben WebView.
 - **Fix Login (Amazon-Fehlerseite lokal)**: Protokoll-relative URLs (`//host/path`) in Amazon-Login-Seiten werden jetzt durch den Proxy umgeschrieben. Vorher wurden `action="//www.amazon.com/ap/signin"`-Formularaktionen wegen `(?!/)` im Regex übersprungen, was dazu führte, dass der Browser direkt zu Amazon postete — Amazon sah eine nicht authentifizierte Anfrage und zeigte die „There was a problem"-Seite.
+- **Fix Login (server_extended)**: `server_extended.py` importierte und installierte `alexa_login_rewrite_fix` (altes Patch-Modul das `oh_style_login.rewrite_html` durch eine Version mit `/auth/alexa-app/proxy/` Pfaden ersetzte) und registrierte eine eigene `/alexa-login` Route mit dem alten Proxy-Pfad — damit wurden alle Login-Fixes aus server_clean.py und oh_style_login.py effektiv überschrieben. Beide Overrides entfernt.
 
 ## 2.11.9-rc1
 
