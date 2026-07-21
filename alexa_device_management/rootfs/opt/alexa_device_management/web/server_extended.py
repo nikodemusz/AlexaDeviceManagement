@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from aiohttp import web
+from yarl import URL
 
 import alexa_cache_service
 import alexa_endpoint_inventory
@@ -16,12 +17,21 @@ import ha_export_overrides
 import oh_style_login
 import server_clean
 
-APP_VERSION = "2.11.5-rc1"
+APP_VERSION = "2.11.6-rc1"
 
 
 async def alexa_login_start(request: web.Request) -> web.StreamResponse:
-    """Start the Amazon login without using Home Assistant's reserved /auth/login path."""
-    return await oh_style_login.start(request)
+    """Start Amazon login with a guaranteed ingress-relative redirect."""
+    session = await oh_style_login.reset_proxy_session(request.app)
+    state = oh_style_login.new_state()
+    oh_style_login.seed_login_cookies(session, state)
+    login_url = URL(oh_style_login.build_openhab_login_url(state))
+
+    ingress_path = request.headers.get("X-Ingress-Path", "").rstrip("/")
+    local = f"{ingress_path}/auth/alexa-app/proxy/{login_url.host}{login_url.raw_path}"
+    if login_url.raw_query_string:
+        local += "?" + login_url.raw_query_string
+    raise web.HTTPFound(local)
 
 
 @web.middleware
