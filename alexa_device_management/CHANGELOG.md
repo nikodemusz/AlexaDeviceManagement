@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.11.15-rc1
+
+- **Fix Login ("Seite nicht gefunden" nach dem Domain-Wechsel auf amazon.de)**: `handle_redirect` reichte den gerade proxied Host nicht an `proxied_url` weiter — bei einem relativen `Location`-Header (z.B. `/ap/...` ohne Host) fiel die Zielauflösung auf den hartkodierten Default `www.amazon.com` zurück. Das war unauffällig, solange der Standard-Marktplatz `amazon.com` war (Default == Fallback), ist seit 2.11.14-rc1 (Default jetzt `amazon.de`) aber sichtbar geworden: mitten im Login-Flow landete der Browser plötzlich wieder auf `amazon.com` statt `amazon.de` und lief ins Leere. `handle_redirect` bekommt jetzt den aktuellen Host explizit übergeben.
+
 ## 2.11.14-rc1
 
 - **Fix Login (EU/DE-Accounts, Teil 3 — Kernursache)**: Der Login startete bisher immer fest auf `https://www.amazon.com/ap/signin`, unabhängig vom Konto. Amazon trennt NA- und EU-Konten auf Identitätsebene: Ein über `amazon.com` erzeugtes Access-Token ist NA-gebunden und wird von `alexa.amazon.de` (und anderen EU-Marktplätzen) grundsätzlich abgelehnt — daher konnten auch die Fallbacks aus 2.11.12/2.11.13 den Login für deutsche Konten nie retten, egal welche Cookie-Domain nachträglich angefragt wurde. Die Login-Startseite (`/ap/signin`), das `return_to`-Ziel, das Cookie-Seeding und die Registrierungs-Payload verwenden jetzt konsistent den echten Marktplatz (Default jetzt `amazon.de` statt `amazon.com`). Die zentrale App-Registrierung (`api.amazon.com/auth/register`) bleibt unverändert, da sie laut Referenzimplementierungen (openHAB/alexa-remote) marktplatzübergreifend zentral ist. Der Fallback auf andere Marktplätze (inkl. `amazon.com`) bleibt als Sicherheitsnetz erhalten, falls das Konto doch auf einem anderen Marktplatz registriert ist.
