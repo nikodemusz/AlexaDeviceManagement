@@ -68,7 +68,11 @@ class AssocHandleTests(unittest.TestCase):
         self.assertEqual(oh_style_login.assoc_handle_for("amazon.co.uk"), "amzn_dp_project_dee_ios_uk")
 
     def test_login_url_uses_marketplace_assoc_handle(self) -> None:
-        state = oh_style_login.new_state()
+        state = {
+            "deviceId": "abc123",
+            "retailDomain": oh_style_login.DEFAULT_RETAIL_DOMAIN,
+            "retailUrl": oh_style_login.DEFAULT_RETAIL_URL,
+        }
         url = oh_style_login.build_openhab_login_url(state)
         self.assertIn("openid.assoc_handle=amzn_dp_project_dee_ios_de", url)
         self.assertIn("pageId=amzn_dp_project_dee_ios_de", url)
