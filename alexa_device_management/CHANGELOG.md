@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.11.14-rc1
+
+- **Fix Login (EU/DE-Accounts, Teil 3 — Kernursache)**: Der Login startete bisher immer fest auf `https://www.amazon.com/ap/signin`, unabhängig vom Konto. Amazon trennt NA- und EU-Konten auf Identitätsebene: Ein über `amazon.com` erzeugtes Access-Token ist NA-gebunden und wird von `alexa.amazon.de` (und anderen EU-Marktplätzen) grundsätzlich abgelehnt — daher konnten auch die Fallbacks aus 2.11.12/2.11.13 den Login für deutsche Konten nie retten, egal welche Cookie-Domain nachträglich angefragt wurde. Die Login-Startseite (`/ap/signin`), das `return_to`-Ziel, das Cookie-Seeding und die Registrierungs-Payload verwenden jetzt konsistent den echten Marktplatz (Default jetzt `amazon.de` statt `amazon.com`). Die zentrale App-Registrierung (`api.amazon.com/auth/register`) bleibt unverändert, da sie laut Referenzimplementierungen (openHAB/alexa-remote) marktplatzübergreifend zentral ist. Der Fallback auf andere Marktplätze (inkl. `amazon.com`) bleibt als Sicherheitsnetz erhalten, falls das Konto doch auf einem anderen Marktplatz registriert ist.
+
 ## 2.11.13-rc1
 
 - **Fix Login (EU/DE-Accounts, Teil 2)**: Der in 2.11.12-rc1 eingeführte EU-Fallback schlug weiterhin fehl ("account not accessible on US or any EU Alexa marketplace"), weil `exchange_token` das übergebene `cookie_domain`-Argument nur für den `cookies`-Anfrage-Wrapper verwendete — das `domain`-Formularfeld und die Ziel-URL griffen weiterhin fest auf `state["retailDomain"]`/`state["retailUrl"]` (`amazon.com`) zurück. Dadurch wurden für `.amazon.de` angeforderte Cookies inkonsistent gegen den US-Exchange-Endpunkt ausgetauscht und von Amazon abgelehnt. `exchange_token` leitet Ziel-URL und `domain`-Feld jetzt korrekt aus dem übergebenen `cookie_domain` ab, sodass EU-Marktplätze tatsächlich eigene, gültige Cookies erhalten.
