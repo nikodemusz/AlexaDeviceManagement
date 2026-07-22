@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.11.11-rc1
+
+- **Fix**: `ValueError: not enough values to unpack` beim Login-Proxy behoben — `rewrite_html` hatte das Regex-Capture für den URL-Scheme (`https?`) vergessen, was bei jeder Amazon-Login-Seite einen 500-Fehler auslöste.
+- **Fix**: Doppeltes Proxying von absoluten URLs behoben — nach dem Umschreiben von `https://host/path` durch `repl_absolute` traf die Relative-Pfad-Regel erneut zu und erzeugte doppelt-proxied URLs.
+
 ## 2.11.10-rc1
 
 - **Fix Version**: `server_extended.py` (der tatsächliche Einstiegspunkt) zeigte noch `2.11.7-rc1`, weil es `server_clean.APP_VERSION` mit seinem eigenen Wert überschreibt. Auf `2.11.10-rc1` aktualisiert.
