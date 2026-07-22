@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.11.13-rc1
+
+- **Fix Login (EU/DE-Accounts, Teil 2)**: Der in 2.11.12-rc1 eingeführte EU-Fallback schlug weiterhin fehl ("account not accessible on US or any EU Alexa marketplace"), weil `exchange_token` das übergebene `cookie_domain`-Argument nur für den `cookies`-Anfrage-Wrapper verwendete — das `domain`-Formularfeld und die Ziel-URL griffen weiterhin fest auf `state["retailDomain"]`/`state["retailUrl"]` (`amazon.com`) zurück. Dadurch wurden für `.amazon.de` angeforderte Cookies inkonsistent gegen den US-Exchange-Endpunkt ausgetauscht und von Amazon abgelehnt. `exchange_token` leitet Ziel-URL und `domain`-Feld jetzt korrekt aus dem übergebenen `cookie_domain` ab, sodass EU-Marktplätze tatsächlich eigene, gültige Cookies erhalten.
+
 ## 2.11.12-rc1
 
 - **Fix Login (EU/DE-Accounts)**: Nach erfolgreichem Amazon-Login schlug der Callback mit `GET https://alexa.amazon.com/api/users/me failed (401)` fehl — bei deutschen (und anderen EU-) Accounts ist der Alexa-API-Endpunkt `alexa.amazon.de`, nicht `alexa.amazon.com`. `register_app` versucht nun bei 401 automatisch EU-Fallback-Domains (`amazon.de`, `.co.uk`, `.fr`, `.it`, `.es`) und verwendet den erfolgreichen Endpunkt für alle weiteren API-Aufrufe (inkl. `/api/endpoints`).

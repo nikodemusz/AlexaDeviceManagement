@@ -215,12 +215,13 @@ def add_exchange_cookie(session: aiohttp.ClientSession, domain: str, item: dict[
 
 
 async def exchange_token(session: aiohttp.ClientSession, state: dict[str, Any], cookie_domain: str) -> None:
+    retail_url = "https://www." + cookie_domain
     cookies_json = json.dumps({"cookies": {"." + cookie_domain: []}}, separators=(",", ":"))
     cookies_base64 = base64.b64encode(cookies_json.encode()).decode()
     form = {
         "di.os.name": "iOS",
         "app_version": API_VERSION,
-        "domain": "." + state.get("retailDomain", DEFAULT_RETAIL_DOMAIN),
+        "domain": "." + cookie_domain,
         "source_token": state["refreshToken"],
         "requested_token_type": "auth_cookies",
         "source_token_type": "refresh_token",
@@ -230,7 +231,7 @@ async def exchange_token(session: aiohttp.ClientSession, state: dict[str, Any], 
         "app_name": "Amazon Alexa",
         "di.os.version": DI_OS_VERSION,
     }
-    async with session.post(state.get("retailUrl", DEFAULT_RETAIL_URL).rstrip("/") + "/ap/exchangetoken", data=form, headers={"Cookie": ""}, allow_redirects=False) as resp:
+    async with session.post(retail_url.rstrip("/") + "/ap/exchangetoken", data=form, headers={"Cookie": ""}, allow_redirects=False) as resp:
         text = await resp.text()
         if resp.status != 200:
             raise RuntimeError(f"Token exchange failed ({resp.status}): {text[:200]}")
