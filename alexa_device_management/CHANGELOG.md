@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.11.16-rc1
+
+- **Fix Login (Amazons echte 404-Seite "Suchst du etwas?" auf amazon.de)**: `openid.assoc_handle`/`pageId` waren fest auf `amzn_dp_project_dee_ios` gesetzt — dieser Handle ist bei Amazon aber pro Marktplatz registriert. Laut der Referenzimplementierung `alexa-cookie` (Apollon77) wird für jeden Marktplatz außer `amazon.com` die TLD als Suffix angehängt (z.B. `amazon.de` → `amzn_dp_project_dee_ios_de`, `amazon.co.uk` → `..._uk`). Ohne dieses Suffix kennt Amazon.de die Seite schlicht nicht und lieferte ihre normale 404-Seite. Neue Funktion `assoc_handle_for()` berechnet das Suffix aus der Marktplatz-Domain; `build_openhab_login_url` nutzt sie jetzt für beide Parameter. Mit Regressionstests abgesichert.
+
 ## 2.11.15-rc1
 
 - **Fix Login ("Seite nicht gefunden" nach dem Domain-Wechsel auf amazon.de)**: `handle_redirect` reichte den gerade proxied Host nicht an `proxied_url` weiter — bei einem relativen `Location`-Header (z.B. `/ap/...` ohne Host) fiel die Zielauflösung auf den hartkodierten Default `www.amazon.com` zurück. Das war unauffällig, solange der Standard-Marktplatz `amazon.com` war (Default == Fallback), ist seit 2.11.14-rc1 (Default jetzt `amazon.de`) aber sichtbar geworden: mitten im Login-Flow landete der Browser plötzlich wieder auf `amazon.com` statt `amazon.de` und lief ins Leere. `handle_redirect` bekommt jetzt den aktuellen Host explizit übergeben.
