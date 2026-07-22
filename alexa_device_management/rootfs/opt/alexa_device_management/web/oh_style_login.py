@@ -1,15 +1,19 @@
 """OpenHAB-style Alexa login for the Home Assistant OS app.
 
-This module intentionally follows the current openHAB Amazon Echo Control flow:
+This module intentionally follows the current openHAB Amazon Echo Control flow
+(see Connection.java's registerConnectionAsApp/exchangeToken/getLoginPage):
 
-1. start at https://www.{DEFAULT_RETAIL_DOMAIN}/ap/signin with device_auth_access
-   (Amazon's NA and EU marketplaces use separate identity backends, so the
-   access token from step 2 is only valid for the marketplace signed into here)
+1. start at https://www.amazon.com/ap/signin with device_auth_access — this is
+   hardcoded to amazon.com for every account, EU included; it is not a
+   marketplace picker
 2. intercept the /ap/maplanding access token
-3. call https://api.amazon.com/auth/register (always centralized, unlike step 1)
-4. exchange the refresh token for website cookies via /ap/exchangetoken
-5. discover the real marketplace/endpoints afterwards, falling back to other
-   marketplaces if the default one 401s
+3. call https://api.amazon.com/auth/register (also always amazon.com)
+4. exchange the refresh token for website cookies via /ap/exchangetoken,
+   which is likewise always requested against amazon.com — only the
+   *requested cookie domain* inside the payload changes
+5. call https://alexa.amazon.com/api/users/me (always amazon.com) to learn
+   the account's real marketplace, then exchange cookies for that domain and
+   discover its endpoints
 
 It does not use a user-provided LWA client_id/client_secret/refresh_token.
 """
@@ -39,9 +43,9 @@ API_VERSION = "2.2.623270.0"
 DI_OS_VERSION = "18.3.2"
 DI_SDK_VERSION = "6.12.4"
 DEVICE_TYPE = "A2IVLV5VM2W81"
-DEFAULT_RETAIL_DOMAIN = "amazon.de"
-DEFAULT_RETAIL_URL = "https://www.amazon.de"
-DEFAULT_ALEXA_API = "https://alexa.amazon.de"
+DEFAULT_RETAIL_DOMAIN = "amazon.com"
+DEFAULT_RETAIL_URL = "https://www.amazon.com"
+DEFAULT_ALEXA_API = "https://alexa.amazon.com"
 AMAZON_PROXY_HOSTS = (
     "www.amazon.com",
     "amazon.com",
@@ -140,20 +144,12 @@ def new_state() -> dict[str, Any]:
     return state
 
 
-def assoc_handle_for(retail_domain: str) -> str:
-    tld = retail_domain.rsplit(".", 1)[-1]
-    suffix = "" if tld == "com" else "_" + tld
-    return "amzn_dp_project_dee_ios" + suffix
-
-
 def build_openhab_login_url(state: dict[str, Any]) -> str:
-    retail_url = state.get("retailUrl", DEFAULT_RETAIL_URL)
-    handle = assoc_handle_for(state.get("retailDomain", DEFAULT_RETAIL_DOMAIN))
     params = {
-        "openid.return_to": retail_url + "/ap/maplanding",
-        "openid.assoc_handle": handle,
+        "openid.return_to": DEFAULT_RETAIL_URL + "/ap/maplanding",
+        "openid.assoc_handle": "amzn_dp_project_dee_ios",
         "openid.identity": "http://specs.openid.net/auth/2.0/identifier_select",
-        "pageId": handle,
+        "pageId": "amzn_dp_project_dee_ios",
         "accountStatusPolicy": "P1",
         "openid.claimed_id": "http://specs.openid.net/auth/2.0/identifier_select",
         "openid.mode": "checkid_setup",
@@ -165,7 +161,7 @@ def build_openhab_login_url(state: dict[str, Any]) -> str:
         "openid.pape.max_auth_age": "0",
         "openid.oa2.scope": "device_auth_access",
     }
-    return retail_url + "/ap/signin?" + urllib.parse.urlencode(params)
+    return DEFAULT_RETAIL_URL + "/ap/signin?" + urllib.parse.urlencode(params)
 
 
 async def proxy_session(app: web.Application) -> aiohttp.ClientSession:
@@ -192,7 +188,7 @@ def seed_login_cookies(session: aiohttp.ClientSession, state: dict[str, Any]) ->
             "map-md": base64.b64encode(map_md_json.encode()).decode(),
             "frc": state["frc"],
         },
-        response_url=URL(state.get("retailUrl", DEFAULT_RETAIL_URL)),
+        response_url=URL(DEFAULT_RETAIL_URL),
     )
 
 
@@ -201,9 +197,9 @@ def cookie_header_for(session: aiohttp.ClientSession, url: str) -> str:
     return "; ".join(f"{k}={m.value}" for k, m in cookies.items())
 
 
-def amazon_cookies_for_register(session: aiohttp.ClientSession, retail_url: str) -> list[dict[str, str]]:
+def amazon_cookies_for_register(session: aiohttp.ClientSession) -> list[dict[str, str]]:
     result: list[dict[str, str]] = []
-    for name, morsel in session.cookie_jar.filter_cookies(URL(retail_url)).items():
+    for name, morsel in session.cookie_jar.filter_cookies(URL(DEFAULT_RETAIL_URL)).items():
         result.append({"Name": name, "Value": morsel.value, "Path": morsel["path"] or "/", "Secure": "true", "HttpOnly": "false"})
     return result
 
@@ -226,13 +222,12 @@ def add_exchange_cookie(session: aiohttp.ClientSession, domain: str, item: dict[
 
 
 async def exchange_token(session: aiohttp.ClientSession, state: dict[str, Any], cookie_domain: str) -> None:
-    retail_url = "https://www." + cookie_domain
     cookies_json = json.dumps({"cookies": {"." + cookie_domain: []}}, separators=(",", ":"))
     cookies_base64 = base64.b64encode(cookies_json.encode()).decode()
     form = {
         "di.os.name": "iOS",
         "app_version": API_VERSION,
-        "domain": "." + cookie_domain,
+        "domain": "." + state.get("retailDomain", DEFAULT_RETAIL_DOMAIN),
         "source_token": state["refreshToken"],
         "requested_token_type": "auth_cookies",
         "source_token_type": "refresh_token",
@@ -242,7 +237,7 @@ async def exchange_token(session: aiohttp.ClientSession, state: dict[str, Any], 
         "app_name": "Amazon Alexa",
         "di.os.version": DI_OS_VERSION,
     }
-    async with session.post(retail_url.rstrip("/") + "/ap/exchangetoken", data=form, headers={"Cookie": ""}, allow_redirects=False) as resp:
+    async with session.post(state.get("retailUrl", DEFAULT_RETAIL_URL).rstrip("/") + "/ap/exchangetoken", data=form, headers={"Cookie": ""}, allow_redirects=False) as resp:
         text = await resp.text()
         if resp.status != 200:
             raise RuntimeError(f"Token exchange failed ({resp.status}): {text[:200]}")
@@ -267,11 +262,9 @@ async def get_json(session: aiohttp.ClientSession, url: str) -> dict[str, Any]:
 
 
 async def register_app(session: aiohttp.ClientSession, state: dict[str, Any], access_token: str) -> dict[str, Any]:
-    retail_domain = state.get("retailDomain", DEFAULT_RETAIL_DOMAIN)
-    retail_url = state.get("retailUrl", DEFAULT_RETAIL_URL)
     payload = {
         "requested_extensions": ["device_info", "customer_info"],
-        "cookies": {"website_cookies": amazon_cookies_for_register(session, retail_url), "domain": "." + retail_domain},
+        "cookies": {"website_cookies": amazon_cookies_for_register(session), "domain": "." + DEFAULT_RETAIL_DOMAIN},
         "registration_data": {
             "domain": "Device",
             "app_version": API_VERSION,
@@ -301,38 +294,11 @@ async def register_app(session: aiohttp.ClientSession, state: dict[str, Any], ac
     write_json(STATE_PATH, state)
 
     await exchange_token(session, state, state.get("retailDomain", DEFAULT_RETAIL_DOMAIN))
-
-    alexa_api = DEFAULT_ALEXA_API
-    try:
-        users_me = await get_json(session, alexa_api + "/api/users/me?platform=ios&version=" + API_VERSION)
-    except RuntimeError as exc:
-        if "401" not in str(exc):
-            raise
-        other_marketplaces = [
-            ("amazon.com", "https://alexa.amazon.com"),
-            ("amazon.co.uk", "https://alexa.amazon.co.uk"),
-            ("amazon.fr", "https://alexa.amazon.fr"),
-            ("amazon.it", "https://alexa.amazon.it"),
-            ("amazon.es", "https://alexa.amazon.es"),
-        ]
-        users_me = None
-        for fallback_domain, fallback_api in other_marketplaces:
-            if fallback_domain == retail_domain:
-                continue
-            try:
-                await exchange_token(session, state, fallback_domain)
-                users_me = await get_json(session, fallback_api + "/api/users/me?platform=ios&version=" + API_VERSION)
-                alexa_api = fallback_api
-                break
-            except RuntimeError:
-                continue
-        if users_me is None:
-            raise RuntimeError("Alexa login failed: account not accessible on any known Alexa marketplace") from exc
-
+    users_me = await get_json(session, DEFAULT_ALEXA_API + "/api/users/me?platform=ios&version=" + API_VERSION)
     marketplace = users_me.get("marketPlaceDomainName") or state.get("retailDomain", DEFAULT_RETAIL_DOMAIN)
     marketplace = safe_host(marketplace)
     await exchange_token(session, state, marketplace)
-    endpoints = await get_json(session, alexa_api + "/api/endpoints")
+    endpoints = await get_json(session, DEFAULT_ALEXA_API + "/api/endpoints")
 
     state["retailDomain"] = safe_host(endpoints.get("retailDomain") or marketplace)
     state["retailUrl"] = endpoints.get("retailUrl") or ("https://www." + state["retailDomain"])
