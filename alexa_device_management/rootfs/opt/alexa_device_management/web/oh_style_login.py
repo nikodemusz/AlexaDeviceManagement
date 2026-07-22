@@ -374,7 +374,7 @@ async def start(request: web.Request) -> web.StreamResponse:
     raise web.HTTPFound(proxied_url(request, str(login_url)))
 
 
-async def handle_redirect(request: web.Request, session: aiohttp.ClientSession, location: str, state: dict[str, Any]) -> web.StreamResponse:
+async def handle_redirect(request: web.Request, session: aiohttp.ClientSession, location: str, state: dict[str, Any], current_host: str) -> web.StreamResponse:
     if "/ap/maplanding" in location:
         token = extract_access_token(location)
         if not token:
@@ -384,7 +384,7 @@ async def handle_redirect(request: web.Request, session: aiohttp.ClientSession, 
             return result_page(True, f"Session stored for {data.get('host', 'Alexa')}")
         except Exception as exc:
             return result_page(False, str(exc))
-    raise web.HTTPFound(proxied_url(request, location))
+    raise web.HTTPFound(proxied_url(request, location, current_host))
 
 
 def rewrite_html(request: web.Request, text: str, current_host: str = "www.amazon.com") -> str:
@@ -471,7 +471,7 @@ async def proxy(request: web.Request) -> web.StreamResponse:
         content_type = resp.headers.get("Content-Type", "text/html")
         status = resp.status
     if status in {301, 302, 303, 307, 308} and location:
-        return await handle_redirect(request, session, location, state)
+        return await handle_redirect(request, session, location, state, host)
     if "text/html" in content_type:
         return web.Response(text=rewrite_html(request, content.decode(errors="replace"), host), content_type="text/html", charset="utf-8", status=status)
     return web.Response(body=content, status=status, content_type=content_type.split(";")[0] or "application/octet-stream")
