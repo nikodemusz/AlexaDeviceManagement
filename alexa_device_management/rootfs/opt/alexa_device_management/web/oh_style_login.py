@@ -140,13 +140,20 @@ def new_state() -> dict[str, Any]:
     return state
 
 
+def assoc_handle_for(retail_domain: str) -> str:
+    tld = retail_domain.rsplit(".", 1)[-1]
+    suffix = "" if tld == "com" else "_" + tld
+    return "amzn_dp_project_dee_ios" + suffix
+
+
 def build_openhab_login_url(state: dict[str, Any]) -> str:
     retail_url = state.get("retailUrl", DEFAULT_RETAIL_URL)
+    handle = assoc_handle_for(state.get("retailDomain", DEFAULT_RETAIL_DOMAIN))
     params = {
         "openid.return_to": retail_url + "/ap/maplanding",
-        "openid.assoc_handle": "amzn_dp_project_dee_ios",
+        "openid.assoc_handle": handle,
         "openid.identity": "http://specs.openid.net/auth/2.0/identifier_select",
-        "pageId": "amzn_dp_project_dee_ios",
+        "pageId": handle,
         "accountStatusPolicy": "P1",
         "openid.claimed_id": "http://specs.openid.net/auth/2.0/identifier_select",
         "openid.mode": "checkid_setup",

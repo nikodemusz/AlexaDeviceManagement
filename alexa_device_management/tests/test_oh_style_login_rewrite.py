@@ -57,5 +57,22 @@ class RewriteHtmlTests(unittest.TestCase):
         self.assertEqual(result.count("/alexa-auth/proxy/"), 1)
 
 
+class AssocHandleTests(unittest.TestCase):
+    def test_com_has_no_suffix(self) -> None:
+        self.assertEqual(oh_style_login.assoc_handle_for("amazon.com"), "amzn_dp_project_dee_ios")
+
+    def test_de_gets_de_suffix(self) -> None:
+        self.assertEqual(oh_style_login.assoc_handle_for("amazon.de"), "amzn_dp_project_dee_ios_de")
+
+    def test_co_uk_gets_uk_suffix(self) -> None:
+        self.assertEqual(oh_style_login.assoc_handle_for("amazon.co.uk"), "amzn_dp_project_dee_ios_uk")
+
+    def test_login_url_uses_marketplace_assoc_handle(self) -> None:
+        state = oh_style_login.new_state()
+        url = oh_style_login.build_openhab_login_url(state)
+        self.assertIn("openid.assoc_handle=amzn_dp_project_dee_ios_de", url)
+        self.assertIn("pageId=amzn_dp_project_dee_ios_de", url)
+
+
 if __name__ == "__main__":
     unittest.main()
