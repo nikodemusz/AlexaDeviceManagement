@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.11.12-rc1
+
+- **Fix Login (EU/DE-Accounts)**: Nach erfolgreichem Amazon-Login schlug der Callback mit `GET https://alexa.amazon.com/api/users/me failed (401)` fehl — bei deutschen (und anderen EU-) Accounts ist der Alexa-API-Endpunkt `alexa.amazon.de`, nicht `alexa.amazon.com`. `register_app` versucht nun bei 401 automatisch EU-Fallback-Domains (`amazon.de`, `.co.uk`, `.fr`, `.it`, `.es`) und verwendet den erfolgreichen Endpunkt für alle weiteren API-Aufrufe (inkl. `/api/endpoints`).
+
 ## 2.11.11-rc1
 
 - **Fix**: `ValueError: not enough values to unpack` beim Login-Proxy behoben — `rewrite_html` hatte das Regex-Capture für den URL-Scheme (`https?`) vergessen, was bei jeder Amazon-Login-Seite einen 500-Fehler auslöste.

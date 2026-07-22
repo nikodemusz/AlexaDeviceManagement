@@ -287,11 +287,36 @@ async def register_app(session: aiohttp.ClientSession, state: dict[str, Any], ac
     write_json(STATE_PATH, state)
 
     await exchange_token(session, state, state.get("retailDomain", DEFAULT_RETAIL_DOMAIN))
-    users_me = await get_json(session, DEFAULT_ALEXA_API + "/api/users/me?platform=ios&version=" + API_VERSION)
+
+    alexa_api = DEFAULT_ALEXA_API
+    try:
+        users_me = await get_json(session, alexa_api + "/api/users/me?platform=ios&version=" + API_VERSION)
+    except RuntimeError as exc:
+        if "401" not in str(exc):
+            raise
+        eu_fallbacks = [
+            ("amazon.de", "https://alexa.amazon.de"),
+            ("amazon.co.uk", "https://alexa.amazon.co.uk"),
+            ("amazon.fr", "https://alexa.amazon.fr"),
+            ("amazon.it", "https://alexa.amazon.it"),
+            ("amazon.es", "https://alexa.amazon.es"),
+        ]
+        users_me = None
+        for eu_domain, eu_api in eu_fallbacks:
+            try:
+                await exchange_token(session, state, eu_domain)
+                users_me = await get_json(session, eu_api + "/api/users/me?platform=ios&version=" + API_VERSION)
+                alexa_api = eu_api
+                break
+            except RuntimeError:
+                continue
+        if users_me is None:
+            raise RuntimeError("Alexa login failed: account not accessible on US or any EU Alexa marketplace") from exc
+
     marketplace = users_me.get("marketPlaceDomainName") or state.get("retailDomain", DEFAULT_RETAIL_DOMAIN)
     marketplace = safe_host(marketplace)
     await exchange_token(session, state, marketplace)
-    endpoints = await get_json(session, DEFAULT_ALEXA_API + "/api/endpoints")
+    endpoints = await get_json(session, alexa_api + "/api/endpoints")
 
     state["retailDomain"] = safe_host(endpoints.get("retailDomain") or marketplace)
     state["retailUrl"] = endpoints.get("retailUrl") or ("https://www." + state["retailDomain"])
