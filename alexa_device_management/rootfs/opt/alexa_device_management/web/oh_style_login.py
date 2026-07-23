@@ -248,6 +248,15 @@ async def exchange_token(session: aiohttp.ClientSession, state: dict[str, Any], 
             add_exchange_cookie(session, domain, cookie)
 
 
+async def outbound_ip(session: aiohttp.ClientSession) -> str:
+    try:
+        async with session.get("https://api.ipify.org?format=json", timeout=aiohttp.ClientTimeout(total=5)) as resp:
+            body = await resp.json()
+            return body.get("ip", "unknown")
+    except Exception:
+        return "unknown"
+
+
 async def get_json(session: aiohttp.ClientSession, url: str) -> dict[str, Any]:
     cookie = cookie_header_for(session, url)
     headers = {"User-Agent": f"AmazonWebView/Amazon Alexa/{API_VERSION}/iOS/{DI_OS_VERSION}/iPhone", "Accept-Language": "en-US"}
@@ -266,9 +275,10 @@ async def get_json(session: aiohttp.ClientSession, url: str) -> dict[str, Any]:
                     "x-amz-cf-id", "x-amz-cf-pop", "www-authenticate", "content-type",
                 }
             }
+            ip = await outbound_ip(session)
             raise RuntimeError(
                 f"GET {url} failed ({resp.status}): {text[:200]} "
-                f"[csrf={'yes' if csrf else 'no'}, cookies={cookie_names}, headers={diag_headers}]"
+                f"[outbound_ip={ip}, csrf={'yes' if csrf else 'no'}, cookies={cookie_names}, headers={diag_headers}]"
             )
         return json.loads(text)
 

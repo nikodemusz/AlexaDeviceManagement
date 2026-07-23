@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.11.20-rc1
+
+- **Diagnose**: Die Diagnosedaten aus 2.11.19-rc1 zeigten `X-Cache: Error from cloudfront` bei ansonsten vollständigem, korrektem Cookie-Satz (`at-main`, `x-main`, `session-token` usw.) — ein starkes Indiz, dass die Ablehnung auf Amazons CloudFront-/Edge-Ebene passiert (z.B. Bot-/Anti-Fraud-Erkennung), nicht an fehlerhaften Zugangsdaten. Rechenzentrums-IPs werden von solcher Erkennung typischerweise strenger behandelt als Wohnanschlüsse. Die Fehlermeldung zeigt bei einem fehlgeschlagenen API-Aufruf jetzt zusätzlich die tatsächliche ausgehende IP-Adresse des Add-ons (ermittelt über einen externen IP-Echo-Dienst), damit sich prüfen lässt, ob die Amazon-Anfragen über eine Wohn-IP oder eine (ggf. auffällige) Server-/Hosting-IP laufen.
+
 ## 2.11.19-rc1
 
 - **Fix**: `add_exchange_cookie` bevorzugte ein evtl. vorhandenes `Domain`-Feld im einzelnen Cookie-Objekt der `/ap/exchangetoken`-Antwort gegenüber dem Domain-Schlüssel der umgebenden Map. openHABs Referenzimplementierung verwendet dafür immer den Map-Schlüssel und ignoriert ein per-Cookie-Domain-Feld komplett — angeglichen, mit Regressionstest.
