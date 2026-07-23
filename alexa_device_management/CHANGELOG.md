@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.11.19-rc1
+
+- **Fix**: `add_exchange_cookie` bevorzugte ein evtl. vorhandenes `Domain`-Feld im einzelnen Cookie-Objekt der `/ap/exchangetoken`-Antwort gegenüber dem Domain-Schlüssel der umgebenden Map. openHABs Referenzimplementierung verwendet dafür immer den Map-Schlüssel und ignoriert ein per-Cookie-Domain-Feld komplett — angeglichen, mit Regressionstest.
+- **Diagnose**: Bei einem fehlgeschlagenen `GET`-API-Aufruf (z.B. `/api/users/me`) zeigt die Fehlerseite jetzt zusätzlich an, ob ein `csrf`-Header gesendet wurde, welche Cookie-Namen zu diesem Zeitpunkt vorhanden waren (keine Werte) und ausgewählte Response-Header (u.a. `Server`, `Via`, `X-Amzn-RequestId`, `X-Cache`, `X-Amz-Cf-*`) — damit sich bei einem erneuten leeren 401 erkennen lässt, ob die Ablehnung auf CDN-/Edge-Ebene oder in der eigentlichen Anwendung passiert.
+
 ## 2.11.18-rc1
 
 - **Fix Login (veraltete deklarierte App-Version)**: `API_VERSION`/`DI_OS_VERSION` standen auf `2.2.623270.0`/`18.3.2` (iOS 18) — eingeführt in 2.11.8-rc1 mit der Annahme, eine neuere Versionsnummer sei "sicherer". Ein Abgleich mit den aktuell von der openHAB-`amazonechocontrol`-Binding verifizierten Konstanten zeigt aber `2.2.556530.0`/`16.6`. Amazon prüft vermutlich nicht "je neuer desto besser", sondern gegen tatsächlich existierende App-Builds — eine nicht existierende Versionskombination wurde clientseitig akzeptiert (Login/Registrierung liefen durch), aber serverseitig beim ersten echten API-Zugriff (`/api/users/me`) mit einem inhaltsleeren 401 abgelehnt. `API_VERSION`/`DI_OS_VERSION` jetzt auf die von openHAB verifizierten Werte gesetzt.

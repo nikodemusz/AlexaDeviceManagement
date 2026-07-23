@@ -209,7 +209,7 @@ def add_exchange_cookie(session: aiohttp.ClientSession, domain: str, item: dict[
     value = item.get("Value") or item.get("value")
     if not name or value is None:
         return
-    cookie_domain = item.get("Domain") or item.get("domain") or domain
+    cookie_domain = domain
     cookie_path = item.get("Path") or item.get("path") or "/"
     simple = SimpleCookie()
     simple[str(name)] = str(value)
@@ -257,7 +257,19 @@ async def get_json(session: aiohttp.ClientSession, url: str) -> dict[str, Any]:
     async with session.get(url, headers=headers, allow_redirects=False) as resp:
         text = await resp.text()
         if resp.status != 200:
-            raise RuntimeError(f"GET {url} failed ({resp.status}): {text[:200]}")
+            cookie_names = [c.split("=", 1)[0].strip() for c in cookie.split(";") if c.strip()]
+            diag_headers = {
+                k: v
+                for k, v in resp.headers.items()
+                if k.lower() in {
+                    "server", "via", "x-amzn-requestid", "x-amzn-errortype", "x-cache",
+                    "x-amz-cf-id", "x-amz-cf-pop", "www-authenticate", "content-type",
+                }
+            }
+            raise RuntimeError(
+                f"GET {url} failed ({resp.status}): {text[:200]} "
+                f"[csrf={'yes' if csrf else 'no'}, cookies={cookie_names}, headers={diag_headers}]"
+            )
         return json.loads(text)
 
 
