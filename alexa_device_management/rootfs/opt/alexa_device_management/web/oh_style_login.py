@@ -39,8 +39,8 @@ from yarl import URL
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
 STATE_PATH = pathlib.Path("/data/alexa_login_state.json")
 
-API_VERSION = "2.2.623270.0"
-DI_OS_VERSION = "18.3.2"
+API_VERSION = "2.2.556530.0"
+DI_OS_VERSION = "16.6"
 DI_SDK_VERSION = "6.12.4"
 DEVICE_TYPE = "A2IVLV5VM2W81"
 DEFAULT_RETAIL_DOMAIN = "amazon.com"
