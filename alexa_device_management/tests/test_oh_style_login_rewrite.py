@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import pathlib
 import sys
 import unittest
 from unittest.mock import Mock
+
+import aiohttp
 
 WEB_DIR = pathlib.Path(__file__).resolve().parents[1] / "rootfs/opt/alexa_device_management/web"
 sys.path.insert(0, str(WEB_DIR))
@@ -64,6 +67,22 @@ class LoginUrlTests(unittest.TestCase):
         self.assertTrue(url.startswith("https://www.amazon.com/ap/signin?"))
         self.assertIn("openid.assoc_handle=amzn_dp_project_dee_ios&", url)
         self.assertIn("pageId=amzn_dp_project_dee_ios&", url)
+
+
+class AddExchangeCookieTests(unittest.TestCase):
+    def test_uses_map_key_domain_not_per_cookie_domain_field(self) -> None:
+        async def run() -> str:
+            session = Mock()
+            session.cookie_jar = aiohttp.CookieJar(unsafe=True)
+            oh_style_login.add_exchange_cookie(
+                session,
+                ".amazon.com",
+                {"Name": "session-id", "Value": "abc123", "Domain": "some-other-host.example"},
+            )
+            cookies = session.cookie_jar.filter_cookies(oh_style_login.URL("https://alexa.amazon.com/"))
+            return cookies["session-id"].value
+
+        self.assertEqual(asyncio.run(run()), "abc123")
 
 
 if __name__ == "__main__":
