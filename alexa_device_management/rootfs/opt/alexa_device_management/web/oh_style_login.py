@@ -221,7 +221,7 @@ def add_exchange_cookie(session: aiohttp.ClientSession, domain: str, item: dict[
     session.cookie_jar.update_cookies(simple, response_url=URL("https://" + str(cookie_domain).lstrip(".")))
 
 
-async def exchange_token(session: aiohttp.ClientSession, state: dict[str, Any], cookie_domain: str) -> None:
+async def exchange_token(session: aiohttp.ClientSession, state: dict[str, Any], cookie_domain: str) -> dict[str, Any]:
     cookies_json = json.dumps({"cookies": {"." + cookie_domain: []}}, separators=(",", ":"))
     cookies_base64 = base64.b64encode(cookies_json.encode()).decode()
     form = {
@@ -243,9 +243,19 @@ async def exchange_token(session: aiohttp.ClientSession, state: dict[str, Any], 
             raise RuntimeError(f"Token exchange failed ({resp.status}): {text[:200]}")
         body = json.loads(text)
     token_cookies = body.get("response", {}).get("tokens", {}).get("cookies", {})
+    added: list[str] = []
     for domain, cookies in token_cookies.items():
         for cookie in cookies:
+            name = cookie.get("Name") or cookie.get("name")
+            if name:
+                added.append(f"{domain}:{name}")
             add_exchange_cookie(session, domain, cookie)
+    return {
+        "requested_domain": cookie_domain,
+        "response_len": len(text),
+        "returned_domains": list(token_cookies.keys()),
+        "added_cookies": added,
+    }
 
 
 async def outbound_ip(session: aiohttp.ClientSession) -> str:
@@ -320,14 +330,15 @@ async def register_app(session: aiohttp.ClientSession, state: dict[str, Any], ac
     state["refreshToken"] = refresh_token
     write_json(STATE_PATH, state)
 
-    await exchange_token(session, state, state.get("retailDomain", DEFAULT_RETAIL_DOMAIN))
+    exchange_summary = await exchange_token(session, state, state.get("retailDomain", DEFAULT_RETAIL_DOMAIN))
     try:
         users_me = await get_json(session, DEFAULT_ALEXA_API + "/api/users/me?platform=ios&version=" + API_VERSION)
     except RuntimeError as exc:
         current_ip = await outbound_ip(session)
         start_ip = state.get("startIp", "unknown")
         raise RuntimeError(
-            f"{exc} [start_ip={start_ip}, ip_at_failure={current_ip}, ip_changed={start_ip != current_ip}]"
+            f"{exc} [start_ip={start_ip}, ip_at_failure={current_ip}, ip_changed={start_ip != current_ip}, "
+            f"exchange={exchange_summary}]"
         ) from exc
     marketplace = users_me.get("marketPlaceDomainName") or state.get("retailDomain", DEFAULT_RETAIL_DOMAIN)
     marketplace = safe_host(marketplace)
