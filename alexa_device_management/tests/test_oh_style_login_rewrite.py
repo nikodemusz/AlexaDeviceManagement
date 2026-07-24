@@ -86,6 +86,31 @@ class AddExchangeCookieTests(unittest.TestCase):
         self.assertEqual(asyncio.run(run()), "abc123")
 
 
+class StoreResponseCookiesTests(unittest.TestCase):
+    def test_csrf_from_curl_response_lands_in_aiohttp_jar(self) -> None:
+        async def run() -> str:
+            session = Mock()
+            session.cookie_jar = aiohttp.CookieJar(unsafe=True)
+
+            class FakeCookie:
+                name = "csrf"
+                value = "123456"
+                domain = ".amazon.com"
+                path = "/"
+                secure = True
+
+            class FakeCurlCookies:
+                jar = [FakeCookie()]
+
+            oh_style_login.store_response_cookies(session, FakeCurlCookies())
+            header = oh_style_login.cookie_header_for(
+                session, "https://eu-api-alexa.amazon.com/api/users/me"
+            )
+            return oh_style_login.csrf_from_cookie(header)
+
+        self.assertEqual(asyncio.run(run()), "123456")
+
+
 class TlsImpersonationTests(unittest.TestCase):
     def test_get_json_uses_curl_cffi_ios_impersonation(self) -> None:
         # The whole point of the TLS experiment: app-API GETs must go through
