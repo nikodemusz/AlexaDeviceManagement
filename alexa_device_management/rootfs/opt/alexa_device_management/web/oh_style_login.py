@@ -297,6 +297,33 @@ async def impersonated_request(
         return resp.status_code, resp.text
 
 
+def store_response_cookies(session: aiohttp.ClientSession, curl_cookies: Any) -> None:
+    """Persist Set-Cookie values from a curl_cffi response into the aiohttp jar.
+
+    The one-shot curl session is discarded after each call, so any cookies
+    Amazon sets in the response (notably the `csrf` token the app API needs
+    for later writes, and which is_configured() requires) would otherwise be
+    lost. aiohttp used to capture these automatically; replicate that.
+    """
+    try:
+        jar = curl_cookies.jar
+    except AttributeError:
+        return
+    for cookie in jar:
+        name = getattr(cookie, "name", None)
+        if not name:
+            continue
+        domain = getattr(cookie, "domain", "") or DEFAULT_RETAIL_DOMAIN
+        simple = SimpleCookie()
+        simple[name] = cookie.value or ""
+        morsel = simple[name]
+        morsel["domain"] = domain
+        morsel["path"] = getattr(cookie, "path", "/") or "/"
+        if getattr(cookie, "secure", False):
+            morsel["secure"] = True
+        session.cookie_jar.update_cookies(simple, response_url=URL("https://" + domain.lstrip(".")))
+
+
 async def get_json(session: aiohttp.ClientSession, url: str) -> dict[str, Any]:
     """Fetch a JSON app-API endpoint using a real-iOS TLS fingerprint.
 
@@ -306,7 +333,8 @@ async def get_json(session: aiohttp.ClientSession, url: str) -> dict[str, Any]:
     valid. curl_cffi impersonates a genuine iOS Safari TLS handshake, so the
     cookies we already obtained are accepted. Cookies still come from the
     aiohttp jar (populated by the login proxy + token exchange) and are
-    passed explicitly, since this curl session has no jar of its own.
+    passed explicitly, since this curl session has no jar of its own; any
+    cookies Amazon sets in the response are copied back into that jar.
     """
     from curl_cffi.requests import AsyncSession as CurlSession
 
@@ -326,6 +354,7 @@ async def get_json(session: aiohttp.ClientSession, url: str) -> dict[str, Any]:
         text = resp.text
         status = resp.status_code
         resp_headers = resp.headers
+        store_response_cookies(session, resp.cookies)
     if status != 200:
         cookie_names = [c.split("=", 1)[0].strip() for c in cookie.split(";") if c.strip()]
         diag_headers = {k: v for k, v in resp_headers.items() if k.lower() in _DIAG_HEADER_KEYS}
@@ -391,6 +420,19 @@ async def register_app(session: aiohttp.ClientSession, state: dict[str, Any], ac
 
     api_url = state["websiteApiUrl"]
     cookie = cookie_header_for(session, api_url)
+    # The app API needs a csrf token for later writes (e.g. creating groups),
+    # and is_configured() requires it. If none of the calls above set a csrf
+    # cookie, prime it with a harmless GET that does. Non-fatal: login still
+    # succeeds without it, just with reduced write capability.
+    if not csrf_from_cookie(cookie):
+        for prime_path in ("/api/language", "/api/ping"):
+            try:
+                await get_json(session, api_url.rstrip("/") + prime_path)
+            except Exception:
+                pass
+            cookie = cookie_header_for(session, api_url)
+            if csrf_from_cookie(cookie):
+                break
     csrf = csrf_from_cookie(cookie)
     session_data = {
         "host": safe_host(URL(api_url).host or "alexa.amazon.com"),

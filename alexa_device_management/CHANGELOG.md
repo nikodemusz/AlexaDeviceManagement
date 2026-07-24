@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.11.26-rc1
+
+- **Fix (Session „nicht verbunden" trotz erfolgreichem Login)**: Nach dem Login meldete die App „Alexa-Web-Session fehlt / Kein Amazon-Benutzer" (Geräte 0), obwohl der Login erfolgreich war und die Region `amazon.de` korrekt erkannt wurde. Ursache: `is_configured()` verlangt zwingend einen `csrf`-Wert in der gespeicherten Session. Die neuen curl_cffi-**Einweg**-Sessions verwarfen aber die `Set-Cookie`-Header der API-Antworten (inkl. `csrf`), die die frühere aiohttp-Version automatisch übernommen hatte — so blieb `csrf` leer und die Session galt als ungültig. Jetzt werden Response-Cookies aus curl_cffi zurück in den Cookie-Jar geschrieben (`store_response_cookies`). Falls `users/me`/`endpoints` kein `csrf` setzen, wird es zusätzlich über einen nicht-fatalen Priming-Aufruf (`/api/language`, `/api/ping`) geholt. Mit Regressionstest abgesichert.
+
 ## 2.11.25-rc1
 
 - **Fix (TLS-Impersonation für die gesamte Geräte-API)**: 2.11.24-rc1 hat bestätigt, dass der Login mit iOS-TLS-Fingerabdruck (`curl_cffi`) durchläuft — „Alexa login successful, Session stored for eu-api-alexa.amazon.com". Da die **laufenden** App-Funktionen (Geräteliste, **Gruppen**, GraphQL/Nexus, Umbenennen, Löschen) dieselbe `alexa.amazon.com/api/*`-Schnittstelle nutzen, hätten sie ohne Impersonation denselben 401 bekommen. Alle sechs zentralen Alexa-API-Helfer in `server_clean.py` (`alexa_delete`, `alexa_raw_get`, `alexa_raw_delete`, `alexa_raw_post`, `alexa_raw_put`, `alexa_get_json`) laufen jetzt über einen gemeinsamen `oh_style_login.impersonated_request`-Helfer mit demselben iOS-Safari-Fingerabdruck. Die HA-seitigen Aufrufe (Supervisor/HA-Export) bleiben auf aiohttp, da sie nicht von Amazon-Fingerprinting betroffen sind.
