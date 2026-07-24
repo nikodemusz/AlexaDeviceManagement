@@ -267,35 +267,53 @@ async def outbound_ip(session: aiohttp.ClientSession) -> str:
         return "unknown"
 
 
+TLS_IMPERSONATE = "safari18_4_ios"
+
+_DIAG_HEADER_KEYS = {
+    "server", "via", "x-amzn-requestid", "x-amzn-errortype", "x-cache",
+    "x-amz-cf-id", "x-amz-cf-pop", "www-authenticate", "content-type",
+}
+
+
 async def get_json(session: aiohttp.ClientSession, url: str) -> dict[str, Any]:
+    """Fetch a JSON app-API endpoint using a real-iOS TLS fingerprint.
+
+    Amazon's edge (CloudFront) fingerprints the TLS ClientHello of
+    alexa.amazon.com/api/* callers and rejects non-app clients such as
+    Python/aiohttp with an empty-body 401 even when the auth cookies are
+    valid. curl_cffi impersonates a genuine iOS Safari TLS handshake, so the
+    cookies we already obtained are accepted. Cookies still come from the
+    aiohttp jar (populated by the login proxy + token exchange) and are
+    passed explicitly, since this curl session has no jar of its own.
+    """
+    from curl_cffi.requests import AsyncSession as CurlSession
+
     cookie = cookie_header_for(session, url)
+    csrf = csrf_from_cookie(cookie)
     headers = {
         "User-Agent": f"AmazonWebView/Amazon Alexa/{API_VERSION}/iOS/{DI_OS_VERSION}/iPhone",
         "Accept-Language": "en-US",
         "DNT": "1",
         "Upgrade-Insecure-Requests": "1",
+        "Cookie": cookie,
     }
-    csrf = csrf_from_cookie(cookie)
     if csrf:
         headers["csrf"] = csrf
-    async with session.get(url, headers=headers, allow_redirects=False) as resp:
-        text = await resp.text()
-        if resp.status != 200:
-            cookie_names = [c.split("=", 1)[0].strip() for c in cookie.split(";") if c.strip()]
-            diag_headers = {
-                k: v
-                for k, v in resp.headers.items()
-                if k.lower() in {
-                    "server", "via", "x-amzn-requestid", "x-amzn-errortype", "x-cache",
-                    "x-amz-cf-id", "x-amz-cf-pop", "www-authenticate", "content-type",
-                }
-            }
-            ip = await outbound_ip(session)
-            raise RuntimeError(
-                f"GET {url} failed ({resp.status}): {text[:200]} "
-                f"[outbound_ip={ip}, csrf={'yes' if csrf else 'no'}, cookies={cookie_names}, headers={diag_headers}]"
-            )
-        return json.loads(text)
+    async with CurlSession(impersonate=TLS_IMPERSONATE) as cs:
+        resp = await cs.get(url, headers=headers, allow_redirects=False)
+        text = resp.text
+        status = resp.status_code
+        resp_headers = resp.headers
+    if status != 200:
+        cookie_names = [c.split("=", 1)[0].strip() for c in cookie.split(";") if c.strip()]
+        diag_headers = {k: v for k, v in resp_headers.items() if k.lower() in _DIAG_HEADER_KEYS}
+        ip = await outbound_ip(session)
+        raise RuntimeError(
+            f"GET {url} failed ({status}): {text[:200]} "
+            f"[tls={TLS_IMPERSONATE}, outbound_ip={ip}, csrf={'yes' if csrf else 'no'}, "
+            f"cookies={cookie_names}, headers={diag_headers}]"
+        )
+    return json.loads(text)
 
 
 async def register_app(session: aiohttp.ClientSession, state: dict[str, Any], access_token: str) -> dict[str, Any]:
