@@ -259,7 +259,12 @@ async def outbound_ip(session: aiohttp.ClientSession) -> str:
 
 async def get_json(session: aiohttp.ClientSession, url: str) -> dict[str, Any]:
     cookie = cookie_header_for(session, url)
-    headers = {"User-Agent": f"AmazonWebView/Amazon Alexa/{API_VERSION}/iOS/{DI_OS_VERSION}/iPhone", "Accept-Language": "en-US"}
+    headers = {
+        "User-Agent": f"AmazonWebView/Amazon Alexa/{API_VERSION}/iOS/{DI_OS_VERSION}/iPhone",
+        "Accept-Language": "en-US",
+        "DNT": "1",
+        "Upgrade-Insecure-Requests": "1",
+    }
     csrf = csrf_from_cookie(cookie)
     if csrf:
         headers["csrf"] = csrf
