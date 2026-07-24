@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import pathlib
 import sys
 import unittest
@@ -83,6 +84,17 @@ class AddExchangeCookieTests(unittest.TestCase):
             return cookies["session-id"].value
 
         self.assertEqual(asyncio.run(run()), "abc123")
+
+
+class TlsImpersonationTests(unittest.TestCase):
+    def test_get_json_uses_curl_cffi_ios_impersonation(self) -> None:
+        # The whole point of the TLS experiment: app-API GETs must go through
+        # curl_cffi with an iOS Safari fingerprint, not aiohttp.
+        self.assertEqual(oh_style_login.TLS_IMPERSONATE, "safari18_4_ios")
+        import curl_cffi.requests  # noqa: F401  (dependency must be importable)
+        src = inspect.getsource(oh_style_login.get_json)
+        self.assertIn("CurlSession", src)
+        self.assertIn("impersonate=TLS_IMPERSONATE", src)
 
 
 if __name__ == "__main__":
