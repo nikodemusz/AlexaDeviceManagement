@@ -275,6 +275,28 @@ _DIAG_HEADER_KEYS = {
 }
 
 
+async def impersonated_request(
+    method: str,
+    url: str,
+    headers: dict[str, str] | None = None,
+    data: bytes | None = None,
+    allow_redirects: bool = False,
+) -> tuple[int, str]:
+    """Make an Alexa app-API request with a real iOS TLS fingerprint.
+
+    Amazon's CloudFront edge fingerprints the TLS ClientHello of
+    alexa.amazon.com/api/* callers and rejects non-app clients (Python/
+    aiohttp) with an empty-body 401 even when the auth cookies are valid.
+    curl_cffi impersonates a genuine iOS Safari handshake so the stored
+    session cookies are accepted. Returns (status_code, text).
+    """
+    from curl_cffi.requests import AsyncSession as CurlSession
+
+    async with CurlSession(impersonate=TLS_IMPERSONATE) as cs:
+        resp = await cs.request(method, url, headers=headers, data=data, allow_redirects=allow_redirects)
+        return resp.status_code, resp.text
+
+
 async def get_json(session: aiohttp.ClientSession, url: str) -> dict[str, Any]:
     """Fetch a JSON app-API endpoint using a real-iOS TLS fingerprint.
 

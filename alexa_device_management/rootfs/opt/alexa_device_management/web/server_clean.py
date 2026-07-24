@@ -10,12 +10,11 @@ import time
 from typing import Any
 from urllib.parse import quote
 
-import aiohttp
 from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "2.11.24-rc1"
+APP_VERSION = "2.11.25-rc1"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
@@ -154,12 +153,10 @@ async def alexa_delete(path: str, data: dict[str, Any], body: bytes | None = Non
     headers = alexa_headers(data)
     if body is not None:
         headers["Content-Type"] = "application/json; charset=UTF-8"
-    async with aiohttp.ClientSession() as session:
-        async with session.delete(base + path, headers=headers, data=body, allow_redirects=False) as resp:
-            resp_body = await resp.text()
-            if resp.status not in (200, 204):
-                raise Exception(f"HTTP {resp.status}: {resp_body[:300]}")
-            return resp_body
+    status, resp_body = await oh_style_login.impersonated_request("DELETE", base + path, headers=headers, data=body)
+    if status not in (200, 204):
+        raise Exception(f"HTTP {status}: {resp_body[:300]}")
+    return resp_body
 
 
 async def alexa_raw_get(path: str, data: dict[str, Any]) -> tuple[int, str]:
@@ -167,9 +164,7 @@ async def alexa_raw_get(path: str, data: dict[str, Any]) -> tuple[int, str]:
     if not is_configured():
         return 0, "Alexa session missing"
     base = data.get("websiteApiUrl", "https://alexa.amazon.com").rstrip("/")
-    async with aiohttp.ClientSession() as session:
-        async with session.get(base + path, headers=alexa_headers(data), allow_redirects=False) as resp:
-            return resp.status, await resp.text()
+    return await oh_style_login.impersonated_request("GET", base + path, headers=alexa_headers(data))
 
 
 async def alexa_raw_delete(path: str, data: dict[str, Any]) -> tuple[int, str]:
@@ -177,9 +172,7 @@ async def alexa_raw_delete(path: str, data: dict[str, Any]) -> tuple[int, str]:
     if not is_configured():
         return 0, "Alexa session missing"
     base = data.get("websiteApiUrl", "https://alexa.amazon.com").rstrip("/")
-    async with aiohttp.ClientSession() as session:
-        async with session.delete(base + path, headers=alexa_headers(data), allow_redirects=False) as resp:
-            return resp.status, await resp.text()
+    return await oh_style_login.impersonated_request("DELETE", base + path, headers=alexa_headers(data))
 
 
 async def alexa_raw_post(path: str, body: bytes, data: dict[str, Any]) -> tuple[int, str]:
@@ -189,9 +182,7 @@ async def alexa_raw_post(path: str, body: bytes, data: dict[str, Any]) -> tuple[
     base = data.get("websiteApiUrl", "https://alexa.amazon.com").rstrip("/")
     headers = alexa_headers(data)
     headers["Content-Type"] = "application/json; charset=UTF-8"
-    async with aiohttp.ClientSession() as session:
-        async with session.post(base + path, headers=headers, data=body, allow_redirects=False) as resp:
-            return resp.status, await resp.text()
+    return await oh_style_login.impersonated_request("POST", base + path, headers=headers, data=body)
 
 
 async def alexa_raw_put(path: str, body: bytes, data: dict[str, Any]) -> tuple[int, str]:
@@ -201,9 +192,7 @@ async def alexa_raw_put(path: str, body: bytes, data: dict[str, Any]) -> tuple[i
     base = data.get("websiteApiUrl", "https://alexa.amazon.com").rstrip("/")
     headers = alexa_headers(data)
     headers["Content-Type"] = "application/json; charset=UTF-8"
-    async with aiohttp.ClientSession() as session:
-        async with session.put(base + path, headers=headers, data=body, allow_redirects=False) as resp:
-            return resp.status, await resp.text()
+    return await oh_style_login.impersonated_request("PUT", base + path, headers=headers, data=body)
 
 
 GRAPHQL_PATH = "/nexus/v1/graphql"
@@ -793,12 +782,10 @@ async def alexa_get_json(path: str, data: dict[str, Any]) -> Any:
     if not is_configured():
         raise web.HTTPUnauthorized(text="Alexa session missing")
     base = data.get("websiteApiUrl", "https://alexa.amazon.com").rstrip("/")
-    async with aiohttp.ClientSession() as session:
-        async with session.get(base + path, headers=alexa_headers(data), allow_redirects=False) as resp:
-            text = await resp.text()
-            if resp.status != 200:
-                raise web.HTTPBadGateway(text=f"Alexa API failed ({resp.status}): {text[:300]}")
-            return json.loads(text)
+    status, text = await oh_style_login.impersonated_request("GET", base + path, headers=alexa_headers(data))
+    if status != 200:
+        raise web.HTTPBadGateway(text=f"Alexa API failed ({status}): {text[:300]}")
+    return json.loads(text)
 
 
 def _normalize_capabilities(raw: dict[str, Any]) -> list[str]:
