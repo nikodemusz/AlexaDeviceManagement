@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.11.21-rc1
+
+- **Diagnose**: Die ausgehende IP aus 2.11.20-rc1 war die normale Wohnanschluss-IP, nicht die des gehosteten vServers — eine Rechenzentrums-IP scheidet damit als Ursache aus. Um zu prüfen, ob sich die ausgehende Amazon-Verbindung *innerhalb eines einzelnen Login-Durchlaufs* ändert (z.B. durch abweichendes Routing zwischen lokalem und öffentlichem Zugriff auf das Add-on), wird die ausgehende IP jetzt zusätzlich beim **Start** des Logins ermittelt und gespeichert. Schlägt der finale `/api/users/me`-Aufruf fehl, zeigt die Fehlermeldung jetzt `start_ip`, `ip_at_failure` und `ip_changed`, damit sich ein Wechsel der ausgehenden Adresse während des Logins zweifelsfrei erkennen (oder ausschließen) lässt.
+
 ## 2.11.20-rc1
 
 - **Diagnose**: Die Diagnosedaten aus 2.11.19-rc1 zeigten `X-Cache: Error from cloudfront` bei ansonsten vollständigem, korrektem Cookie-Satz (`at-main`, `x-main`, `session-token` usw.) — ein starkes Indiz, dass die Ablehnung auf Amazons CloudFront-/Edge-Ebene passiert (z.B. Bot-/Anti-Fraud-Erkennung), nicht an fehlerhaften Zugangsdaten. Rechenzentrums-IPs werden von solcher Erkennung typischerweise strenger behandelt als Wohnanschlüsse. Die Fehlermeldung zeigt bei einem fehlgeschlagenen API-Aufruf jetzt zusätzlich die tatsächliche ausgehende IP-Adresse des Add-ons (ermittelt über einen externen IP-Echo-Dienst), damit sich prüfen lässt, ob die Amazon-Anfragen über eine Wohn-IP oder eine (ggf. auffällige) Server-/Hosting-IP laufen.

@@ -316,7 +316,14 @@ async def register_app(session: aiohttp.ClientSession, state: dict[str, Any], ac
     write_json(STATE_PATH, state)
 
     await exchange_token(session, state, state.get("retailDomain", DEFAULT_RETAIL_DOMAIN))
-    users_me = await get_json(session, DEFAULT_ALEXA_API + "/api/users/me?platform=ios&version=" + API_VERSION)
+    try:
+        users_me = await get_json(session, DEFAULT_ALEXA_API + "/api/users/me?platform=ios&version=" + API_VERSION)
+    except RuntimeError as exc:
+        current_ip = await outbound_ip(session)
+        start_ip = state.get("startIp", "unknown")
+        raise RuntimeError(
+            f"{exc} [start_ip={start_ip}, ip_at_failure={current_ip}, ip_changed={start_ip != current_ip}]"
+        ) from exc
     marketplace = users_me.get("marketPlaceDomainName") or state.get("retailDomain", DEFAULT_RETAIL_DOMAIN)
     marketplace = safe_host(marketplace)
     await exchange_token(session, state, marketplace)
@@ -364,6 +371,8 @@ def extract_access_token(location: str) -> str:
 async def start(request: web.Request) -> web.StreamResponse:
     session = await reset_proxy_session(request.app)
     state = new_state()
+    state["startIp"] = await outbound_ip(session)
+    write_json(STATE_PATH, state)
     seed_login_cookies(session, state)
     login_url = URL(build_openhab_login_url(state))
     raise web.HTTPFound(proxied_url(request, str(login_url)))
