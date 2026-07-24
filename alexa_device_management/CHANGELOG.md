@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.11.23-rc1
+
+- **Diagnose (Cookie-Austausch)**: Wichtige Beobachtung — jeder Login-Versuch erzeugt eine **neue** Geräteregistrierung im Amazon-Konto. Das beweist, dass `/auth/register` erfolgreich ist und ein gültiger Refresh-Token zurückkommt; das Problem liegt also eng zwischen `exchange_token` (Refresh-Token → Auth-Cookies) und `/api/users/me`. Verdacht: `exchange_token` liefert zwar `200 OK`, aber die zurückgegebenen Auth-Cookies sind leer/unbrauchbar, sodass `/api/users/me` nur die alten Website-Login-Cookies sieht und ablehnt. `exchange_token` protokolliert jetzt, **was** Amazon zurückschickt (Antwortgröße, Domains und Namen der gelieferten Cookies); diese Zusammenfassung erscheint bei einem 401 in der Fehlermeldung (`exchange=...`), um genau diesen Handoff sichtbar zu machen.
+
+## 2.11.22-rc1
+
+- **Fix-Versuch Login (Header-Parität)**: Die Diagnose aus 2.11.21-rc1 hat die letzten Verdachtsmomente ausgeschlossen: ausgehende IP ist die Wohnanschluss-IP und ändert sich im Login nicht (`ip_changed=False`), Cookies sind vollständig, App-Version stimmt. Die 401-Antwort enthält aber sowohl `x-amzn-RequestId` als auch `X-Cache: Error from cloudfront` — die Kombination zeigt, dass die Anfrage tatsächlich den Alexa-Anwendungsserver erreicht und *dieser* den 401 liefert (keine reine CloudFront-Blockade). Der einzige verbliebene konkrete Unterschied zur openHAB-Referenz waren zwei Standard-Header, die openHAB an jede Anfrage hängt (`DNT: 1`, `Upgrade-Insecure-Requests: 1`) — jetzt auch beim `/api/users/me`-Aufruf gesetzt.
+
 ## 2.11.21-rc1
 
 - **Diagnose**: Die ausgehende IP aus 2.11.20-rc1 war die normale Wohnanschluss-IP, nicht die des gehosteten vServers — eine Rechenzentrums-IP scheidet damit als Ursache aus. Um zu prüfen, ob sich die ausgehende Amazon-Verbindung *innerhalb eines einzelnen Login-Durchlaufs* ändert (z.B. durch abweichendes Routing zwischen lokalem und öffentlichem Zugriff auf das Add-on), wird die ausgehende IP jetzt zusätzlich beim **Start** des Logins ermittelt und gespeichert. Schlägt der finale `/api/users/me`-Aufruf fehl, zeigt die Fehlermeldung jetzt `start_ip`, `ip_at_failure` und `ip_changed`, damit sich ein Wechsel der ausgehenden Adresse während des Logins zweifelsfrei erkennen (oder ausschließen) lässt.
