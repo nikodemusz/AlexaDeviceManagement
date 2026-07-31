@@ -20,7 +20,7 @@ from yaml_generator import load_yaml_with_secrets
 class ConfigStore:
     """Thread-safe JSON store with atomic writes and YAML migration."""
 
-    SCHEMA_VERSION = 4
+    SCHEMA_VERSION = 5
 
     def __init__(self, path: pathlib.Path, legacy_path: pathlib.Path, alexa_yaml_path: pathlib.Path) -> None:
         self.path = path
@@ -47,7 +47,13 @@ class ConfigStore:
                 "client_secret_secret": "alexa_skill_client_secret",
                 "fallback_web_cleanup": True,
             },
-            "ui": {"collapsed_devices": [], "collapsed_areas": []},
+            "ui": {
+                "collapsed_devices": [],
+                "collapsed_areas": [],
+                "hidden_devices": [],
+                "hidden_entities": [],
+                "hidden_alexa": [],
+            },
             "updated_at": None,
         }
 
@@ -105,12 +111,28 @@ class ConfigStore:
             "updated_at": int(self.path.stat().st_mtime) if self.path.exists() else None,
         }
 
+    @staticmethod
+    def _string_list(value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return sorted({str(item) for item in value if str(item or "").strip()})
+
     def _normalize(self, data: Any) -> dict[str, Any]:
         result = self.default()
         if isinstance(data, dict):
             result["locale"] = str(data.get("locale") or "de-DE")
             result["entities"] = data.get("entities") if isinstance(data.get("entities"), dict) else {}
-            result["ui"] = data.get("ui") if isinstance(data.get("ui"), dict) else result["ui"]
+
+            raw_ui = data.get("ui")
+            if isinstance(raw_ui, dict):
+                result["ui"] = {
+                    "collapsed_devices": self._string_list(raw_ui.get("collapsed_devices")),
+                    "collapsed_areas": self._string_list(raw_ui.get("collapsed_areas")),
+                    "hidden_devices": self._string_list(raw_ui.get("hidden_devices")),
+                    "hidden_entities": self._string_list(raw_ui.get("hidden_entities")),
+                    "hidden_alexa": self._string_list(raw_ui.get("hidden_alexa")),
+                }
+
             raw_group_sync = data.get("group_sync")
             if isinstance(raw_group_sync, dict):
                 result["group_sync"] = {
@@ -118,6 +140,7 @@ class ConfigStore:
                     "create_missing": bool(raw_group_sync.get("create_missing", True)),
                     "remove_from_other_groups": bool(raw_group_sync.get("remove_from_other_groups", False)),
                 }
+
             raw_event_gateway = data.get("event_gateway")
             if isinstance(raw_event_gateway, dict):
                 result["event_gateway"] = {
