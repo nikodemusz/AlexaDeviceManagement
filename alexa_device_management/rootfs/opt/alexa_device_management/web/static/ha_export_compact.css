@@ -1,0 +1,202 @@
+body:not(.ha-compact-disabled) #devices .device {
+  margin-bottom: 8px;
+}
+
+body:not(.ha-compact-disabled) #devices .device-head {
+  padding: 10px 12px;
+}
+
+body:not(.ha-compact-disabled) #devices .entity-grid {
+  display: block;
+  padding: 0;
+  border-top: 1px solid #e2e8f0;
+}
+
+body:not(.ha-compact-disabled) #devices .entity-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  align-items: center;
+  min-height: 58px;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid #e2e8f0;
+  border-radius: 0;
+  background: #fff;
+}
+
+body:not(.ha-compact-disabled) #devices .entity-card:last-child {
+  border-bottom: 0;
+}
+
+body:not(.ha-compact-disabled) #devices .entity-card.selected {
+  background: #f0f9ff;
+  box-shadow: inset 3px 0 0 #0ea5e9;
+}
+
+body:not(.ha-compact-disabled) #devices .entity-card.technical {
+  opacity: .72;
+}
+
+body:not(.ha-compact-disabled) #devices .entity-top {
+  align-items: center;
+  margin: 0;
+  min-width: 0;
+}
+
+body:not(.ha-compact-disabled) #devices .entity-top input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+}
+
+body:not(.ha-compact-disabled) #devices .entity-title strong {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+body:not(.ha-compact-disabled) #devices .entity-id {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+body:not(.ha-compact-disabled) #devices .badge {
+  margin-top: 3px;
+  padding: 2px 6px;
+}
+
+body:not(.ha-compact-disabled) #devices .compact-entity-status {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 11px;
+}
+
+body:not(.ha-compact-disabled) #devices .compact-entity-status .configured-name {
+  color: #0369a1;
+  font-weight: 650;
+}
+
+body:not(.ha-compact-disabled) #devices .compact-entity-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+body:not(.ha-compact-disabled) #devices .compact-edit {
+  min-width: 92px;
+  padding: 7px 9px;
+  font-size: 12px;
+}
+
+body:not(.ha-compact-disabled) #devices .entity-card > .fields,
+body:not(.ha-compact-disabled) #devices .entity-card > details {
+  display: none;
+}
+
+body:not(.ha-compact-disabled) #devices .entity-card.compact-expanded {
+  padding-bottom: 12px;
+  background: #f8fafc;
+}
+
+body:not(.ha-compact-disabled) #devices .entity-card.compact-expanded > .fields {
+  display: grid;
+  grid-column: 1 / -1;
+  padding: 10px;
+  border: 1px solid #dbe2ea;
+  border-radius: 10px;
+  background: #fff;
+}
+
+body:not(.ha-compact-disabled) #devices .entity-card.compact-expanded > details {
+  display: block;
+  grid-column: 1 / -1;
+  margin: 0 10px;
+}
+
+#btn-compact-view[aria-pressed="true"] {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+@media (max-width: 620px) {
+  body:not(.ha-compact-disabled) #devices .area {
+    margin-bottom: 10px;
+  }
+
+  body:not(.ha-compact-disabled) #devices .area-title {
+    position: sticky;
+    top: 112px;
+    z-index: 3;
+    padding: 7px 4px;
+    background: #f3f6f9;
+  }
+
+  body:not(.ha-compact-disabled) #devices .area-title h2 {
+    font-size: 16px;
+  }
+
+  body:not(.ha-compact-disabled) #devices .device-head {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 7px;
+  }
+
+  body:not(.ha-compact-disabled) #devices .device-actions {
+    grid-column: auto;
+  }
+
+  body:not(.ha-compact-disabled) #devices .device-actions .prepare {
+    width: auto;
+    padding: 7px 9px;
+    font-size: 0;
+  }
+
+  body:not(.ha-compact-disabled) #devices .device-actions .prepare::after {
+    content: "Alexa";
+    font-size: 12px;
+  }
+
+  body:not(.ha-compact-disabled) #devices .device-actions .muted {
+    display: none;
+  }
+
+  body:not(.ha-compact-disabled) #devices .entity-card {
+    grid-template-columns: minmax(0, 1fr) auto;
+    min-height: 54px;
+    padding: 7px 8px;
+  }
+
+  body:not(.ha-compact-disabled) #devices .entity-title strong {
+    font-size: 13px;
+  }
+
+  body:not(.ha-compact-disabled) #devices .entity-id {
+    font-size: 10px;
+  }
+
+  body:not(.ha-compact-disabled) #devices .compact-edit {
+    min-width: 42px;
+    width: 42px;
+    padding: 7px;
+    font-size: 0;
+  }
+
+  body:not(.ha-compact-disabled) #devices .compact-edit::after {
+    content: "✎";
+    font-size: 17px;
+  }
+
+  body:not(.ha-compact-disabled) #devices .entity-card.compact-expanded > .fields {
+    grid-template-columns: 1fr;
+  }
+
+  body:not(.ha-compact-disabled) #devices .entity-card.compact-expanded > .fields .field.full {
+    grid-column: auto;
+  }
+}
