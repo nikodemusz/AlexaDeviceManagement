@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import tempfile
 import time
 from typing import Any
@@ -13,11 +14,14 @@ import aiohttp
 from aiohttp import web
 
 import ha_export
+import server_clean
 from yaml_generator import GeneratorValidationError
 
 SUPERVISOR_BASE_URL = "http://supervisor"
+HA_API_BASE_URL = "http://supervisor/core/api"
 DEPLOY_STATUS_PATH = pathlib.Path("/data/alexa_device_management/deploy_status.json")
 LIFECYCLE_STATUS_PATH = pathlib.Path("/data/alexa_device_management/lifecycle_status.json")
+_ENTITY_ID_RE = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$", re.IGNORECASE)
 
 
 def _atomic_write_bytes(path: pathlib.Path, content: bytes) -> None:
@@ -71,6 +75,130 @@ def _write_lifecycle_status(data: dict[str, Any]) -> None:
     _write_json(LIFECYCLE_STATUS_PATH, current)
 
 
+def _enabled_entities(config: dict[str, Any]) -> set[str]:
+    entities = config.get("entities") if isinstance(config, dict) else {}
+    if not isinstance(entities, dict):
+        return set()
+    return {
+        str(entity_id)
+        for entity_id, settings in entities.items()
+        if isinstance(settings, dict) and settings.get("enabled")
+    }
+
+
+def _ha_entity_id_for_device(device: dict[str, Any]) -> str | None:
+    """Extract the Home Assistant entity_id exposed in Alexa metadata."""
+    raw = device.get("raw") if isinstance(device.get("raw"), dict) else {}
+    candidates: list[Any] = [
+        device.get("ha_entity_id"),
+        device.get("family"),
+        raw.get("entityId"),
+        raw.get("entity_id"),
+    ]
+    description = str(raw.get("description") or "").strip()
+    if description:
+        candidates.insert(0, description.partition(" via ")[0].strip())
+
+    for candidate in candidates:
+        value = str(candidate or "").strip()
+        if _ENTITY_ID_RE.fullmatch(value):
+            return value.lower()
+    return None
+
+
+def _cleanup_plan(
+    devices: list[dict[str, Any]],
+    removed_entities: set[str],
+    enabled_entities: set[str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return explicit removals and unreachable duplicates safe to delete."""
+    by_entity: dict[str, list[dict[str, Any]]] = {}
+    for device in devices:
+        entity_id = _ha_entity_id_for_device(device)
+        if entity_id:
+            by_entity.setdefault(entity_id, []).append(device)
+
+    removed_matches: list[dict[str, Any]] = []
+    duplicate_matches: list[dict[str, Any]] = []
+    for entity_id in sorted(removed_entities):
+        removed_matches.extend(by_entity.get(entity_id.lower(), []))
+
+    for entity_id in sorted(enabled_entities):
+        matches = by_entity.get(entity_id.lower(), [])
+        if len(matches) < 2:
+            continue
+        reachable = [item for item in matches if bool(item.get("online"))]
+        if not reachable:
+            continue
+        duplicate_matches.extend(item for item in matches if not bool(item.get("online")))
+
+    removed_serials = {str(item.get("serial") or "") for item in removed_matches}
+    duplicate_matches = [
+        item for item in duplicate_matches
+        if str(item.get("serial") or "") not in removed_serials
+    ]
+    return removed_matches, duplicate_matches
+
+
+async def _cleanup_alexa_endpoints(
+    removed_entities: set[str], enabled_entities: set[str]
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "requested_entities": sorted(removed_entities),
+        "deleted_removed": [],
+        "deleted_duplicates": [],
+        "not_found": [],
+        "failed": [],
+        "warnings": [],
+    }
+    if not removed_entities and not enabled_entities:
+        return result
+    if not server_clean.is_configured():
+        result["warnings"].append(
+            "Alexa ist nicht verbunden; deaktivierte Geräte konnten nicht aus Alexa entfernt werden."
+        )
+        return result
+
+    data = server_clean.session_data()
+    devices, errors = await server_clean._fetch_devices_from_alexa(data)
+    result["warnings"].extend(errors)
+    removed_matches, duplicate_matches = _cleanup_plan(
+        devices, removed_entities, enabled_entities
+    )
+
+    found_entities = {
+        entity_id
+        for item in removed_matches
+        if (entity_id := _ha_entity_id_for_device(item))
+    }
+    result["not_found"] = sorted(entity for entity in removed_entities if entity.lower() not in found_entities)
+
+    async def delete_items(items: list[dict[str, Any]], result_key: str) -> None:
+        for item in items:
+            serial = str(item.get("serial") or "").strip()
+            entity_id = _ha_entity_id_for_device(item)
+            try:
+                await server_clean._delete_target(item, data)
+                if serial:
+                    server_clean._remove_from_cache([serial])
+                result[result_key].append({
+                    "entity_id": entity_id,
+                    "serial": serial,
+                    "name": str(item.get("name") or serial),
+                })
+            except Exception as exc:
+                result["failed"].append({
+                    "entity_id": entity_id,
+                    "serial": serial,
+                    "name": str(item.get("name") or serial),
+                    "error": str(exc)[:500],
+                })
+
+    await delete_items(removed_matches, "deleted_removed")
+    await delete_items(duplicate_matches, "deleted_duplicates")
+    return result
+
+
 def lifecycle_snapshot() -> dict[str, Any]:
     lifecycle = _read_json(LIFECYCLE_STATUS_PATH)
     deploy = _read_deploy_status()
@@ -112,9 +240,27 @@ async def _supervisor_post(path: str, timeout: int = 120) -> tuple[int, dict[str
             return response.status, body
 
 
-def _result_message(body: dict[str, Any] | str) -> str:
+async def _ha_post(path: str, timeout: int = 120) -> tuple[int, dict[str, Any] | list[Any] | str]:
+    headers = ha_export._headers()
+    async with aiohttp.ClientSession(headers=headers) as session:
+        async with session.post(
+            f"{HA_API_BASE_URL}{path}",
+            json={},
+            timeout=aiohttp.ClientTimeout(total=timeout),
+        ) as response:
+            text = await response.text()
+            try:
+                body: dict[str, Any] | list[Any] | str = await response.json(content_type=None)
+            except Exception:
+                body = text
+            return response.status, body
+
+
+def _result_message(body: dict[str, Any] | list[Any] | str) -> str:
     if isinstance(body, dict):
         return str(body.get("message") or body.get("error") or body)
+    if isinstance(body, list):
+        return "Home-Assistant-Dienst wurde ausgeführt."
     return str(body or "Unbekannte Antwort")
 
 
@@ -129,11 +275,13 @@ async def check_config() -> dict[str, Any]:
 
 
 async def checked_deploy(request: web.Request) -> web.Response:
-    """Persist browser state, deploy from ConfigStore, validate HA and roll back on failure."""
+    """Persist browser state, deploy, validate HA and synchronize removals to Alexa."""
     started_at = int(time.time())
     target = ha_export.ALEXA_YAML_PATH
     previous_exists = target.exists()
     previous_bytes = target.read_bytes() if previous_exists else None
+    previous_config = ha_export._load_state()
+    previous_enabled = _enabled_entities(previous_config)
     _write_deploy_status({"state": "running", "started_at": started_at, "finished_at": None, "rolled_back": False})
 
     try:
@@ -145,6 +293,8 @@ async def checked_deploy(request: web.Request) -> web.Response:
             ha_export._save_state(payload)
 
         persisted = ha_export._load_state()
+        enabled_entities = _enabled_entities(persisted)
+        removed_entities = previous_enabled - enabled_entities
         deployment = ha_export.YAML_GENERATOR.deploy(persisted)
         check = await check_config()
         if not check["ok"]:
@@ -166,17 +316,19 @@ async def checked_deploy(request: web.Request) -> web.Response:
             })
             return web.json_response(result, status=422)
 
+        alexa_cleanup = await _cleanup_alexa_endpoints(removed_entities, enabled_entities)
         finished_at = int(time.time())
         result = {
             "ok": True, "saved": True, "deployed": True, "rolled_back": False,
             "path": deployment.path, "backup": deployment.backup, "yaml": deployment.yaml_text,
             "selected": deployment.selected_count, "selected_count": deployment.selected_count,
-            "check": check, "restart_required": True,
+            "check": check, "alexa_cleanup": alexa_cleanup, "restart_required": True,
         }
         _write_deploy_status({
             "state": "success", "started_at": started_at, "finished_at": finished_at,
             "rolled_back": False, "path": deployment.path, "backup": deployment.backup,
-            "selected": deployment.selected_count, "selected_count": deployment.selected_count, "check": check,
+            "selected": deployment.selected_count, "selected_count": deployment.selected_count,
+            "check": check, "alexa_cleanup": alexa_cleanup,
         })
         _write_lifecycle_status({"discovery_pending": False, "last_deploy_at": finished_at})
         return web.json_response(result)
@@ -236,9 +388,10 @@ async def check_config_endpoint(request: web.Request) -> web.Response:
 
 
 async def restart(request: web.Request) -> web.Response:
+    """Restart only Home Assistant Core through its service API."""
     try:
         requested_at = int(time.time())
-        status, body = await _supervisor_post("/core/restart", timeout=30)
+        status, body = await _ha_post("/services/homeassistant/restart", timeout=30)
         if not 200 <= status < 300:
             return web.json_response({"ok": False, "status": status, "error": _result_message(body), "response": body}, status=502)
         _write_lifecycle_status({
@@ -249,7 +402,7 @@ async def restart(request: web.Request) -> web.Response:
             "ok": True, "status": status, "message": _result_message(body),
             "restart_requested_at": requested_at,
             "discovery_pending": True,
-            "note": "Home Assistant wird neu gestartet. Danach muss die Alexa-Gerätesuche manuell gestartet werden.",
+            "note": "Nur Home Assistant Core wird neu gestartet; Host und Supervisor bleiben aktiv.",
         })
     except Exception as exc:
         return web.json_response({"ok": False, "error": str(exc)}, status=500)
