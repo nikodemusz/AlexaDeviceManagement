@@ -15,7 +15,7 @@ import ha_export
 import ha_export_overrides
 import server_clean
 
-APP_VERSION = "2.11.26-rc1"
+APP_VERSION = "2.12.0-rc1"
 
 
 @web.middleware
