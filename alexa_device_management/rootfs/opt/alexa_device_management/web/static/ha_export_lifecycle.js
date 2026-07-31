@@ -53,16 +53,25 @@
     } else if (status.restart_required) {
       chip.textContent = 'Home Assistant muss neu gestartet werden';
       chip.classList.add('warn');
+    } else if (status.event_sync_pending) {
+      const adds = status.event_sync?.pending_add_or_update?.length || 0;
+      const deletes = status.event_sync?.pending_delete?.length || 0;
+      chip.textContent = `Alexa Event Gateway ausstehend: ${adds} aktualisieren, ${deletes} löschen`;
+      chip.classList.add('warn');
     } else if (status.discovery_pending) {
       chip.textContent = 'Alexa-Gerätesuche steht noch aus';
       chip.classList.add('warn');
     } else if (status.deploy_state === 'success') {
-      chip.textContent = 'Deployment, Neustart und Gerätesuche aktuell';
+      chip.textContent = status.event_sync?.enabled
+        ? 'Deployment, Neustart und Alexa-Abgleich aktuell'
+        : 'Deployment, Neustart und Gerätesuche aktuell';
       chip.classList.add('good');
     } else {
       chip.textContent = 'Noch kein vollständiger Deployment-Ablauf';
     }
 
+    const discovery = document.getElementById('btn-alexa-discovery');
+    if (discovery) discovery.textContent = status.event_sync?.enabled ? 'Manuelle Gerätesuche' : 'Alexa-Gerätesuche';
     const restart = document.getElementById('btn-restart');
     if (restart && status.restart_required) restart.classList.remove('hidden');
   }
@@ -88,9 +97,14 @@
       const response = await fetch(`${base}/api/ha-export/discovery-guide`);
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+      const eventSync = result.lifecycle?.event_sync;
+      const official = eventSync?.enabled
+        ? `<div class="status ok" style="display:block">Der offizielle Event-Gateway-Abgleich ist aktiviert. Verwende nach dem Neustart zuerst den Button <strong>Event Gateway</strong>. Die manuelle Gerätesuche ist nur noch ein Fallback.</div>`
+        : '';
       content.innerHTML = `
+        ${official}
         <div class="status ${result.lifecycle?.discovery_pending ? 'err' : 'ok'}" style="display:block">
-          ${result.lifecycle?.discovery_pending ? 'Die Gerätesuche ist nach dem letzten Neustart noch offen.' : 'Keine offene Gerätesuche gespeichert.'}
+          ${result.lifecycle?.discovery_pending ? 'Die Gerätesuche ist nach dem letzten Neustart noch offen.' : 'Keine offene manuelle Gerätesuche gespeichert.'}
         </div>
         <p>${esc(result.reason)}</p>
         <ol>${(result.steps || []).map(step => `<li style="margin-bottom:8px">${esc(step)}</li>`).join('')}</ol>

@@ -5,6 +5,7 @@ from aiohttp import web
 
 import alexa_cache_service
 import alexa_endpoint_inventory
+import alexa_event_sync
 import alexa_group_manager
 import alexa_login_ingress_fix
 import alexa_room_enrichment
@@ -15,7 +16,7 @@ import ha_export
 import ha_export_overrides
 import server_clean
 
-APP_VERSION = "2.12.0-rc1"
+APP_VERSION = "2.13.0-rc1"
 
 
 @web.middleware
@@ -74,6 +75,7 @@ async def navigation_middleware(request: web.Request, handler):
             + '"></script><script src="' + ingress_path + '/static/ha_export_performance.js?v=' + APP_VERSION
             + '"></script><script src="' + ingress_path + '/static/ha_export_deploy_fix.js?v=' + APP_VERSION
             + '"></script><script src="' + ingress_path + '/static/alexa_group_manager.js?v=' + APP_VERSION
+            + '"></script><script src="' + ingress_path + '/static/alexa_event_gateway.js?v=' + APP_VERSION
             + '"></script>'
         )
         text = text.replace("let inventory=", "window.inventory=")
@@ -96,10 +98,12 @@ def create_app() -> web.Application:
     alexa_cache_service.install(server_clean)
     ha_export_overrides.install()
     ha_control.install()
+    alexa_event_sync.install(ha_control)
     app = server_clean.create_app()
     app.middlewares.append(navigation_middleware)
     alexa_cache_service.register_routes(app, server_clean)
     alexa_group_manager.register_routes(app, server_clean, ha_export.CONFIG_STORE)
+    alexa_event_sync.register_routes(app)
     ha_export.register_routes(app)
     ha_control.register_routes(app)
     discovery_preview.register_routes(app)

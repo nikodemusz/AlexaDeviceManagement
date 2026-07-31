@@ -33,8 +33,6 @@
     saving = true;
     statusChip('Autosave: speichert…', 'warn');
     try {
-      // Create the JSON snapshot only after the user stopped editing. This keeps
-      // serialization of large configurations away from the input event itself.
       const payload = JSON.stringify(config);
       const response = await fetch(`${base}/api/ha-export/autosave`, {
         method: 'POST',
@@ -60,23 +58,26 @@
 
   function schedule() {
     clearTimeout(timer);
+    document.body.dataset.configDirty = 'true';
     statusChip('Autosave: ausstehend', 'warn');
     timer = setTimeout(persist, 1000);
   }
 
   document.addEventListener('change', event => {
-    if (event.target.matches('.enabled, .category, .group-sync-control')) schedule();
+    if (event.target.matches('.enabled, .category, .event-gateway-setting')) schedule();
   }, true);
 
   document.addEventListener('input', event => {
-    if (event.target.matches('.alexaname, .description, .alexagroup')) schedule();
+    if (event.target.matches('.alexaname, .description, .event-gateway-setting')) schedule();
   }, true);
 
   document.addEventListener('click', event => {
-    if (event.target.matches('.prepare, #btn-enable-visible, #btn-disable-visible, #btn-disable-technical, #btn-copy-ha-areas')) {
+    if (event.target.matches('.prepare, #btn-enable-visible, #btn-disable-visible, #btn-disable-technical')) {
       setTimeout(schedule, 0);
     }
   }, true);
+
+  window.addEventListener('ha-export-config-changed', schedule);
 
   window.addEventListener('pagehide', () => {
     const payload = currentConfig();
