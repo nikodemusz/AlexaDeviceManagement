@@ -16,7 +16,7 @@ import ha_export
 import ha_export_overrides
 import server_clean
 
-APP_VERSION = "2.13.0-rc1"
+APP_VERSION = "2.14.0-rc1"
 
 
 @web.middleware
@@ -64,6 +64,8 @@ async def navigation_middleware(request: web.Request, handler):
             + '/static/ha_export_mobile.css?v=' + APP_VERSION + '">'
             + '<link rel="stylesheet" href="' + ingress_path
             + '/static/ha_export_performance.css?v=' + APP_VERSION + '">'
+            + '<link rel="stylesheet" href="' + ingress_path
+            + '/static/ha_export_compact.css?v=' + APP_VERSION + '">'
         )
         scripts = (
             '<script>document.documentElement.dataset.ingressPath=' + repr(ingress_path)
@@ -76,6 +78,7 @@ async def navigation_middleware(request: web.Request, handler):
             + '"></script><script src="' + ingress_path + '/static/ha_export_deploy_fix.js?v=' + APP_VERSION
             + '"></script><script src="' + ingress_path + '/static/alexa_group_manager.js?v=' + APP_VERSION
             + '"></script><script src="' + ingress_path + '/static/alexa_event_gateway.js?v=' + APP_VERSION
+            + '"></script><script src="' + ingress_path + '/static/ha_export_compact.js?v=' + APP_VERSION
             + '"></script>'
         )
         text = text.replace("let inventory=", "window.inventory=")
