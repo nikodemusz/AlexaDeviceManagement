@@ -42,8 +42,6 @@ class AlexaYamlGenerator:
 
     def __init__(self, target_path: pathlib.Path, backup_limit: int = 0) -> None:
         self.target_path = target_path
-        # Kept for API compatibility. Deployment rollback is handled in memory by
-        # ha_control, so persistent backup files are deliberately not created.
         self.backup_limit = 0
 
     def generate(self, data: dict[str, Any]) -> GenerationResult:
@@ -85,8 +83,6 @@ class AlexaYamlGenerator:
 
     def deploy(self, data: dict[str, Any]) -> DeploymentResult:
         generated = self.generate(data)
-        if generated.selected_count < 1:
-            raise GeneratorValidationError("No enabled entities selected for Alexa export")
         if not generated.yaml_text.strip():
             raise GeneratorValidationError("Generated Alexa YAML is empty")
 
@@ -113,10 +109,7 @@ class AlexaYamlGenerator:
             if os.path.exists(tmp_name):
                 os.unlink(tmp_name)
 
-        try:
-            actual_bytes = self.target_path.read_bytes()
-        except OSError as exc:
-            raise OSError(f"Written Alexa YAML cannot be read back: {exc}") from exc
+        actual_bytes = self.target_path.read_bytes()
         if actual_bytes != expected_bytes:
             raise OSError(
                 f"Alexa YAML write verification failed: expected {len(expected_bytes)} bytes, "
