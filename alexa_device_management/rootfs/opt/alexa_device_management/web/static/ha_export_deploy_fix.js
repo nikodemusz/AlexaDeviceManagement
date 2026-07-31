@@ -18,21 +18,39 @@
     return data?.check?.message || data?.message || data?.error || 'HTTP-Fehler';
   }
 
+  function cleanupMessage(cleanup) {
+    if (!cleanup) return '';
+    const removed = cleanup.deleted_removed?.length || 0;
+    const duplicates = cleanup.deleted_duplicates?.length || 0;
+    const failed = cleanup.failed?.length || 0;
+    const missing = cleanup.not_found?.length || 0;
+    const warnings = cleanup.warnings?.filter(Boolean) || [];
+    return `\nAlexa entfernt: ${removed}`
+      + `\nNicht erreichbare Duplikate entfernt: ${duplicates}`
+      + (missing ? `\nIn Alexa nicht gefunden: ${missing}` : '')
+      + (failed ? `\nAlexa-Löschfehler: ${failed}` : '')
+      + (warnings.length ? `\nHinweise: ${warnings.join(' | ')}` : '');
+  }
+
   async function deployCurrentConfiguration(event) {
     event?.preventDefault();
 
     const config = window.config;
-    if (!config?.entities || !Object.values(config.entities).some(item => item?.enabled)) {
-      setStatus('Es ist noch keine Entität für Alexa ausgewählt.', false);
+    if (!config?.entities) {
+      setStatus('Die aktuelle Konfiguration konnte nicht gelesen werden.', false);
       return;
     }
 
-    if (!confirm('Aktuelle Konfiguration als alexa.yaml ausrollen und Home Assistant vollständig prüfen?')) return;
+    const selected = Object.values(config.entities).filter(item => item?.enabled).length;
+    const question = selected
+      ? 'Aktuelle Konfiguration als alexa.yaml ausrollen, Alexa-Abwahlen synchronisieren und Home Assistant vollständig prüfen?'
+      : 'Alle Home-Assistant-Geräte für Alexa deaktivieren und vorhandene Zuordnungen aus Alexa entfernen?';
+    if (!confirm(question)) return;
 
     const oldText = button.textContent;
     button.disabled = true;
     button.textContent = 'Rolle aus…';
-    setStatus('Deployment gestartet. alexa.yaml wird geschrieben und anschließend von Home Assistant geprüft.');
+    setStatus('Deployment gestartet. alexa.yaml wird geschrieben, Alexa wird bereinigt und Home Assistant anschließend geprüft.');
 
     try {
       const response = await fetch(`${base}/api/ha-export/deploy`, {
@@ -70,7 +88,9 @@
         `Konfiguration erfolgreich ausgerollt.\nDatei: ${result.path}`
         + `\nBackup: ${result.backup || 'keines'}`
         + `\nEntitäten: ${result.selected ?? result.selected_count ?? 0}`
+        + cleanupMessage(result.alexa_cleanup)
         + `\nPrüfung: ${checkMessage(result)}`,
+        !(result.alexa_cleanup?.failed?.length),
       );
       document.getElementById('btn-restart')?.classList.remove('hidden');
       window.dispatchEvent(new CustomEvent('ha-export-status-changed'));
@@ -82,7 +102,5 @@
     }
   }
 
-  // The page's original handler sends no request body. Replace it completely so
-  // deployment always receives the current editor state and always reports progress.
   button.onclick = deployCurrentConfiguration;
 })();
