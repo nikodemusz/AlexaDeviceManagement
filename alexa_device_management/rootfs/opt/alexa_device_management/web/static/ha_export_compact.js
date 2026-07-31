@@ -79,7 +79,8 @@
       status.className = 'compact-entity-status';
       title.appendChild(status);
     }
-    status.innerHTML = statusMarkup(entityId, card);
+    const markup = statusMarkup(entityId, card);
+    if (status.innerHTML !== markup) status.innerHTML = markup;
 
     let actions = card.querySelector('.compact-entity-actions');
     if (!actions) {
@@ -132,13 +133,5 @@
     document.addEventListener('DOMContentLoaded', enhanceEntities);
   } else {
     enhanceEntities();
-  }
-
-  const root = document.getElementById('devices');
-  if (root) {
-    new MutationObserver(() => requestAnimationFrame(enhanceEntities)).observe(root, {
-      childList: true,
-      subtree: true,
-    });
   }
 })();
