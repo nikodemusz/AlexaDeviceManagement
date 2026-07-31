@@ -38,7 +38,7 @@ class ConfigStoreGroupTests(unittest.TestCase):
                 },
             }, create_backup=False)
 
-            self.assertEqual(saved["schema_version"], 4)
+            self.assertEqual(saved["schema_version"], 5)
             self.assertEqual(saved["entities"]["light.test"]["alexa_group"], "Wohnzimmer")
             self.assertEqual(saved["group_sync"], {
                 "enabled": True,
