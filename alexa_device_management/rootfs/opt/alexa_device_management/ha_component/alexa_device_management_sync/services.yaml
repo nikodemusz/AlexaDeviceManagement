@@ -1,0 +1,20 @@
+sync:
+  name: Alexa-Endpunkte synchronisieren
+  description: Sendet AddOrUpdateReport und DeleteReport an das Alexa Event Gateway.
+  fields:
+    add_or_update:
+      name: Hinzufügen oder aktualisieren
+      example:
+        - light.wohnzimmer
+      selector:
+        object:
+    delete:
+      name: Löschen
+      example:
+        - switch.altes_geraet
+      selector:
+        object:
+    entity_config:
+      name: Alexa-Entitätskonfiguration
+      selector:
+        object:

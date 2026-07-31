@@ -1,0 +1,12 @@
+{
+  "domain": "alexa_device_management_sync",
+  "name": "Alexa Device Management Sync",
+  "codeowners": [],
+  "documentation": "https://github.com/nikodemusz/AlexaDeviceManagement",
+  "integration_type": "service",
+  "iot_class": "cloud_push",
+  "version": "1.0.0",
+  "dependencies": [
+    "alexa"
+  ]
+}

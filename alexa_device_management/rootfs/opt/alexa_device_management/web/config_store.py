@@ -14,11 +14,13 @@ from typing import Any
 
 import yaml
 
+from yaml_generator import load_yaml_with_secrets
+
 
 class ConfigStore:
     """Thread-safe JSON store with atomic writes and YAML migration."""
 
-    SCHEMA_VERSION = 3
+    SCHEMA_VERSION = 4
 
     def __init__(self, path: pathlib.Path, legacy_path: pathlib.Path, alexa_yaml_path: pathlib.Path) -> None:
         self.path = path
@@ -37,6 +39,13 @@ class ConfigStore:
                 "enabled": True,
                 "create_missing": True,
                 "remove_from_other_groups": False,
+            },
+            "event_gateway": {
+                "enabled": False,
+                "endpoint": "https://api.eu.amazonalexa.com/v3/events",
+                "client_id_secret": "alexa_skill_client_id",
+                "client_secret_secret": "alexa_skill_client_secret",
+                "fallback_web_cleanup": True,
             },
             "ui": {"collapsed_devices": [], "collapsed_areas": []},
             "updated_at": None,
@@ -109,6 +118,26 @@ class ConfigStore:
                     "create_missing": bool(raw_group_sync.get("create_missing", True)),
                     "remove_from_other_groups": bool(raw_group_sync.get("remove_from_other_groups", False)),
                 }
+            raw_event_gateway = data.get("event_gateway")
+            if isinstance(raw_event_gateway, dict):
+                result["event_gateway"] = {
+                    "enabled": bool(raw_event_gateway.get("enabled", False)),
+                    "endpoint": str(
+                        raw_event_gateway.get("endpoint")
+                        or "https://api.eu.amazonalexa.com/v3/events"
+                    ).strip(),
+                    "client_id_secret": str(
+                        raw_event_gateway.get("client_id_secret")
+                        or "alexa_skill_client_id"
+                    ).strip(),
+                    "client_secret_secret": str(
+                        raw_event_gateway.get("client_secret_secret")
+                        or "alexa_skill_client_secret"
+                    ).strip(),
+                    "fallback_web_cleanup": bool(
+                        raw_event_gateway.get("fallback_web_cleanup", True)
+                    ),
+                }
             result["updated_at"] = data.get("updated_at")
         result["schema_version"] = self.SCHEMA_VERSION
         return result
@@ -116,7 +145,9 @@ class ConfigStore:
     def _import_yaml(self) -> dict[str, Any]:
         state = self.default()
         try:
-            document = yaml.safe_load(self.alexa_yaml_path.read_text(encoding="utf-8")) or {}
+            document = load_yaml_with_secrets(
+                self.alexa_yaml_path.read_text(encoding="utf-8")
+            ) or {}
             smart_home = document.get("alexa", {}).get("smart_home", {})
             state["locale"] = smart_home.get("locale", "de-DE")
             entity_config = smart_home.get("entity_config", {}) or {}
@@ -130,6 +161,17 @@ class ConfigStore:
                     "display_category": current.get("display_categories", ""),
                     "alexa_group": "",
                 }
+
+            endpoint = str(smart_home.get("endpoint") or "").strip()
+            client_id = str(smart_home.get("client_id") or "").strip()
+            client_secret = str(smart_home.get("client_secret") or "").strip()
+            if endpoint and client_id and client_secret:
+                state["event_gateway"].update({
+                    "enabled": True,
+                    "endpoint": endpoint,
+                    "client_id_secret": client_id,
+                    "client_secret_secret": client_secret,
+                })
         except (OSError, yaml.YAMLError, AttributeError, TypeError):
             pass
         return state
