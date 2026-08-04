@@ -1,0 +1,55 @@
+name: Restore complete changelog
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/restore-changelog.yml
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge current and historical changelog
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          root = Path("alexa_device_management")
+          changelog = root / "CHANGELOG.md"
+          legacy = root / "CHANGELOG-legacy.md"
+
+          current = changelog.read_text(encoding="utf-8")
+          history = legacy.read_text(encoding="utf-8")
+
+          current = current.replace(
+              '- **Fix**: Die Release-Einträge werden wieder direkt im sichtbaren `CHANGELOG.md` gepflegt; der bisherige Verlauf bleibt in `CHANGELOG-legacy.md` erhalten.',
+              '- **Changelog**: Der vollständige Versionsverlauf bleibt dauerhaft in `CHANGELOG.md`; neue Versionseinträge werden oben ergänzt.'
+          )
+          current = current.replace(
+              '\nÄltere Einträge: [CHANGELOG-legacy.md](CHANGELOG-legacy.md)',
+              ''
+          ).rstrip()
+
+          if history.startswith("# Changelog"):
+              history = history[len("# Changelog"):].lstrip()
+
+          changelog.write_text(current + "\n\n" + history, encoding="utf-8")
+          legacy.unlink()
+          Path(".github/workflows/restore-changelog.yml").unlink()
+          PY
+
+      - name: Commit restored changelog
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "docs: restore complete changelog"
+          git push
