@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Alexa-Geräteverwaltung</title>
+  <link rel="stylesheet" href="{{INGRESS_PATH}}/static/device_overview.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Alexa-Geräteverwaltung</h1>
+      <div class="subtitle">Home Assistant konfigurieren und den tatsächlichen Alexa-Bestand prüfen</div>
+    </div>
+    <div class="top-actions">
+      <a id="btn-login" class="button primary hidden" href="{{INGRESS_PATH}}/alexa-login">Alexa verbinden</a>
+      <button id="btn-logout" class="button danger hidden">Abmelden</button>
+      <button id="btn-refresh" class="button secondary">Aktualisieren</button>
+      <button id="btn-settings" class="button secondary">Einstellungen</button>
+      <a class="button secondary" href="{{INGRESS_PATH}}/debug">Debug</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="workflow">
+      <button id="btn-preview" class="button secondary">YAML-Vorschau</button>
+      <button id="btn-deploy" class="button primary">Konfiguration ausrollen</button>
+      <button id="btn-restart" class="button warning">HA neu starten</button>
+      <button id="btn-event-sync" class="button primary">Event Gateway synchronisieren</button>
+      <button id="btn-group-sync" class="button secondary">Alexa-Gruppen synchronisieren</button>
+    </section>
+
+    <section class="filters">
+      <input id="search" placeholder="Gerät, Entität, Alexa-Name oder Raum suchen">
+      <select id="status-filter">
+        <option value="all">Alle sichtbaren</option>
+        <option value="selected">Für Alexa ausgewählt</option>
+        <option value="synced">Synchronisiert</option>
+        <option value="pending">Ausstehend</option>
+        <option value="only_alexa">Noch in Alexa vorhanden</option>
+        <option value="problems">Probleme und Duplikate</option>
+        <option value="alexa_only">Nur Alexa</option>
+        <option value="hidden">Ausgeblendet</option>
+      </select>
+      <select id="area-filter"><option value="">Alle Bereiche</option></select>
+      <select id="domain-filter"><option value="">Alle Domains</option></select>
+    </section>
+
+    <section class="bulk-actions">
+      <button id="btn-enable-useful" class="button secondary">Sinnvolle sichtbare aktivieren</button>
+      <button id="btn-disable-visible" class="button secondary">Sichtbare deaktivieren</button>
+      <button id="btn-hide-technical" class="button secondary">Technische sichtbare ausblenden</button>
+      <button id="btn-unhide-visible" class="button secondary hidden">Gefilterte wieder einblenden</button>
+    </section>
+
+    <section id="summary" class="summary"></section>
+    <div id="message" class="message hidden"></div>
+    <section id="content" class="content"><div class="loading">Geräte werden geladen…</div></section>
+  </main>
+
+  <datalist id="group-list"></datalist>
+
+  <dialog id="settings-dialog">
+    <form method="dialog" class="dialog-shell">
+      <header>
+        <h2>Einstellungen</h2>
+        <button class="button secondary" value="cancel">Schließen</button>
+      </header>
+      <div class="dialog-content">
+        <fieldset>
+          <legend>Alexa Event Gateway</legend>
+          <label class="check"><input id="event-enabled" type="checkbox"> Offiziellen Add-/Update-/Delete-Abgleich aktivieren</label>
+          <label>Event-Endpunkt
+            <select id="event-endpoint">
+              <option value="https://api.eu.amazonalexa.com/v3/events">Europa</option>
+              <option value="https://api.amazonalexa.com/v3/events">Nordamerika</option>
+              <option value="https://api.fe.amazonalexa.com/v3/events">Ferner Osten</option>
+            </select>
+          </label>
+          <label>Secret-Name Client-ID<input id="event-client-id-secret"></label>
+          <label>Secret-Name Client-Secret<input id="event-client-secret-secret"></label>
+          <label class="check"><input id="event-fallback" type="checkbox"> Private Alexa-Web-Löschung als Fallback verwenden</label>
+        </fieldset>
+        <fieldset>
+          <legend>Alexa-Gruppen</legend>
+          <label class="check"><input id="group-enabled" type="checkbox"> Gruppenabgleich aktivieren</label>
+          <label class="check"><input id="group-create" type="checkbox"> Fehlende Gruppen erstellen</label>
+          <label class="check"><input id="group-remove-other" type="checkbox"> Aus anderen Gruppen entfernen</label>
+        </fieldset>
+        <fieldset>
+          <legend>Export</legend>
+          <label>Locale<input id="locale"></label>
+        </fieldset>
+      </div>
+      <footer>
+        <button id="btn-save-settings" class="button primary" value="cancel">Speichern</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="yaml-dialog">
+    <div class="dialog-shell wide">
+      <header>
+        <h2>YAML-Vorschau</h2>
+        <button id="btn-close-yaml" class="button secondary">Schließen</button>
+      </header>
+      <pre id="yaml-output"></pre>
+    </div>
+  </dialog>
+
+  <script>document.documentElement.dataset.ingressPath="{{INGRESS_PATH}}";</script>
+  <script src="{{INGRESS_PATH}}/static/device_overview.js"></script>
+</body>
+</html>

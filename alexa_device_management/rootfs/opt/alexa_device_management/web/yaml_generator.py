@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import re
 import tempfile
 from dataclasses import dataclass
 from typing import Any
@@ -16,10 +17,45 @@ SUPPORTED_DISPLAY_CATEGORIES = {
     "INTERIOR_BLIND", "EXTERIOR_BLIND", "CAMERA", "LOCK", "SCENE_TRIGGER",
     "OTHER",
 }
+VALID_EVENT_ENDPOINTS = {
+    "https://api.amazonalexa.com/v3/events",
+    "https://api.eu.amazonalexa.com/v3/events",
+    "https://api.fe.amazonalexa.com/v3/events",
+}
+_SECRET_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 class GeneratorValidationError(ValueError):
     """Raised when persisted configuration cannot produce valid Alexa YAML."""
+
+
+class SecretRef(str):
+    """YAML ``!secret`` reference without storing the secret value in app state."""
+
+
+class _SecretDumper(yaml.SafeDumper):
+    pass
+
+
+class _SecretLoader(yaml.SafeLoader):
+    pass
+
+
+def _represent_secret(dumper: yaml.SafeDumper, data: SecretRef) -> yaml.Node:
+    return dumper.represent_scalar("!secret", str(data))
+
+
+def _construct_secret(loader: yaml.SafeLoader, node: yaml.Node) -> SecretRef:
+    return SecretRef(loader.construct_scalar(node))
+
+
+_SecretDumper.add_representer(SecretRef, _represent_secret)
+_SecretLoader.add_constructor("!secret", _construct_secret)
+
+
+def load_yaml_with_secrets(text: str) -> Any:
+    """Load generated YAML while retaining ``!secret`` references as strings."""
+    return yaml.load(text, Loader=_SecretLoader)
 
 
 @dataclass(frozen=True)
@@ -71,9 +107,24 @@ class AlexaYamlGenerator:
         if entity_config:
             smart_home["entity_config"] = entity_config
 
-        document = {"alexa": {"smart_home": smart_home}}
-        yaml_text = yaml.safe_dump(
+        event_gateway = normalized["event_gateway"]
+        document: dict[str, Any] = {"alexa": {"smart_home": smart_home}}
+        if event_gateway["enabled"]:
+            smart_home.update({
+                "endpoint": event_gateway["endpoint"],
+                "client_id": SecretRef(event_gateway["client_id_secret"]),
+                "client_secret": SecretRef(event_gateway["client_secret_secret"]),
+            })
+            document["alexa_device_management_sync"] = {
+                "endpoint": event_gateway["endpoint"],
+                "client_id": SecretRef(event_gateway["client_id_secret"]),
+                "client_secret": SecretRef(event_gateway["client_secret_secret"]),
+                "locale": normalized["locale"],
+            }
+
+        yaml_text = yaml.dump(
             document,
+            Dumper=_SecretDumper,
             allow_unicode=True,
             sort_keys=False,
             default_flow_style=False,
@@ -160,12 +211,45 @@ class AlexaYamlGenerator:
                 "description": str(raw_settings.get("description") or "").strip(),
                 "display_category": category,
             }
-        return {"locale": locale, "entities": entities}
+
+        raw_gateway = data.get("event_gateway")
+        raw_gateway = raw_gateway if isinstance(raw_gateway, dict) else {}
+        event_gateway = {
+            "enabled": bool(raw_gateway.get("enabled", False)),
+            "endpoint": str(
+                raw_gateway.get("endpoint")
+                or "https://api.eu.amazonalexa.com/v3/events"
+            ).strip().lower(),
+            "client_id_secret": str(
+                raw_gateway.get("client_id_secret") or "alexa_skill_client_id"
+            ).strip(),
+            "client_secret_secret": str(
+                raw_gateway.get("client_secret_secret") or "alexa_skill_client_secret"
+            ).strip(),
+            "fallback_web_cleanup": bool(raw_gateway.get("fallback_web_cleanup", True)),
+        }
+        if event_gateway["enabled"]:
+            if event_gateway["endpoint"] not in VALID_EVENT_ENDPOINTS:
+                raise GeneratorValidationError(
+                    f"Unsupported Alexa event endpoint: {event_gateway['endpoint']}"
+                )
+            for field in ("client_id_secret", "client_secret_secret"):
+                value = event_gateway[field]
+                if not value or not _SECRET_NAME_RE.fullmatch(value):
+                    raise GeneratorValidationError(
+                        f"Invalid Home Assistant secret name for {field}: {value!r}"
+                    )
+
+        return {
+            "locale": locale,
+            "entities": entities,
+            "event_gateway": event_gateway,
+        }
 
     @staticmethod
     def _validate_rendered_yaml(yaml_text: str, expected: dict[str, Any]) -> None:
         try:
-            parsed = yaml.safe_load(yaml_text)
+            parsed = load_yaml_with_secrets(yaml_text)
         except yaml.YAMLError as exc:
             raise GeneratorValidationError(f"Generated YAML is invalid: {exc}") from exc
         if parsed != expected:

@@ -8,7 +8,11 @@ import unittest
 WEB_DIR = pathlib.Path(__file__).resolve().parents[1] / "rootfs/opt/alexa_device_management/web"
 sys.path.insert(0, str(WEB_DIR))
 
-from yaml_generator import AlexaYamlGenerator, GeneratorValidationError
+from yaml_generator import (
+    AlexaYamlGenerator,
+    GeneratorValidationError,
+    load_yaml_with_secrets,
+)
 
 
 class AlexaYamlGeneratorTests(unittest.TestCase):
@@ -45,6 +49,31 @@ class AlexaYamlGeneratorTests(unittest.TestCase):
         )
         self.assertNotIn("sensor.ignoriert", result.yaml_text)
 
+    def test_generates_event_gateway_and_secret_references(self) -> None:
+        generator = AlexaYamlGenerator(pathlib.Path("/tmp/alexa.yaml"))
+        result = generator.generate({
+            "locale": "de-DE",
+            "entities": {"light.test": {"enabled": True, "name": "Test"}},
+            "event_gateway": {
+                "enabled": True,
+                "endpoint": "https://api.eu.amazonalexa.com/v3/events",
+                "client_id_secret": "alexa_skill_client_id",
+                "client_secret_secret": "alexa_skill_client_secret",
+            },
+        })
+
+        self.assertIn("client_id: !secret 'alexa_skill_client_id'", result.yaml_text)
+        self.assertIn("client_secret: !secret 'alexa_skill_client_secret'", result.yaml_text)
+        parsed = load_yaml_with_secrets(result.yaml_text)
+        self.assertEqual(
+            parsed["alexa_device_management_sync"]["endpoint"],
+            "https://api.eu.amazonalexa.com/v3/events",
+        )
+        self.assertEqual(
+            parsed["alexa"]["smart_home"]["client_id"],
+            "alexa_skill_client_id",
+        )
+
     def test_rejects_invalid_entity_id(self) -> None:
         generator = AlexaYamlGenerator(pathlib.Path("/tmp/alexa.yaml"))
         with self.assertRaises(GeneratorValidationError):
@@ -62,6 +91,18 @@ class AlexaYamlGeneratorTests(unittest.TestCase):
                 }
             })
 
+    def test_rejects_invalid_event_gateway_secret_name(self) -> None:
+        generator = AlexaYamlGenerator(pathlib.Path("/tmp/alexa.yaml"))
+        with self.assertRaises(GeneratorValidationError):
+            generator.generate({
+                "entities": {},
+                "event_gateway": {
+                    "enabled": True,
+                    "client_id_secret": "not a secret name",
+                    "client_secret_secret": "valid_name",
+                },
+            })
+
     def test_deploy_replaces_atomically_without_backup_files(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             target = pathlib.Path(directory) / "alexa.yaml"
@@ -76,13 +117,18 @@ class AlexaYamlGeneratorTests(unittest.TestCase):
             self.assertEqual(target.read_text(encoding="utf-8"), result.yaml_text)
             self.assertEqual(list(target.parent.glob("alexa.yaml.backup-*")), [])
 
-    def test_deploy_rejects_empty_selection(self) -> None:
+    def test_deploy_allows_empty_selection(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             target = pathlib.Path(directory) / "alexa.yaml"
             generator = AlexaYamlGenerator(target)
-            with self.assertRaises(GeneratorValidationError):
-                generator.deploy({"entities": {"light.test": {"enabled": False}}})
-            self.assertFalse(target.exists())
+            result = generator.deploy({"entities": {"light.test": {"enabled": False}}})
+            self.assertTrue(target.exists())
+            self.assertEqual(result.selected_count, 0)
+            parsed = load_yaml_with_secrets(result.yaml_text)
+            self.assertEqual(
+                parsed["alexa"]["smart_home"]["filter"]["include_entities"],
+                [],
+            )
 
 
 if __name__ == "__main__":
