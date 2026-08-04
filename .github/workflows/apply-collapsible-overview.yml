@@ -1,0 +1,83 @@
+name: Apply collapsible device overview
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Patch overview
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('alexa_device_management')
+          js_path = root / 'rootfs/opt/alexa_device_management/web/static/device_overview.js'
+          js = js_path.read_text(encoding='utf-8')
+
+          js = js.replace(
+          '  let savePromise = Promise.resolve();\n',
+          '  let savePromise = Promise.resolve();\n  const expandedAreas = new Set();\n  const expandedDevices = new Set();\n'
+          )
+
+          js = js.replace(
+          '  function deviceHtml(device, entities) {\n    return `<section class="device status-${attr(device.status)} ${device.hidden ? "hidden-item" : ""}"><div class="device-head"><div><div class="device-name">${esc(device.name)}</div><div class="device-meta">${esc(device.area_name || "Kein Bereich")}${device.floor_name ? ` • ${esc(device.floor_name)}` : ""}${device.manufacturer ? ` • ${esc(device.manufacturer)}` : ""}${device.model ? ` • ${esc(device.model)}` : ""}</div></div><div class="device-actions"><button class="button primary small" data-action="prepare-device" data-device="${attr(device.device_id)}">Sinnvoll aktivieren</button><button class="button secondary small" data-action="${device.hidden ? "show-device" : "hide-device"}" data-device="${attr(device.device_id)}">${device.hidden ? "Einblenden" : "Gerät ausblenden"}</button></div></div><div class="entity-grid">${entities.map(entity => entityHtml(entity, device)).join("")}</div></section>`;\n  }',
+          '  function deviceHtml(device, entities) {\n    const expanded = expandedDevices.has(device.device_id);\n    return `<section class="device status-${attr(device.status)} ${device.hidden ? "hidden-item" : ""}" data-device-section="${attr(device.device_id)}"><div class="device-head"><button class="collapse-toggle" data-action="toggle-device" data-device="${attr(device.device_id)}" aria-expanded="${expanded}">${expanded ? "▾" : "▸"}</button><div class="device-title"><div class="device-name">${esc(device.name)}</div><div class="device-meta">${esc(device.area_name || "Kein Bereich")}${device.floor_name ? ` • ${esc(device.floor_name)}` : ""}${device.manufacturer ? ` • ${esc(device.manufacturer)}` : ""}${device.model ? ` • ${esc(device.model)}` : ""}</div></div><div class="device-actions"><button class="button primary small" data-action="prepare-device" data-device="${attr(device.device_id)}">Sinnvoll aktivieren</button><button class="button secondary small" data-action="${device.hidden ? "show-device" : "hide-device"}" data-device="${attr(device.device_id)}">${device.hidden ? "Einblenden" : "Gerät ausblenden"}</button></div></div>${expanded ? `<div class="entity-grid">${entities.map(entity => entityHtml(entity, device)).join("")}</div>` : ""}</section>`;\n  }'
+          )
+
+          js = js.replace(
+          '        html.push(`<section class="area"><div class="area-title"><h2>${esc(area)}</h2><span class="muted">${items.length} Geräte</span></div>`);\n        for (const item of items) html.push(deviceHtml(item.device, item.entities));\n        html.push("</section>");',
+          '        const areaKey = items[0]?.device?.area_id || area;\n        const expanded = expandedAreas.has(areaKey);\n        html.push(`<section class="area"><div class="area-title"><button class="collapse-toggle" data-action="toggle-area" data-area="${attr(areaKey)}" aria-expanded="${expanded}">${expanded ? "▾" : "▸"}</button><h2>${esc(area)}</h2><span class="muted">${items.length} Geräte</span></div>`);\n        if (expanded) for (const item of items) html.push(deviceHtml(item.device, item.entities));\n        html.push("</section>");'
+          )
+
+          js = js.replace(
+          '  async function changeVisibility(kind, ids, hidden) {\n    await request("/api/device-overview/visibility", {method: "POST", body: JSON.stringify({kind, ids: Array.isArray(ids) ? ids : [ids], hidden})});\n    await load(false);\n  }',
+          '  function applyVisibilityLocally(kind, ids, hidden) {\n    const wanted = new Set(Array.isArray(ids) ? ids : [ids]);\n    config.ui ||= {};\n    const key = kind === "device" ? "hidden_devices" : kind === "entity" ? "hidden_entities" : "hidden_alexa";\n    const current = new Set(config.ui[key] || []);\n    for (const id of wanted) hidden ? current.add(id) : current.delete(id);\n    config.ui[key] = [...current].sort();\n    if (kind === "device") for (const device of model.devices || []) if (wanted.has(device.device_id)) { device.hidden = hidden; for (const entity of device.entities || []) entity.hidden = hidden || entity.hidden_directly; }\n    if (kind === "entity") for (const device of model.devices || []) for (const entity of device.entities || []) if (wanted.has(entity.entity_id)) { entity.hidden_directly = hidden; entity.hidden = hidden || device.hidden; }\n    if (kind === "alexa") for (const item of model.alexa_only || []) if (wanted.has(item.key)) item.hidden = hidden;\n  }\n\n  async function changeVisibility(kind, ids, hidden) {\n    const values = Array.isArray(ids) ? ids : [ids];\n    applyVisibilityLocally(kind, values, hidden);\n    render();\n    try {\n      const result = await request("/api/device-overview/visibility", {method: "POST", body: JSON.stringify({kind, ids: values, hidden})});\n      if (result.configuration) config = result.configuration;\n    } catch (error) {\n      applyVisibilityLocally(kind, values, !hidden);\n      render();\n      throw error;\n    }\n  }'
+          )
+
+          js = js.replace(
+          '      if (action === "hide-device") await changeVisibility("device", button.dataset.device, true);',
+          '      if (action === "toggle-area") { const id = button.dataset.area; expandedAreas.has(id) ? expandedAreas.delete(id) : expandedAreas.add(id); render(); }\n      else if (action === "toggle-device") { const id = button.dataset.device; expandedDevices.has(id) ? expandedDevices.delete(id) : expandedDevices.add(id); render(); }\n      else if (action === "hide-device") await changeVisibility("device", button.dataset.device, true);'
+          )
+
+          js_path.write_text(js, encoding='utf-8')
+
+          css_path = root / 'rootfs/opt/alexa_device_management/web/static/device_overview.css'
+          css = css_path.read_text(encoding='utf-8')
+          css += '\n.collapse-toggle { border: 0; background: transparent; cursor: pointer; font-size: 1.25rem; line-height: 1; padding: .25rem .4rem; color: inherit; }\n.area-title, .device-head { align-items: center; }\n.device-title { flex: 1; min-width: 0; }\n'
+          css_path.write_text(css, encoding='utf-8')
+
+          config_path = root / 'config.yaml'
+          config_text = config_path.read_text(encoding='utf-8').replace('version: "2.14.1-rc1"', 'version: "2.15.0-rc1"')
+          config_path.write_text(config_text, encoding='utf-8')
+
+          server_path = root / 'rootfs/opt/alexa_device_management/web/server_extended.py'
+          server = server_path.read_text(encoding='utf-8').replace('APP_VERSION = "2.14.1-rc1"', 'APP_VERSION = "2.15.0-rc1"')
+          server_path.write_text(server, encoding='utf-8')
+
+          changelog_path = root / 'CHANGELOG.md'
+          changelog = changelog_path.read_text(encoding='utf-8')
+          marker = '# Changelog\n\n'
+          entry = '## 2.15.0-rc1\n\n- **Übersicht**: Bereiche und Geräte sind standardmäßig eingeklappt und können unabhängig aufgeklappt werden.\n- **Performance**: Ausblenden und Einblenden aktualisiert die Ansicht sofort, ohne die vollständige Geräteliste neu zu laden.\n\n'
+          if entry not in changelog:
+              changelog = changelog.replace(marker, marker + entry, 1)
+          changelog_path.write_text(changelog, encoding='utf-8')
+          PY
+      - name: Remove temporary workflow
+        run: rm .github/workflows/apply-collapsible-overview.yml
+      - name: Commit changes
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "feat: add collapsible device hierarchy"
+          git push
