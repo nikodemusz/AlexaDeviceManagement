@@ -4,6 +4,8 @@
   let config = null;
   let saveTimer = null;
   let savePromise = Promise.resolve();
+  const expandedAreas = new Set();
+  const expandedDevices = new Set();
 
   const STATUS_TEXT = {
     synced: "Synchronisiert",
@@ -197,7 +199,8 @@
   }
 
   function deviceHtml(device, entities) {
-    return `<section class="device status-${attr(device.status)} ${device.hidden ? "hidden-item" : ""}"><div class="device-head"><div><div class="device-name">${esc(device.name)}</div><div class="device-meta">${esc(device.area_name || "Kein Bereich")}${device.floor_name ? ` • ${esc(device.floor_name)}` : ""}${device.manufacturer ? ` • ${esc(device.manufacturer)}` : ""}${device.model ? ` • ${esc(device.model)}` : ""}</div></div><div class="device-actions"><button class="button primary small" data-action="prepare-device" data-device="${attr(device.device_id)}">Sinnvoll aktivieren</button><button class="button secondary small" data-action="${device.hidden ? "show-device" : "hide-device"}" data-device="${attr(device.device_id)}">${device.hidden ? "Einblenden" : "Gerät ausblenden"}</button></div></div><div class="entity-grid">${entities.map(entity => entityHtml(entity, device)).join("")}</div></section>`;
+    const expanded = expandedDevices.has(device.device_id);
+    return `<section class="device status-${attr(device.status)} ${device.hidden ? "hidden-item" : ""}" data-device-section="${attr(device.device_id)}"><div class="device-head"><button class="collapse-toggle" data-action="toggle-device" data-device="${attr(device.device_id)}" aria-expanded="${expanded}">${expanded ? "▾" : "▸"}</button><div class="device-title"><div class="device-name">${esc(device.name)}</div><div class="device-meta">${esc(device.area_name || "Kein Bereich")}${device.floor_name ? ` • ${esc(device.floor_name)}` : ""}${device.manufacturer ? ` • ${esc(device.manufacturer)}` : ""}${device.model ? ` • ${esc(device.model)}` : ""}</div></div><div class="device-actions"><button class="button primary small" data-action="prepare-device" data-device="${attr(device.device_id)}">Sinnvoll aktivieren</button><button class="button secondary small" data-action="${device.hidden ? "show-device" : "hide-device"}" data-device="${attr(device.device_id)}">${device.hidden ? "Einblenden" : "Gerät ausblenden"}</button></div></div>${expanded ? `<div class="entity-grid">${entities.map(entity => entityHtml(entity, device)).join("")}</div>` : ""}</section>`;
   }
 
   function alexaOnlyHtml(item) {
@@ -219,8 +222,10 @@
     const html = [];
     if (filter.status !== "alexa_only") {
       for (const [area, items] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], "de"))) {
-        html.push(`<section class="area"><div class="area-title"><h2>${esc(area)}</h2><span class="muted">${items.length} Geräte</span></div>`);
-        for (const item of items) html.push(deviceHtml(item.device, item.entities));
+        const areaKey = items[0]?.device?.area_id || area;
+        const expanded = expandedAreas.has(areaKey);
+        html.push(`<section class="area"><div class="area-title"><button class="collapse-toggle" data-action="toggle-area" data-area="${attr(areaKey)}" aria-expanded="${expanded}">${expanded ? "▾" : "▸"}</button><h2>${esc(area)}</h2><span class="muted">${items.length} Geräte</span></div>`);
+        if (expanded) for (const item of items) html.push(deviceHtml(item.device, item.entities));
         html.push("</section>");
       }
     }
@@ -247,9 +252,30 @@
     } finally { setBusy(button, false); }
   }
 
+  function applyVisibilityLocally(kind, ids, hidden) {
+    const wanted = new Set(Array.isArray(ids) ? ids : [ids]);
+    config.ui ||= {};
+    const key = kind === "device" ? "hidden_devices" : kind === "entity" ? "hidden_entities" : "hidden_alexa";
+    const current = new Set(config.ui[key] || []);
+    for (const id of wanted) hidden ? current.add(id) : current.delete(id);
+    config.ui[key] = [...current].sort();
+    if (kind === "device") for (const device of model.devices || []) if (wanted.has(device.device_id)) { device.hidden = hidden; for (const entity of device.entities || []) entity.hidden = hidden || entity.hidden_directly; }
+    if (kind === "entity") for (const device of model.devices || []) for (const entity of device.entities || []) if (wanted.has(entity.entity_id)) { entity.hidden_directly = hidden; entity.hidden = hidden || device.hidden; }
+    if (kind === "alexa") for (const item of model.alexa_only || []) if (wanted.has(item.key)) item.hidden = hidden;
+  }
+
   async function changeVisibility(kind, ids, hidden) {
-    await request("/api/device-overview/visibility", {method: "POST", body: JSON.stringify({kind, ids: Array.isArray(ids) ? ids : [ids], hidden})});
-    await load(false);
+    const values = Array.isArray(ids) ? ids : [ids];
+    applyVisibilityLocally(kind, values, hidden);
+    render();
+    try {
+      const result = await request("/api/device-overview/visibility", {method: "POST", body: JSON.stringify({kind, ids: values, hidden})});
+      if (result.configuration) config = result.configuration;
+    } catch (error) {
+      applyVisibilityLocally(kind, values, !hidden);
+      render();
+      throw error;
+    }
   }
 
   async function renameAlexa(key) {
@@ -377,7 +403,9 @@
   async function handleAction(button) {
     const action = button.dataset.action;
     try {
-      if (action === "hide-device") await changeVisibility("device", button.dataset.device, true);
+      if (action === "toggle-area") { const id = button.dataset.area; expandedAreas.has(id) ? expandedAreas.delete(id) : expandedAreas.add(id); render(); }
+      else if (action === "toggle-device") { const id = button.dataset.device; expandedDevices.has(id) ? expandedDevices.delete(id) : expandedDevices.add(id); render(); }
+      else if (action === "hide-device") await changeVisibility("device", button.dataset.device, true);
       else if (action === "show-device") await changeVisibility("device", button.dataset.device, false);
       else if (action === "hide-entity") await changeVisibility("entity", button.dataset.entity, true);
       else if (action === "show-entity") await changeVisibility("entity", button.dataset.entity, false);

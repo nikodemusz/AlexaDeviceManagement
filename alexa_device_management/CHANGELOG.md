@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.15.0-rc1
+
+- **Übersicht**: Bereiche und Geräte sind standardmäßig eingeklappt und können unabhängig aufgeklappt werden.
+- **Performance**: Ausblenden und Einblenden aktualisiert die Ansicht sofort, ohne die vollständige Geräteliste neu zu laden.
+
 ## 2.14.1-rc1
 
 - **Changelog**: Der vollständige Versionsverlauf bleibt dauerhaft in `CHANGELOG.md`; neue Versionseinträge werden oben ergänzt.
