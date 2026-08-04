@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.15.1-rc1
+
+- **Fix**: Versionsgebundene CSS- und JavaScript-URLs verhindern, dass Home-Assistant-Ingress nach einem Update die alte Geräteoberfläche aus dem Browsercache lädt.
+- **Fix**: Der aufklappbare Gerätekopf verwendet das korrekte dreispaltige Layout für Pfeil, Gerätedaten und Aktionen.
+
 ## 2.15.0-rc1
 
 - **Übersicht**: Bereiche und Geräte sind standardmäßig eingeklappt und können unabhängig aufgeklappt werden.
