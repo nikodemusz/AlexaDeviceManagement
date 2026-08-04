@@ -1,0 +1,79 @@
+name: Restore complete changelog
+
+on:
+  push:
+    paths:
+      - .github/workflows/restore-full-changelog.yml
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Restore full changelog and bump patch version
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path("alexa_device_management")
+          legacy_path = root / "CHANGELOG-legacy.md"
+          legacy = legacy_path.read_text(encoding="utf-8")
+          prefix = "# Changelog\n\n"
+          if legacy.startswith(prefix):
+              legacy = legacy[len(prefix):]
+
+          new_entries = """# Changelog
+
+## 2.14.2-rc1
+
+- **Fix**: Der vollständige Versionsverlauf befindet sich wieder direkt in `CHANGELOG.md`; neue Versionseinträge werden ausschließlich oben ergänzt.
+
+## 2.14.1-rc1
+
+- **Changelog**: Die fehlenden Release-Einträge für die zusammengeführte Geräteverwaltung wurden ergänzt.
+
+## 2.14.0-rc1
+
+- **Geräteverwaltung**: Home-Assistant-Export und Alexa-Gerätebestand sind in einer gemeinsamen Ansicht zusammengeführt.
+- **Status**: Vorhandene, ausstehende, doppelte und nur noch in Alexa vorhandene Endpunkte werden pro Entity angezeigt.
+- **Ausblenden**: HA-Geräte, einzelne Entities und reine Alexa-Endpunkte können unabhängig vom Export verborgen werden.
+- **Bedienung**: Export, Alexa-Gruppen, Umbenennen, Löschen, Deployment und Synchronisierung sind auf einer Seite verfügbar.
+
+## 2.13.0-rc1
+
+- **Event Gateway**: Neue, geänderte und entfernte Endpunkte werden offiziell per `AddOrUpdateReport` und `DeleteReport` an Alexa gemeldet.
+- **Konfiguration**: Skill-Zugangsdaten werden ausschließlich über `!secret` referenziert.
+- **Lifecycle**: Änderungen werden gegen den zuletzt tatsächlich ausgerollten Bestand berechnet.
+
+"""
+          (root / "CHANGELOG.md").write_text(new_entries + legacy, encoding="utf-8")
+
+          config_path = root / "config.yaml"
+          config = config_path.read_text(encoding="utf-8").replace('version: "2.14.1-rc1"', 'version: "2.14.2-rc1"')
+          config_path.write_text(config, encoding="utf-8")
+
+          server_path = root / "rootfs/opt/alexa_device_management/web/server_extended.py"
+          server = server_path.read_text(encoding="utf-8").replace('APP_VERSION = "2.14.1-rc1"', 'APP_VERSION = "2.14.2-rc1"')
+          server_path.write_text(server, encoding="utf-8")
+
+          legacy_path.unlink()
+          Path(".github/workflows/restore-full-changelog.yml").unlink()
+          PY
+
+      - name: Commit repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: restore complete changelog and bump 2.14.2-rc1"
+          git push
