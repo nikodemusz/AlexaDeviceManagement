@@ -88,6 +88,26 @@ class AlexaYamlGenerator:
             if settings["enabled"]
         }
 
+        selected_by_device: dict[str, list[str]] = {}
+        for entity_id, settings in selected.items():
+            device_id = settings.get("device_id", "")
+            if device_id:
+                selected_by_device.setdefault(device_id, []).append(entity_id)
+        duplicates = {
+            device_id: entity_ids
+            for device_id, entity_ids in selected_by_device.items()
+            if len(entity_ids) > 1
+        }
+        if duplicates:
+            details = "; ".join(
+                f"{device_id}: {', '.join(sorted(entity_ids))}"
+                for device_id, entity_ids in sorted(duplicates.items())
+            )
+            raise GeneratorValidationError(
+                "Mehrere Alexa-Endpunkte für dasselbe Home-Assistant-Gerät sind aktiviert. "
+                "Bitte genau eine Haupt-Entity auswählen: " + details
+            )
+
         smart_home: dict[str, Any] = {
             "locale": normalized["locale"],
             "filter": {"include_entities": sorted(selected)},
@@ -210,6 +230,7 @@ class AlexaYamlGenerator:
                 "name": str(raw_settings.get("name") or "").strip(),
                 "description": str(raw_settings.get("description") or "").strip(),
                 "display_category": category,
+                "device_id": str(raw_settings.get("device_id") or "").strip(),
             }
 
         raw_gateway = data.get("event_gateway")
