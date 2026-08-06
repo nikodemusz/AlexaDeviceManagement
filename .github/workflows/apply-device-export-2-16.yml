@@ -25,14 +25,13 @@ jobs:
           root = Path('alexa_device_management')
           web = root / 'rootfs/opt/alexa_device_management/web'
 
-          # UI: one-click device export and one primary entity per HA device.
           js_path = web / 'static/device_overview.js'
           js = js_path.read_text(encoding='utf-8')
           js = js.replace(
               'enabled: false, name: "", description: "", display_category: "", alexa_group: ""',
               'enabled: false, name: "", description: "", display_category: "", alexa_group: "", device_id: ""'
           )
-          anchor = '''  function statusBadge(status) {'''
+          anchor = '  function statusBadge(status) {'
           helper = '''  function selectedEntities(device) {\n    return (device.entities || []).filter(entity => entityConfig(entity.entity_id).enabled);\n  }\n\n  function primaryEntity(device) {\n    return (device.entities || []).find(isUseful) || (device.entities || []).find(entity => !isTechnical(entity));\n  }\n\n  function applyDeviceExport(device, enabled) {\n    const candidate = primaryEntity(device);\n    if (enabled && !candidate) throw new Error("Für dieses Gerät wurde keine sinnvolle Alexa-Entität gefunden.");\n    for (const entity of device.entities || []) {\n      const settings = entityConfig(entity.entity_id);\n      settings.enabled = Boolean(enabled && entity === candidate);\n      settings.device_id = device.device_id;\n      entity.export.enabled = settings.enabled;\n    }\n    if (enabled) {\n      const settings = entityConfig(candidate.entity_id);\n      settings.name ||= suggestedName(candidate, device);\n      settings.display_category ||= suggestedCategory(candidate);\n      settings.alexa_group ||= device.area_name || "";\n    }\n    return candidate;\n  }\n\n'''
           if helper not in js:
               js = js.replace(anchor, helper + anchor)
@@ -48,10 +47,7 @@ jobs:
           if old_prepare not in js:
               raise SystemExit('prepareDevice anchor not found')
           js = js.replace(old_prepare, new_prepare)
-          js = js.replace(
-              'else if (action === "prepare-device") await prepareDevice(button.dataset.device);',
-              'else if (action === "toggle-device-export") await toggleDeviceExport(button.dataset.device);'
-          )
+          js = js.replace('else if (action === "prepare-device") await prepareDevice(button.dataset.device);', 'else if (action === "toggle-device-export") await toggleDeviceExport(button.dataset.device);')
 
           old_toggle = '''    if (target.classList.contains("export-toggle")) {\n      settings.enabled = target.checked;\n      if (target.checked) {\n        const device = model.devices.find(item => item.entities.some(entity => entity.entity_id === entityId));\n        const entity = device?.entities.find(item => item.entity_id === entityId);\n        if (device && entity) { settings.name ||= suggestedName(entity, device); settings.display_category ||= suggestedCategory(entity); }\n      }\n      await saveConfig(); await load(false);\n    }'''
           new_toggle = '''    if (target.classList.contains("export-toggle")) {\n      const device = model.devices.find(item => item.entities.some(entity => entity.entity_id === entityId));\n      const entity = device?.entities.find(item => item.entity_id === entityId);\n      if (device && entity && target.checked) {\n        for (const other of device.entities || []) {\n          const otherSettings = entityConfig(other.entity_id);\n          otherSettings.enabled = other.entity_id === entityId;\n          otherSettings.device_id = device.device_id;\n          other.export.enabled = otherSettings.enabled;\n        }\n        settings.name ||= suggestedName(entity, device);\n        settings.display_category ||= suggestedCategory(entity);\n        settings.alexa_group ||= device.area_name || "";\n      } else {\n        settings.enabled = false;\n        if (entity) entity.export.enabled = false;\n      }\n      render();\n      await saveConfig();\n    }'''
@@ -72,7 +68,6 @@ jobs:
           js = js.replace(old_bulk, new_bulk)
           js_path.write_text(js, encoding='utf-8')
 
-          # Backend: attach HA device IDs to old and new configuration before saving/deploying.
           ha_export = web / 'ha_export.py'
           text = ha_export.read_text(encoding='utf-8')
           text = text.replace('import re\nfrom typing import Any', 'import re\nfrom copy import deepcopy\nfrom typing import Any')
@@ -85,29 +80,20 @@ jobs:
           text = text.replace('requested = await request.json()\n        saved = _save_state(requested)', 'requested = await enrich_device_ids(await request.json())\n        saved = _save_state(requested)')
           ha_export.write_text(text, encoding='utf-8')
 
-          # Deployment path also enriches persisted legacy configurations.
           ha_control = web / 'ha_control.py'
           text = ha_control.read_text(encoding='utf-8')
-          text = text.replace(
-              'if isinstance(payload, dict) and payload:\n            ha_export._save_state(payload)\n\n        persisted = ha_export._load_state()',
-              'if isinstance(payload, dict) and payload:\n            ha_export._save_state(await ha_export.enrich_device_ids(payload))\n\n        persisted = await ha_export.enrich_device_ids(ha_export._load_state())\n        ha_export._save_state(persisted)'
-          )
+          text = text.replace('if isinstance(payload, dict) and payload:\n            ha_export._save_state(payload)\n\n        persisted = ha_export._load_state()', 'if isinstance(payload, dict) and payload:\n            ha_export._save_state(await ha_export.enrich_device_ids(payload))\n\n        persisted = await ha_export.enrich_device_ids(ha_export._load_state())\n        ha_export._save_state(persisted)')
           ha_control.write_text(text, encoding='utf-8')
 
-          # Generator hard-stop for multiple selected entities of one physical device.
           generator = web / 'yaml_generator.py'
           text = generator.read_text(encoding='utf-8')
-          anchor = '''        smart_home: dict[str, Any] = {'''
+          anchor = '        smart_home: dict[str, Any] = {'
           validation = '''        selected_by_device: dict[str, list[str]] = {}\n        for entity_id, settings in selected.items():\n            device_id = settings.get("device_id", "")\n            if device_id:\n                selected_by_device.setdefault(device_id, []).append(entity_id)\n        duplicates = {device_id: ids for device_id, ids in selected_by_device.items() if len(ids) > 1}\n        if duplicates:\n            details = "; ".join(f"{device_id}: {', '.join(sorted(ids))}" for device_id, ids in sorted(duplicates.items()))\n            raise GeneratorValidationError(\n                "Mehrere Alexa-Endpunkte für dasselbe Home-Assistant-Gerät sind aktiviert. "\n                "Bitte genau eine Haupt-Entity auswählen: " + details\n            )\n\n'''
           if validation not in text:
               text = text.replace(anchor, validation + anchor)
-          text = text.replace(
-              '"display_category": category,\n            }',
-              '"display_category": category,\n                "device_id": str(raw_settings.get("device_id") or "").strip(),\n            }'
-          )
+          text = text.replace('"display_category": category,\n            }', '"display_category": category,\n                "device_id": str(raw_settings.get("device_id") or "").strip(),\n            }')
           generator.write_text(text, encoding='utf-8')
 
-          # Regression test.
           tests = root / 'tests/test_yaml_generator.py'
           text = tests.read_text(encoding='utf-8')
           test = '''\n    def test_rejects_multiple_entities_for_same_device(self) -> None:\n        generator = AlexaYamlGenerator(pathlib.Path("/tmp/alexa.yaml"))\n        with self.assertRaisesRegex(GeneratorValidationError, "genau eine Haupt-Entity"):\n            generator.generate({\n                "entities": {\n                    "light.controller": {"enabled": True, "device_id": "device-1"},\n                    "switch.controller": {"enabled": True, "device_id": "device-1"},\n                }\n            })\n'''
@@ -115,10 +101,8 @@ jobs:
               text = text.replace('\n    def test_rejects_invalid_entity_id', test + '\n    def test_rejects_invalid_entity_id')
           tests.write_text(text, encoding='utf-8')
 
-          # Version and cache busting: development version, no RC suffix.
           config = root / 'config.yaml'
-          text = config.read_text(encoding='utf-8')
-          text = text.replace('version: "2.15.1-rc1"', 'version: "2.16.0"')
+          text = config.read_text(encoding='utf-8').replace('version: "2.15.1-rc1"', 'version: "2.16.0"')
           config.write_text(text, encoding='utf-8')
 
           server = web / 'server_extended.py'
@@ -126,9 +110,7 @@ jobs:
           server.write_text(text, encoding='utf-8')
 
           html = web / 'static/device_overview.html'
-          text = html.read_text(encoding='utf-8')
-          text = text.replace('device_overview.css?v=2.15.1-rc1', 'device_overview.css?v=2.16.0')
-          text = text.replace('device_overview.js?v=2.15.1-rc1', 'device_overview.js?v=2.16.0')
+          text = html.read_text(encoding='utf-8').replace('device_overview.css?v=2.15.1-rc1', 'device_overview.css?v=2.16.0').replace('device_overview.js?v=2.15.1-rc1', 'device_overview.js?v=2.16.0')
           html.write_text(text, encoding='utf-8')
 
           changelog = root / 'CHANGELOG.md'
@@ -138,7 +120,6 @@ jobs:
               text = text.replace('# Changelog\n\n', '# Changelog\n\n' + entry, 1)
           changelog.write_text(text, encoding='utf-8')
 
-          # Remove abandoned trigger files and this one-shot workflow.
           for path in Path('.github').glob('device-export-trigger*.txt'):
               path.unlink()
           Path('.github/workflows/apply-device-export-2-16.yml').unlink()
@@ -154,3 +135,5 @@ jobs:
           git add -A
           git commit -m "feat: add device-level Alexa export safeguards"
           git push
+
+# trigger: 2
