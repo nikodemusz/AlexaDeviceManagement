@@ -1,0 +1,129 @@
+name: Apply device-level export toggle
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch device overview
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('alexa_device_management')
+          js_path = root / 'rootfs/opt/alexa_device_management/web/static/device_overview.js'
+          html_path = root / 'rootfs/opt/alexa_device_management/web/static/device_overview.html'
+          css_path = root / 'rootfs/opt/alexa_device_management/web/static/device_overview.css'
+          config_path = root / 'config.yaml'
+          server_path = root / 'rootfs/opt/alexa_device_management/web/server_extended.py'
+          changelog_path = root / 'CHANGELOG.md'
+
+          js = js_path.read_text(encoding='utf-8')
+
+          old_device = '''  function deviceHtml(device, entities) {
+    const expanded = expandedDevices.has(device.device_id);
+    return `<section class="device status-${attr(device.status)} ${device.hidden ? "hidden-item" : ""}" data-device-section="${attr(device.device_id)}"><div class="device-head"><button class="collapse-toggle" data-action="toggle-device" data-device="${attr(device.device_id)}" aria-expanded="${expanded}">${expanded ? "▾" : "▸"}</button><div class="device-title"><div class="device-name">${esc(device.name)}</div><div class="device-meta">${esc(device.area_name || "Kein Bereich")}${device.floor_name ? ` • ${esc(device.floor_name)}` : ""}${device.manufacturer ? ` • ${esc(device.manufacturer)}` : ""}${device.model ? ` • ${esc(device.model)}` : ""}</div></div><div class="device-actions"><button class="button primary small" data-action="prepare-device" data-device="${attr(device.device_id)}">Sinnvoll aktivieren</button><button class="button secondary small" data-action="${device.hidden ? "show-device" : "hide-device"}" data-device="${attr(device.device_id)}">${device.hidden ? "Einblenden" : "Gerät ausblenden"}</button></div></div>${expanded ? `<div class="entity-grid">${entities.map(entity => entityHtml(entity, device)).join("")}</div>` : ""}</section>`;
+  }
+'''
+          new_device = '''  function deviceHtml(device, entities) {
+    const expanded = expandedDevices.has(device.device_id);
+    const exportedEntities = (device.entities || []).filter(entity => entity.export.enabled);
+    const exported = exportedEntities.length > 0;
+    const exportInfo = exported
+      ? ` • Export: ${exportedEntities.map(entity => entity.name || entity.entity_id).join(", ")}`
+      : "";
+    return `<section class="device status-${attr(device.status)} ${device.hidden ? "hidden-item" : ""}" data-device-section="${attr(device.device_id)}"><div class="device-head"><button class="collapse-toggle" data-action="toggle-device" data-device="${attr(device.device_id)}" aria-expanded="${expanded}">${expanded ? "▾" : "▸"}</button><div class="device-title"><div class="device-name">${esc(device.name)}</div><div class="device-meta">${esc(device.area_name || "Kein Bereich")}${device.floor_name ? ` • ${esc(device.floor_name)}` : ""}${device.manufacturer ? ` • ${esc(device.manufacturer)}` : ""}${device.model ? ` • ${esc(device.model)}` : ""}${esc(exportInfo)}</div></div><div class="device-actions"><button class="button ${exported ? "secondary" : "primary"} small" data-action="toggle-device-export" data-device="${attr(device.device_id)}">${exported ? "Export entfernen" : "Gerät exportieren"}</button><button class="button secondary small" data-action="${device.hidden ? "show-device" : "hide-device"}" data-device="${attr(device.device_id)}">${device.hidden ? "Einblenden" : "Gerät ausblenden"}</button></div></div>${expanded ? `<div class="entity-grid">${entities.map(entity => entityHtml(entity, device)).join("")}</div>` : ""}</section>`;
+  }
+'''
+          if old_device not in js:
+              raise SystemExit('deviceHtml block not found')
+          js = js.replace(old_device, new_device)
+
+          old_prepare = '''  async function prepareDevice(deviceId) {
+    const device = (model.devices || []).find(item => item.device_id === deviceId); if (!device) return;
+    const candidate = device.entities.find(isUseful) || device.entities.find(entity => !isTechnical(entity));
+    if (!candidate) return message("Für dieses Gerät wurde keine sinnvolle Alexa-Entität gefunden.", "err");
+    for (const entity of device.entities) entityConfig(entity.entity_id).enabled = false;
+    const settings = entityConfig(candidate.entity_id);
+    settings.enabled = true; settings.name ||= suggestedName(candidate, device); settings.display_category ||= suggestedCategory(candidate);
+    await saveConfig(); message(`${candidate.entity_id} wurde für Alexa vorbereitet.`); await load(false);
+  }
+'''
+          new_prepare = '''  async function toggleDeviceExport(deviceId) {
+    const device = (model.devices || []).find(item => item.device_id === deviceId); if (!device) return;
+    const exported = (device.entities || []).some(entity => entity.export.enabled);
+
+    if (exported) {
+      for (const entity of device.entities || []) {
+        const settings = entityConfig(entity.entity_id);
+        settings.enabled = false;
+        entity.export.enabled = false;
+      }
+      render();
+      await saveConfig();
+      message(`Der Export für „${device.name}“ wurde entfernt.`);
+      return;
+    }
+
+    const candidate = device.entities.find(isUseful) || device.entities.find(entity => !isTechnical(entity));
+    if (!candidate) return message("Für dieses Gerät wurde keine sinnvolle Alexa-Haupt-Entity gefunden.", "err");
+
+    for (const entity of device.entities || []) {
+      const settings = entityConfig(entity.entity_id);
+      settings.enabled = false;
+      entity.export.enabled = false;
+    }
+    const settings = entityConfig(candidate.entity_id);
+    settings.enabled = true;
+    settings.name ||= suggestedName(candidate, device);
+    settings.display_category ||= suggestedCategory(candidate);
+    settings.alexa_group ||= device.area_name || "";
+    Object.assign(candidate.export, settings);
+    render();
+    await saveConfig();
+    message(`„${device.name}“ wird über ${candidate.entity_id} exportiert.`);
+  }
+'''
+          if old_prepare not in js:
+              raise SystemExit('prepareDevice block not found')
+          js = js.replace(old_prepare, new_prepare)
+          js = js.replace('else if (action === "prepare-device") await prepareDevice(button.dataset.device);', 'else if (action === "toggle-device-export") await toggleDeviceExport(button.dataset.device);')
+          js_path.write_text(js, encoding='utf-8')
+
+          html = html_path.read_text(encoding='utf-8').replace('device_overview.css?v=2.15.1-rc1', 'device_overview.css?v=2.16.0-rc1').replace('device_overview.js?v=2.15.1-rc1', 'device_overview.js?v=2.16.0-rc1')
+          html_path.write_text(html, encoding='utf-8')
+
+          css = css_path.read_text(encoding='utf-8')
+          if '.device-export-summary' not in css:
+              css += '\n.device-actions .button { white-space: nowrap; }\n'
+          css_path.write_text(css, encoding='utf-8')
+
+          config = config_path.read_text(encoding='utf-8').replace('version: "2.15.1-rc1"', 'version: "2.16.0-rc1"')
+          config_path.write_text(config, encoding='utf-8')
+
+          server = server_path.read_text(encoding='utf-8').replace('APP_VERSION = "2.15.1-rc1"', 'APP_VERSION = "2.16.0-rc1"')
+          server_path.write_text(server, encoding='utf-8')
+
+          changelog = changelog_path.read_text(encoding='utf-8')
+          entry = '# Changelog\n\n## 2.16.0-rc1\n\n- **Geräteexport**: Ganze Home-Assistant-Geräte können direkt im eingeklappten Gerätekopf exportiert oder aus dem Export entfernt werden.\n- **Automatik**: Beim Geräteexport wird eine geeignete Haupt-Entity gewählt und mit Name, Kategorie und Alexa-Gruppe vorbelegt.\n- **Performance**: Der Gerätestatus wird sofort lokal aktualisiert, ohne die vollständige Geräteübersicht neu zu laden.\n\n'
+          if '## 2.16.0-rc1' not in changelog:
+              changelog = entry + changelog.removeprefix('# Changelog\n\n')
+          changelog_path.write_text(changelog, encoding='utf-8')
+          PY
+      - name: Remove temporary workflow
+        run: rm -f .github/workflows/apply-device-export-toggle.yml
+      - name: Commit changes
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "feat: add device-level export toggle"
+          git push
