@@ -15,25 +15,40 @@ _ROOM_KEYS = ("roomName", "groupName", "locationName", "location", "room")
 _DESCRIPTION_KEYS = (
     "description", "friendlyDescription", "displayDescription", "deviceDescription",
 )
+_MAX_NESTED_JSON_LENGTH = 1_000_000
+_MAX_WALK_NODES = 100_000
 
 
-def _parse_nested(value: Any) -> Any:
-    if isinstance(value, str) and value[:1] in ("{", "["):
-        try:
-            return _parse_nested(json.loads(value))
-        except (json.JSONDecodeError, RecursionError):
-            return value
-    if isinstance(value, dict):
-        return {key: _parse_nested(child) for key, child in value.items()}
-    if isinstance(value, list):
-        return [_parse_nested(child) for child in value]
-    return value
+def _nested_json(value: Any) -> Any:
+    """Decode a reasonably sized embedded JSON value without copying payloads."""
+    if not isinstance(value, str):
+        return value
+    stripped = value.lstrip()
+    if not stripped[:1] in ("{", "[") or len(value) > _MAX_NESTED_JSON_LENGTH:
+        return value
+    try:
+        return json.loads(value)
+    except (json.JSONDecodeError, RecursionError):
+        return value
+
+
+def _walk(value: Any):
+    """Iterate over nested Alexa payloads with bounded memory and stack depth."""
+    stack = [value]
+    visited = 0
+    while stack and visited < _MAX_WALK_NODES:
+        current = _nested_json(stack.pop())
+        visited += 1
+        yield current
+        if isinstance(current, dict):
+            stack.extend(reversed(tuple(current.values())))
+        elif isinstance(current, list):
+            stack.extend(reversed(current))
 
 
 def _identifiers(value: Any) -> set[str]:
     result: set[str] = set()
-
-    def walk(current: Any) -> None:
+    for current in _walk(value):
         if isinstance(current, dict):
             for key, child in current.items():
                 normalized = str(key).replace("_", "").lower()
@@ -43,37 +58,37 @@ def _identifiers(value: Any) -> set[str]:
                         result.add(text)
                         if text.startswith("amzn1.alexa.endpoint."):
                             result.add(text.removeprefix("amzn1.alexa.endpoint."))
-                walk(child)
-        elif isinstance(current, list):
-            for child in current:
-                walk(child)
-
-    walk(value)
     return result
 
 
 def _first_text(value: Any, keys: tuple[str, ...]) -> str:
-    if isinstance(value, dict):
+    for current in _walk(value):
+        if not isinstance(current, dict):
+            continue
         for key in keys:
-            text = value.get(key)
+            text = current.get(key)
             if not isinstance(text, (dict, list)) and str(text or "").strip():
                 return str(text).strip()
-        for child in value.values():
-            found = _first_text(child, keys)
-            if found:
-                return found
-    elif isinstance(value, list):
-        for child in value:
-            found = _first_text(child, keys)
-            if found:
-                return found
     return ""
+
+
+def _membership_identifiers(value: Any) -> set[str]:
+    """Read both scalar member IDs and identifier fields in member objects."""
+    result = _identifiers(value)
+    for current in _walk(value):
+        if isinstance(current, (dict, list)) or current is None:
+            continue
+        text = str(current).strip().lower()
+        if text:
+            result.add(text)
+            if text.startswith("amzn1.alexa.endpoint."):
+                result.add(text.removeprefix("amzn1.alexa.endpoint."))
+    return result
 
 
 def _collect_group_members(value: Any) -> dict[str, set[str]]:
     memberships: dict[str, set[str]] = defaultdict(set)
-
-    def walk(current: Any) -> None:
+    for current in _walk(value):
         if isinstance(current, dict):
             room = str(
                 current.get("groupName") or current.get("roomName")
@@ -84,15 +99,15 @@ def _collect_group_members(value: Any) -> dict[str, set[str]]:
                 for key in ("applianceIds", "applianceKeys", "associatedApplianceIds", "members")
             )
             if room and group_hint:
-                for identifier in _identifiers(current):
+                # Only inspect membership fields. Walking the entire group subtree
+                # here made large Phoenix responses quadratic and could OOM the app.
+                member_values = [
+                    current.get(key)
+                    for key in ("applianceIds", "applianceKeys", "associatedApplianceIds", "members")
+                    if key in current
+                ]
+                for identifier in _membership_identifiers(member_values):
                     memberships[identifier].add(room)
-            for child in current.values():
-                walk(child)
-        elif isinstance(current, list):
-            for child in current:
-                walk(child)
-
-    walk(value)
     return memberships
 
 
@@ -107,8 +122,7 @@ def _description(device: dict[str, Any]) -> str:
 
 
 def _enrich(devices: list[dict[str, Any]], phoenix: Any) -> None:
-    parsed = _parse_nested(phoenix)
-    memberships = _collect_group_members(parsed)
+    memberships = _collect_group_members(phoenix)
 
     for device in devices:
         original_family = str(device.get("family") or "").strip()
