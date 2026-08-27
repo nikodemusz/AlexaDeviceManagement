@@ -6,6 +6,8 @@
   let savePromise = Promise.resolve();
   const expandedAreas = new Set();
   const expandedDevices = new Set();
+  const visibleAreaCounts = new Map();
+  const AREA_PAGE_SIZE = 25;
 
   const STATUS_TEXT = {
     synced: "Synchronisiert",
@@ -225,7 +227,13 @@
         const areaKey = items[0]?.device?.area_id || area;
         const expanded = expandedAreas.has(areaKey);
         html.push(`<section class="area"><div class="area-title"><button class="collapse-toggle" data-action="toggle-area" data-area="${attr(areaKey)}" aria-expanded="${expanded}">${expanded ? "▾" : "▸"}</button><h2>${esc(area)}</h2><span class="muted">${items.length} Geräte</span></div>`);
-        if (expanded) for (const item of items) html.push(deviceHtml(item.device, item.entities));
+        if (expanded) {
+          const visibleCount = Math.min(visibleAreaCounts.get(areaKey) || AREA_PAGE_SIZE, items.length);
+          for (const item of items.slice(0, visibleCount)) html.push(deviceHtml(item.device, item.entities));
+          if (visibleCount < items.length) {
+            html.push(`<button class="button secondary area-more" data-action="more-area" data-area="${attr(areaKey)}">Weitere ${Math.min(AREA_PAGE_SIZE, items.length - visibleCount)} Geräte anzeigen</button>`);
+          }
+        }
         html.push("</section>");
       }
     }
@@ -403,7 +411,13 @@
   async function handleAction(button) {
     const action = button.dataset.action;
     try {
-      if (action === "toggle-area") { const id = button.dataset.area; expandedAreas.has(id) ? expandedAreas.delete(id) : expandedAreas.add(id); render(); }
+      if (action === "toggle-area") {
+        const id = button.dataset.area;
+        if (expandedAreas.has(id)) { expandedAreas.delete(id); visibleAreaCounts.delete(id); }
+        else { expandedAreas.add(id); visibleAreaCounts.set(id, AREA_PAGE_SIZE); }
+        render();
+      }
+      else if (action === "more-area") { const id = button.dataset.area; visibleAreaCounts.set(id, (visibleAreaCounts.get(id) || AREA_PAGE_SIZE) + AREA_PAGE_SIZE); render(); }
       else if (action === "toggle-device") { const id = button.dataset.device; expandedDevices.has(id) ? expandedDevices.delete(id) : expandedDevices.add(id); render(); }
       else if (action === "hide-device") await changeVisibility("device", button.dataset.device, true);
       else if (action === "show-device") await changeVisibility("device", button.dataset.device, false);
