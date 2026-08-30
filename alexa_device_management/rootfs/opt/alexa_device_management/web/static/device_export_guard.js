@@ -1,8 +1,9 @@
 (() => {
   function relabel() {
     for (const button of document.querySelectorAll('button[data-action="prepare-device"]')) {
-      button.textContent = "Gerät exportieren";
-      button.title = "Wählt automatisch genau eine geeignete Haupt-Entity für Alexa aus";
+      if (button.textContent !== "Gerät exportieren") button.textContent = "Gerät exportieren";
+      const title = "Wählt automatisch genau eine geeignete Haupt-Entity für Alexa aus";
+      if (button.title !== title) button.title = title;
     }
   }
 
