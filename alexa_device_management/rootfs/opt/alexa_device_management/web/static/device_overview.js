@@ -7,7 +7,9 @@
   const expandedAreas = new Set();
   const expandedDevices = new Set();
   const visibleAreaCounts = new Map();
+  const areaRenderTokens = new Map();
   const AREA_PAGE_SIZE = 25;
+  const AREA_FRAME_SIZE = 3;
 
   const STATUS_TEXT = {
     synced: "Synchronisiert",
@@ -225,19 +227,47 @@
     const expanded = expandedAreas.has(areaKey);
     button.textContent = expanded ? "▾" : "▸";
     button.setAttribute("aria-expanded", String(expanded));
-    if (!expanded) { container.replaceChildren(); return; }
+    const token = Symbol(areaKey);
+    areaRenderTokens.set(areaKey, token);
+    container.replaceChildren();
+    if (!expanded) return;
 
-    const items = areaItems(areaKey);
-    const visibleCount = Math.min(visibleAreaCounts.get(areaKey) || AREA_PAGE_SIZE, items.length);
-    container.innerHTML = items.slice(0, visibleCount).map(item => deviceHtml(item.device, item.entities)).join("");
-    if (visibleCount < items.length) {
-      const more = document.createElement("button");
-      more.className = "button secondary area-more";
-      more.dataset.action = "more-area";
-      more.dataset.area = areaKey;
-      more.textContent = `Weitere ${Math.min(AREA_PAGE_SIZE, items.length - visibleCount)} Geräte anzeigen`;
-      container.append(more);
-    }
+    const loading = document.createElement("div");
+    loading.className = "loading area-loading";
+    loading.textContent = "Geräte werden eingeblendet…";
+    container.append(loading);
+
+    requestAnimationFrame(() => {
+      if (areaRenderTokens.get(areaKey) !== token || !expandedAreas.has(areaKey)) return;
+      const items = areaItems(areaKey);
+      const visibleCount = Math.min(visibleAreaCounts.get(areaKey) || AREA_PAGE_SIZE, items.length);
+      const visibleItems = items.slice(0, visibleCount);
+      container.replaceChildren();
+      let index = 0;
+
+      function appendFrame() {
+        if (areaRenderTokens.get(areaKey) !== token || !expandedAreas.has(areaKey)) return;
+        const fragment = document.createDocumentFragment();
+        for (const item of visibleItems.slice(index, index + AREA_FRAME_SIZE)) {
+          const template = document.createElement("template");
+          template.innerHTML = deviceHtml(item.device, item.entities);
+          fragment.append(template.content);
+        }
+        index += AREA_FRAME_SIZE;
+        container.append(fragment);
+        if (index < visibleItems.length) { requestAnimationFrame(appendFrame); return; }
+        if (visibleCount < items.length) {
+          const more = document.createElement("button");
+          more.className = "button secondary area-more";
+          more.dataset.action = "more-area";
+          more.dataset.area = areaKey;
+          more.textContent = `Weitere ${Math.min(AREA_PAGE_SIZE, items.length - visibleCount)} Geräte anzeigen`;
+          container.append(more);
+        }
+      }
+
+      requestAnimationFrame(appendFrame);
+    });
   }
 
   function alexaOnlyHtml(item) {

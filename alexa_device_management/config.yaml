@@ -1,6 +1,6 @@
 # https://developers.home-assistant.io/docs/apps/configuration#app-configuration
 name: Alexa Device Management
-version: "2.16.3"
+version: "2.16.4"
 slug: alexa_device_management
 description: Standalone web UI to manage Amazon Alexa smart home devices and configure Home Assistant devices for Alexa.
 url: "https://github.com/nikodemusz/AlexaDeviceManagement/tree/main/alexa_device_management"

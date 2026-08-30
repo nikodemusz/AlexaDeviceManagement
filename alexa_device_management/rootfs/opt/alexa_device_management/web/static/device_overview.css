@@ -19,7 +19,7 @@ main{max-width:1600px;margin:auto;padding:16px}.workflow{margin-bottom:12px}
 .bulk-actions{margin-bottom:12px}.summary{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 .summary-card{min-width:120px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 11px;font-size:12px}.summary-card strong{display:block;font-size:18px}
 .message{padding:11px;border-radius:9px;margin:10px 0;white-space:pre-wrap}.message.ok{background:var(--ok-bg);color:var(--ok)}.message.err{background:var(--danger-bg);color:var(--danger)}.message.warn{background:var(--warn-bg);color:var(--warn)}
-.area{margin-bottom:16px}.area-title{display:flex;gap:8px;align-items:center;margin:8px 2px}.area-title h2{font-size:18px;margin:0}.muted{color:var(--muted);font-size:12px}
+.area{margin-bottom:16px;contain:layout style paint}.area-title{display:flex;gap:8px;align-items:center;margin:8px 2px}.area-title h2{font-size:18px;margin:0}.muted{color:var(--muted);font-size:12px}
 .device{background:var(--panel);border:1px solid var(--line);border-radius:13px;overflow:hidden;margin-bottom:10px;box-shadow:0 1px 4px rgba(15,23,42,.04)}
 .device.status-synced{border-left:4px solid #22c55e}.device.status-pending{border-left:4px solid #f59e0b}.device.status-problem{border-left:4px solid #ef4444}.device.hidden-item{opacity:.78}
 .device-head{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center;padding:13px 14px;background:#f8fafc}.device-name{font-weight:750}.device-meta{font-size:12px;color:var(--muted);margin-top:3px}
@@ -29,7 +29,7 @@ main{max-width:1600px;margin:auto;padding:16px}.workflow{margin-bottom:12px}
 .badges{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}.badge{border-radius:999px;padding:3px 7px;font-size:11px;background:#e2e8f0;color:#475569}.badge.synced{background:#dcfce7;color:#166534}.badge.pending{background:#fef3c7;color:#92400e}.badge.problem{background:#fee2e2;color:#991b1b}.badge.alexa{background:#e0f2fe;color:#075985}.badge.hidden-badge{background:#f1f5f9;color:#475569}
 .fields{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}.field.full{grid-column:1/-1}.field label{display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:4px}.entity-actions{margin-top:9px}
 .alexa-match{margin-top:9px;padding-top:9px;border-top:1px dashed #cbd5e1}.alexa-line{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:start}.alexa-name{font-weight:650}.alexa-meta{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
-.alexa-only-title{margin:20px 0 8px}.alexa-only-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px}.alexa-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}.alexa-card.orphaned{border-color:#fca5a5;background:var(--danger-bg)}.alexa-card.hidden-item{opacity:.65}
+.alexa-only-title{margin:20px 0 8px}.alexa-only-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px;contain:layout style paint}.alexa-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;content-visibility:auto;contain-intrinsic-size:auto 180px}.alexa-card.orphaned{border-color:#fca5a5;background:var(--danger-bg)}.alexa-card.hidden-item{opacity:.65}
 .empty,.loading{background:var(--panel);border:1px dashed var(--line);border-radius:12px;padding:24px;text-align:center;color:var(--muted)}
 dialog{width:min(760px,94vw);border:0;border-radius:14px;padding:0;background:var(--panel);color:var(--text)}dialog::backdrop{background:rgba(15,23,42,.45)}
 .dialog-shell header,.dialog-shell footer{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:13px 15px;border-bottom:1px solid var(--line)}.dialog-shell footer{border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end}.dialog-shell h2{margin:0;font-size:18px}.dialog-content{padding:14px}.dialog-shell.wide{width:min(1000px,94vw)}
@@ -42,3 +42,4 @@ pre{margin:0;max-height:70vh;overflow:auto;padding:16px;background:#111827;color
 .collapse-toggle { border: 0; background: transparent; cursor: pointer; font-size: 1.25rem; line-height: 1; padding: .25rem .4rem; color: inherit; }
 .area-title, .device-head { align-items: center; }
 .device-title { flex: 1; min-width: 0; }
+.area-loading { margin: 8px 0; padding: 12px; }
