@@ -205,6 +205,41 @@
     return `<section class="device status-${attr(device.status)} ${device.hidden ? "hidden-item" : ""}" data-device-section="${attr(device.device_id)}"><div class="device-head"><button class="collapse-toggle" data-action="toggle-device" data-device="${attr(device.device_id)}" aria-expanded="${expanded}">${expanded ? "▾" : "▸"}</button><div class="device-title"><div class="device-name">${esc(device.name)}</div><div class="device-meta">${esc(device.area_name || "Kein Bereich")}${device.floor_name ? ` • ${esc(device.floor_name)}` : ""}${device.manufacturer ? ` • ${esc(device.manufacturer)}` : ""}${device.model ? ` • ${esc(device.model)}` : ""}</div></div><div class="device-actions"><button class="button primary small" data-action="prepare-device" data-device="${attr(device.device_id)}">Sinnvoll aktivieren</button><button class="button secondary small" data-action="${device.hidden ? "show-device" : "hide-device"}" data-device="${attr(device.device_id)}">${device.hidden ? "Einblenden" : "Gerät ausblenden"}</button></div></div>${expanded ? `<div class="entity-grid">${entities.map(entity => entityHtml(entity, device)).join("")}</div>` : ""}</section>`;
   }
 
+  function areaItems(areaKey) {
+    const filter = filters();
+    const items = [];
+    for (const device of model.devices || []) {
+      const key = device.area_id || device.area_name || "Ohne Bereich";
+      if (key !== areaKey) continue;
+      const entities = (device.entities || []).filter(entity => entityMatchesFilter(entity, device, filter));
+      if (entities.length) items.push({device, entities});
+    }
+    return items;
+  }
+
+  function renderArea(button, areaKey) {
+    const section = button.closest("section.area");
+    const container = section?.querySelector(".area-devices");
+    if (!container) return;
+
+    const expanded = expandedAreas.has(areaKey);
+    button.textContent = expanded ? "▾" : "▸";
+    button.setAttribute("aria-expanded", String(expanded));
+    if (!expanded) { container.replaceChildren(); return; }
+
+    const items = areaItems(areaKey);
+    const visibleCount = Math.min(visibleAreaCounts.get(areaKey) || AREA_PAGE_SIZE, items.length);
+    container.innerHTML = items.slice(0, visibleCount).map(item => deviceHtml(item.device, item.entities)).join("");
+    if (visibleCount < items.length) {
+      const more = document.createElement("button");
+      more.className = "button secondary area-more";
+      more.dataset.action = "more-area";
+      more.dataset.area = areaKey;
+      more.textContent = `Weitere ${Math.min(AREA_PAGE_SIZE, items.length - visibleCount)} Geräte anzeigen`;
+      container.append(more);
+    }
+  }
+
   function alexaOnlyHtml(item) {
     return `<article class="alexa-card ${item.status === "orphaned" ? "orphaned" : ""} ${item.hidden ? "hidden-item" : ""}"><div class="alexa-name">${esc(item.name)}</div><div class="badges">${statusBadge(item.status)}${item.hidden ? '<span class="badge hidden-badge">ausgeblendet</span>' : ""}</div><div class="alexa-meta">${esc(item.source)}${item.family ? ` • ${esc(item.family)}` : ""}${item.skill ? ` • ${esc(item.skill)}` : ""}<br>${esc(item.serial)}${item.groups?.length ? `<br>Gruppen: ${esc(item.groups.join(", "))}` : ""}</div><div class="alexa-actions"><button class="button secondary small" data-action="${item.hidden ? "show-alexa" : "hide-alexa"}" data-key="${attr(item.key)}">${item.hidden ? "Einblenden" : "Ausblenden"}</button><button class="button secondary small" data-action="rename-alexa" data-key="${attr(item.key)}">Umbenennen</button><button class="button danger small" data-action="delete-alexa" data-key="${attr(item.key)}">Löschen</button></div></article>`;
   }
@@ -227,6 +262,7 @@
         const areaKey = items[0]?.device?.area_id || area;
         const expanded = expandedAreas.has(areaKey);
         html.push(`<section class="area"><div class="area-title"><button class="collapse-toggle" data-action="toggle-area" data-area="${attr(areaKey)}" aria-expanded="${expanded}">${expanded ? "▾" : "▸"}</button><h2>${esc(area)}</h2><span class="muted">${items.length} Geräte</span></div>`);
+        html.push('<div class="area-devices">');
         if (expanded) {
           const visibleCount = Math.min(visibleAreaCounts.get(areaKey) || AREA_PAGE_SIZE, items.length);
           for (const item of items.slice(0, visibleCount)) html.push(deviceHtml(item.device, item.entities));
@@ -234,7 +270,7 @@
             html.push(`<button class="button secondary area-more" data-action="more-area" data-area="${attr(areaKey)}">Weitere ${Math.min(AREA_PAGE_SIZE, items.length - visibleCount)} Geräte anzeigen</button>`);
           }
         }
-        html.push("</section>");
+        html.push("</div></section>");
       }
     }
     const alexaOnly = (model.alexa_only || []).filter(item => alexaOnlyMatchesFilter(item, filter));
@@ -415,9 +451,14 @@
         const id = button.dataset.area;
         if (expandedAreas.has(id)) { expandedAreas.delete(id); visibleAreaCounts.delete(id); }
         else { expandedAreas.add(id); visibleAreaCounts.set(id, AREA_PAGE_SIZE); }
-        render();
+        renderArea(button, id);
       }
-      else if (action === "more-area") { const id = button.dataset.area; visibleAreaCounts.set(id, (visibleAreaCounts.get(id) || AREA_PAGE_SIZE) + AREA_PAGE_SIZE); render(); }
+      else if (action === "more-area") {
+        const id = button.dataset.area;
+        visibleAreaCounts.set(id, (visibleAreaCounts.get(id) || AREA_PAGE_SIZE) + AREA_PAGE_SIZE);
+        const areaToggle = button.closest("section.area")?.querySelector('button[data-action="toggle-area"]');
+        if (areaToggle) renderArea(areaToggle, id);
+      }
       else if (action === "toggle-device") { const id = button.dataset.device; expandedDevices.has(id) ? expandedDevices.delete(id) : expandedDevices.add(id); render(); }
       else if (action === "hide-device") await changeVisibility("device", button.dataset.device, true);
       else if (action === "show-device") await changeVisibility("device", button.dataset.device, false);
