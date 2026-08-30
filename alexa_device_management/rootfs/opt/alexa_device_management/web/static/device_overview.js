@@ -7,9 +7,8 @@
   const expandedAreas = new Set();
   const expandedDevices = new Set();
   const visibleAreaCounts = new Map();
-  const areaRenderTokens = new Map();
+  const renderedAreaItems = new Map();
   const AREA_PAGE_SIZE = 25;
-  const AREA_FRAME_SIZE = 3;
 
   const STATUS_TEXT = {
     synced: "Synchronisiert",
@@ -270,43 +269,32 @@
     const expanded = expandedAreas.has(areaKey);
     button.textContent = expanded ? "▾" : "▸";
     button.setAttribute("aria-expanded", String(expanded));
-    const token = Symbol(areaKey);
-    areaRenderTokens.set(areaKey, token);
     container.replaceChildren();
     if (!expanded) return;
-
-    const loading = document.createElement("div");
-    loading.className = "loading area-loading";
-    loading.textContent = "Geräte werden eingeblendet…";
-    container.append(loading);
-
-    requestAnimationFrame(() => {
-      if (areaRenderTokens.get(areaKey) !== token || !expandedAreas.has(areaKey)) return;
-      const items = areaItems(areaKey);
-      const visibleCount = Math.min(visibleAreaCounts.get(areaKey) || AREA_PAGE_SIZE, items.length);
-      const visibleItems = items.slice(0, visibleCount);
-      container.replaceChildren();
-      let index = 0;
-
-      function appendFrame() {
-        if (areaRenderTokens.get(areaKey) !== token || !expandedAreas.has(areaKey)) return;
-        const fragment = document.createDocumentFragment();
-        for (const item of visibleItems.slice(index, index + AREA_FRAME_SIZE)) fragment.append(deviceSummaryElement(item.device));
-        index += AREA_FRAME_SIZE;
-        container.append(fragment);
-        if (index < visibleItems.length) { requestAnimationFrame(appendFrame); return; }
-        if (visibleCount < items.length) {
-          const more = document.createElement("button");
-          more.className = "button secondary area-more";
-          more.dataset.action = "more-area";
-          more.dataset.area = areaKey;
-          more.textContent = `Weitere ${Math.min(AREA_PAGE_SIZE, items.length - visibleCount)} Geräte anzeigen`;
-          container.append(more);
-        }
-      }
-
-      requestAnimationFrame(appendFrame);
-    });
+    const items = renderedAreaItems.get(areaKey) || [];
+    const visibleCount = Math.min(visibleAreaCounts.get(areaKey) || AREA_PAGE_SIZE, items.length);
+    const list = document.createElement("div");
+    list.className = "simple-device-list";
+    for (const item of items.slice(0, visibleCount)) {
+      const row = document.createElement("div");
+      row.className = "simple-device-row";
+      const name = document.createElement("strong");
+      name.textContent = String(item.device.name || item.device.device_id || "Unbekanntes Gerät");
+      const detail = document.createElement("span");
+      detail.className = "muted";
+      detail.textContent = `${item.entities.length} Entität${item.entities.length === 1 ? "" : "en"}`;
+      row.append(name, detail);
+      list.append(row);
+    }
+    container.append(list);
+    if (visibleCount < items.length) {
+      const more = document.createElement("button");
+      more.className = "button secondary area-more";
+      more.dataset.action = "more-area";
+      more.dataset.area = areaKey;
+      more.textContent = `Weitere ${Math.min(AREA_PAGE_SIZE, items.length - visibleCount)} Geräte anzeigen`;
+      container.append(more);
+    }
   }
 
   function alexaOnlyHtml(item) {
@@ -326,9 +314,11 @@
       groups.get(area).push({device, entities});
     }
     const html = [];
+    renderedAreaItems.clear();
     if (filter.status !== "alexa_only") {
       for (const [area, items] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], "de"))) {
         const areaKey = items[0]?.device?.area_id || area;
+        renderedAreaItems.set(areaKey, items);
         const expanded = expandedAreas.has(areaKey);
         html.push(`<section class="area"><div class="area-title"><button class="collapse-toggle" data-action="toggle-area" data-area="${attr(areaKey)}" aria-expanded="${expanded}">${expanded ? "▾" : "▸"}</button><h2>${esc(area)}</h2><span class="muted">${items.length} Geräte</span></div>`);
         html.push('<div class="area-devices">');
