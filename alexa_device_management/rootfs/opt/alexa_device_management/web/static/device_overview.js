@@ -278,12 +278,30 @@
     for (const item of items.slice(0, visibleCount)) {
       const row = document.createElement("div");
       row.className = "simple-device-row";
+      row.dataset.deviceRow = String(item.device.device_id || "");
+      const info = document.createElement("div");
       const name = document.createElement("strong");
       name.textContent = String(item.device.name || item.device.device_id || "Unbekanntes Gerät");
       const detail = document.createElement("span");
       detail.className = "muted";
-      detail.textContent = `${item.entities.length} Entität${item.entities.length === 1 ? "" : "en"}`;
-      row.append(name, detail);
+      const selected = item.entities.filter(entity => entity.export?.enabled).length;
+      detail.textContent = `${item.entities.length} Entität${item.entities.length === 1 ? "" : "en"} • ${selected} für Alexa`;
+      info.append(name, detail);
+      const actions = document.createElement("div");
+      actions.className = "device-actions";
+      for (const [action, text, cls] of [
+        ["prepare-device", "Gerät exportieren", "primary"],
+        ["toggle-simple-device", "Entitäten wählen", "secondary"],
+        ["disable-device-export", "Export deaktivieren", "secondary"],
+      ]) {
+        const control = document.createElement("button");
+        control.className = `button ${cls} small`;
+        control.dataset.action = action;
+        control.dataset.device = String(item.device.device_id || "");
+        control.textContent = text;
+        actions.append(control);
+      }
+      row.append(info, actions);
       list.append(row);
     }
     container.append(list);
@@ -322,13 +340,6 @@
         const expanded = expandedAreas.has(areaKey);
         html.push(`<section class="area"><div class="area-title"><button class="collapse-toggle" data-action="toggle-area" data-area="${attr(areaKey)}" aria-expanded="${expanded}">${expanded ? "▾" : "▸"}</button><h2>${esc(area)}</h2><span class="muted">${items.length} Geräte</span></div>`);
         html.push('<div class="area-devices">');
-        if (expanded) {
-          const visibleCount = Math.min(visibleAreaCounts.get(areaKey) || AREA_PAGE_SIZE, items.length);
-          for (const item of items.slice(0, visibleCount)) html.push(deviceHtml(item.device, item.entities));
-          if (visibleCount < items.length) {
-            html.push(`<button class="button secondary area-more" data-action="more-area" data-area="${attr(areaKey)}">Weitere ${Math.min(AREA_PAGE_SIZE, items.length - visibleCount)} Geräte anzeigen</button>`);
-          }
-        }
         html.push("</div></section>");
       }
     }
@@ -338,6 +349,10 @@
       html.push(...alexaOnly.map(alexaOnlyHtml)); html.push("</div>");
     }
     document.getElementById("content").innerHTML = html.length ? html.join("") : '<div class="empty">Keine Geräte entsprechen dem aktuellen Filter.</div>';
+    for (const areaKey of expandedAreas) {
+      const button = document.querySelector(`button[data-action="toggle-area"][data-area="${CSS.escape(areaKey)}"]`);
+      if (button) renderArea(button, areaKey);
+    }
     document.getElementById("btn-login").classList.toggle("hidden", model.alexa_connected);
     document.getElementById("btn-logout").classList.toggle("hidden", !model.alexa_connected);
   }
@@ -416,7 +431,38 @@
     for (const entity of device.entities) entityConfig(entity.entity_id).enabled = false;
     const settings = entityConfig(candidate.entity_id);
     settings.enabled = true; settings.name ||= suggestedName(candidate, device); settings.display_category ||= suggestedCategory(candidate);
-    await saveConfig(); message(`${candidate.entity_id} wurde für Alexa vorbereitet.`); await load(false);
+    for (const entity of device.entities) entity.export.enabled = entity.entity_id === candidate.entity_id;
+    await saveConfig(); message(`${candidate.entity_id} wurde für Alexa vorbereitet.`);
+  }
+
+  async function disableDeviceExport(deviceId) {
+    const device = (model.devices || []).find(item => item.device_id === deviceId); if (!device) return;
+    for (const entity of device.entities) { entityConfig(entity.entity_id).enabled = false; entity.export.enabled = false; }
+    await saveConfig(); message(`Alexa-Export für „${device.name}“ wurde deaktiviert.`);
+  }
+
+  function toggleSimpleDevice(button, deviceId) {
+    const row = button.closest(".simple-device-row");
+    if (!row) return;
+    const existing = row.querySelector(".simple-entity-list");
+    if (existing) { existing.remove(); button.textContent = "Entitäten wählen"; return; }
+    const device = (model.devices || []).find(item => item.device_id === deviceId); if (!device) return;
+    const list = document.createElement("div");
+    list.className = "simple-entity-list";
+    for (const entity of device.entities || []) {
+      const label = document.createElement("label");
+      label.className = "simple-entity-row";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.className = "export-toggle";
+      checkbox.dataset.entity = String(entity.entity_id || "");
+      checkbox.checked = Boolean(entity.export?.enabled);
+      const text = document.createElement("span");
+      text.textContent = `${entity.name || entity.entity_id} (${entity.entity_id})`;
+      label.append(checkbox, text);
+      list.append(label);
+    }
+    row.append(list); button.textContent = "Entitäten schließen";
   }
 
   async function fillEntity(entityId) {
@@ -529,6 +575,8 @@
       else if (action === "delete-alexa") await deleteAlexa(button.dataset.key);
       else if (action === "assign-group") await assignGroup(button.dataset.entity, button.dataset.key);
       else if (action === "prepare-device") await prepareDevice(button.dataset.device);
+      else if (action === "disable-device-export") await disableDeviceExport(button.dataset.device);
+      else if (action === "toggle-simple-device") toggleSimpleDevice(button, button.dataset.device);
       else if (action === "fill-entity") await fillEntity(button.dataset.entity);
     } catch (error) { message(error.message, "err"); }
   }
@@ -541,12 +589,16 @@
     const settings = entityConfig(entityId);
     if (target.classList.contains("export-toggle")) {
       settings.enabled = target.checked;
+      for (const device of model.devices || []) {
+        const entity = (device.entities || []).find(item => item.entity_id === entityId);
+        if (entity?.export) entity.export.enabled = target.checked;
+      }
       if (target.checked) {
         const device = model.devices.find(item => item.entities.some(entity => entity.entity_id === entityId));
         const entity = device?.entities.find(item => item.entity_id === entityId);
         if (device && entity) { settings.name ||= suggestedName(entity, device); settings.display_category ||= suggestedCategory(entity); }
       }
-      await saveConfig(); await load(false);
+      await saveConfig(); message(`${entityId} wurde ${target.checked ? "für Alexa aktiviert" : "deaktiviert"}.`);
     } else if (target.classList.contains("export-category")) { settings.display_category = target.value; scheduleSave(); }
   });
   document.getElementById("content").addEventListener("input", event => {
