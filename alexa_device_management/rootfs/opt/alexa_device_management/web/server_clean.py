@@ -14,7 +14,7 @@ from aiohttp import web
 
 import oh_style_login
 
-APP_VERSION = "2.16.5"
+APP_VERSION = "2.16.6"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 SESSION_PATH = pathlib.Path("/data/alexa_session.json")
