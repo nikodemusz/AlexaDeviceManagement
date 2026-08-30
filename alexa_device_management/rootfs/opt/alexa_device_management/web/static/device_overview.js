@@ -207,6 +207,49 @@
     return `<section class="device status-${attr(device.status)} ${device.hidden ? "hidden-item" : ""}" data-device-section="${attr(device.device_id)}"><div class="device-head"><button class="collapse-toggle" data-action="toggle-device" data-device="${attr(device.device_id)}" aria-expanded="${expanded}">${expanded ? "▾" : "▸"}</button><div class="device-title"><div class="device-name">${esc(device.name)}</div><div class="device-meta">${esc(device.area_name || "Kein Bereich")}${device.floor_name ? ` • ${esc(device.floor_name)}` : ""}${device.manufacturer ? ` • ${esc(device.manufacturer)}` : ""}${device.model ? ` • ${esc(device.model)}` : ""}</div></div><div class="device-actions"><button class="button primary small" data-action="prepare-device" data-device="${attr(device.device_id)}">Sinnvoll aktivieren</button><button class="button secondary small" data-action="${device.hidden ? "show-device" : "hide-device"}" data-device="${attr(device.device_id)}">${device.hidden ? "Einblenden" : "Gerät ausblenden"}</button></div></div>${expanded ? `<div class="entity-grid">${entities.map(entity => entityHtml(entity, device)).join("")}</div>` : ""}</section>`;
   }
 
+  function deviceSummaryElement(device) {
+    const section = document.createElement("section");
+    const safeStatus = String(device.status || "").replace(/[^a-z0-9_-]/gi, "");
+    section.className = `device status-${safeStatus}${device.hidden ? " hidden-item" : ""}`;
+    section.dataset.deviceSection = String(device.device_id || "");
+
+    const head = document.createElement("div");
+    head.className = "device-head";
+    const toggle = document.createElement("button");
+    toggle.className = "collapse-toggle";
+    toggle.dataset.action = "toggle-device";
+    toggle.dataset.device = String(device.device_id || "");
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.textContent = "▸";
+
+    const title = document.createElement("div");
+    title.className = "device-title";
+    const name = document.createElement("div");
+    name.className = "device-name";
+    name.textContent = String(device.name || device.device_id || "Unbekanntes Gerät");
+    const meta = document.createElement("div");
+    meta.className = "device-meta";
+    meta.textContent = [device.area_name || "Kein Bereich", device.floor_name, device.manufacturer, device.model].filter(Boolean).map(String).join(" • ");
+    title.append(name, meta);
+
+    const actions = document.createElement("div");
+    actions.className = "device-actions";
+    const prepare = document.createElement("button");
+    prepare.className = "button primary small";
+    prepare.dataset.action = "prepare-device";
+    prepare.dataset.device = String(device.device_id || "");
+    prepare.textContent = "Sinnvoll aktivieren";
+    const visibility = document.createElement("button");
+    visibility.className = "button secondary small";
+    visibility.dataset.action = device.hidden ? "show-device" : "hide-device";
+    visibility.dataset.device = String(device.device_id || "");
+    visibility.textContent = device.hidden ? "Einblenden" : "Gerät ausblenden";
+    actions.append(prepare, visibility);
+    head.append(toggle, title, actions);
+    section.append(head);
+    return section;
+  }
+
   function areaItems(areaKey) {
     const filter = filters();
     const items = [];
@@ -248,11 +291,7 @@
       function appendFrame() {
         if (areaRenderTokens.get(areaKey) !== token || !expandedAreas.has(areaKey)) return;
         const fragment = document.createDocumentFragment();
-        for (const item of visibleItems.slice(index, index + AREA_FRAME_SIZE)) {
-          const template = document.createElement("template");
-          template.innerHTML = deviceHtml(item.device, item.entities);
-          fragment.append(template.content);
-        }
+        for (const item of visibleItems.slice(index, index + AREA_FRAME_SIZE)) fragment.append(deviceSummaryElement(item.device));
         index += AREA_FRAME_SIZE;
         container.append(fragment);
         if (index < visibleItems.length) { requestAnimationFrame(appendFrame); return; }
