@@ -459,7 +459,17 @@
       checkbox.checked = Boolean(entity.export?.enabled);
       const text = document.createElement("span");
       text.textContent = `${entity.name || entity.entity_id} (${entity.entity_id})`;
-      label.append(checkbox, text);
+      const nameField = document.createElement("label");
+      nameField.className = "simple-alexa-name";
+      const nameCaption = document.createElement("span");
+      nameCaption.textContent = "Alexa-Name";
+      const nameInput = document.createElement("input");
+      nameInput.className = "export-name";
+      nameInput.dataset.entity = String(entity.entity_id || "");
+      nameInput.value = String(entity.export?.name || "");
+      nameInput.placeholder = suggestedName(entity, device);
+      nameField.append(nameCaption, nameInput);
+      label.append(checkbox, text, nameField);
       list.append(label);
     }
     row.append(list); button.textContent = "Entitäten schließen";
