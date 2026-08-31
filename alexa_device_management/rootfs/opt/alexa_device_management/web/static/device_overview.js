@@ -450,27 +450,41 @@
     const list = document.createElement("div");
     list.className = "simple-entity-list";
     for (const entity of device.entities || []) {
-      const label = document.createElement("label");
-      label.className = "simple-entity-row";
+      const entityRow = document.createElement("div");
+      entityRow.className = "simple-entity-row";
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
       checkbox.className = "export-toggle";
       checkbox.dataset.entity = String(entity.entity_id || "");
       checkbox.checked = Boolean(entity.export?.enabled);
-      const text = document.createElement("span");
+      checkbox.setAttribute("aria-label", `${entity.name || entity.entity_id} für Alexa exportieren`);
+      const text = document.createElement("label");
+      text.className = "simple-entity-identity";
+      text.htmlFor = `export-${String(entity.entity_id || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+      checkbox.id = text.htmlFor;
       text.textContent = `${entity.name || entity.entity_id} (${entity.entity_id})`;
-      const nameField = document.createElement("label");
+      const nameField = document.createElement("div");
       nameField.className = "simple-alexa-name";
-      const nameCaption = document.createElement("span");
-      nameCaption.textContent = "Alexa-Name";
+      const nameCaption = document.createElement("label");
+      nameCaption.textContent = "Name bei Alexa";
       const nameInput = document.createElement("input");
       nameInput.className = "export-name";
       nameInput.dataset.entity = String(entity.entity_id || "");
+      nameInput.id = `alexa-name-${String(entity.entity_id || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+      nameCaption.htmlFor = nameInput.id;
       nameInput.value = String(entity.export?.name || "");
       nameInput.placeholder = suggestedName(entity, device);
-      nameField.append(nameCaption, nameInput);
-      label.append(checkbox, text, nameField);
-      list.append(label);
+      nameInput.setAttribute("aria-label", `Alexa-Name für ${entity.name || entity.entity_id}`);
+      const suggestion = document.createElement("button");
+      suggestion.type = "button";
+      suggestion.className = "button secondary small simple-name-suggestion";
+      suggestion.dataset.action = "suggest-simple-name";
+      suggestion.dataset.entity = String(entity.entity_id || "");
+      suggestion.dataset.suggestion = suggestedName(entity, device);
+      suggestion.textContent = "Vorschlag";
+      nameField.append(nameCaption, nameInput, suggestion);
+      entityRow.append(checkbox, text, nameField);
+      list.append(entityRow);
     }
     row.append(list); button.textContent = "Entitäten schließen";
   }
@@ -587,6 +601,14 @@
       else if (action === "prepare-device") await prepareDevice(button.dataset.device);
       else if (action === "disable-device-export") await disableDeviceExport(button.dataset.device);
       else if (action === "toggle-simple-device") toggleSimpleDevice(button, button.dataset.device);
+      else if (action === "suggest-simple-name") {
+        const entityId = button.dataset.entity;
+        const value = button.dataset.suggestion || "";
+        entityConfig(entityId).name = value;
+        const input = button.closest(".simple-alexa-name")?.querySelector(".export-name");
+        if (input) input.value = value;
+        await saveConfig(); message(`Alexa-Name für ${entityId} wurde übernommen.`);
+      }
       else if (action === "fill-entity") await fillEntity(button.dataset.entity);
     } catch (error) { message(error.message, "err"); }
   }
@@ -606,7 +628,12 @@
       if (target.checked) {
         const device = model.devices.find(item => item.entities.some(entity => entity.entity_id === entityId));
         const entity = device?.entities.find(item => item.entity_id === entityId);
-        if (device && entity) { settings.name ||= suggestedName(entity, device); settings.display_category ||= suggestedCategory(entity); }
+        if (device && entity) {
+          settings.name ||= suggestedName(entity, device);
+          settings.display_category ||= suggestedCategory(entity);
+          const nameInput = target.closest(".simple-entity-row")?.querySelector(".export-name");
+          if (nameInput && !nameInput.value) nameInput.value = settings.name;
+        }
       }
       await saveConfig(); message(`${entityId} wurde ${target.checked ? "für Alexa aktiviert" : "deaktiviert"}.`);
     } else if (target.classList.contains("export-category")) { settings.display_category = target.value; scheduleSave(); }
