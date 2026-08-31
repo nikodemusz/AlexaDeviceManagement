@@ -74,21 +74,19 @@ class AlexaYamlGeneratorTests(unittest.TestCase):
             "alexa_skill_client_id",
         )
 
-    def test_rejects_multiple_entities_for_same_device(self) -> None:
+    def test_allows_multiple_entities_for_same_device(self) -> None:
         generator = AlexaYamlGenerator(pathlib.Path("/tmp/alexa.yaml"))
-        with self.assertRaisesRegex(GeneratorValidationError, "genau eine Haupt-Entity"):
-            generator.generate({
-                "entities": {
-                    "light.controller": {
-                        "enabled": True,
-                        "device_id": "device-1",
-                    },
-                    "switch.controller": {
-                        "enabled": True,
-                        "device_id": "device-1",
-                    },
-                }
-            })
+        result = generator.generate({
+            "entities": {
+                "light.controller": {"enabled": True, "device_id": "device-1"},
+                "sensor.controller_power": {"enabled": True, "device_id": "device-1"},
+            }
+        })
+        self.assertEqual(result.selected_count, 2)
+        self.assertEqual(
+            result.document["alexa"]["smart_home"]["filter"]["include_entities"],
+            ["light.controller", "sensor.controller_power"],
+        )
 
     def test_allows_entities_from_different_devices(self) -> None:
         generator = AlexaYamlGenerator(pathlib.Path("/tmp/alexa.yaml"))

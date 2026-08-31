@@ -2,7 +2,7 @@
   function relabel() {
     for (const button of document.querySelectorAll('button[data-action="prepare-device"]')) {
       if (button.textContent !== "Gerät exportieren") button.textContent = "Gerät exportieren";
-      const title = "Wählt automatisch genau eine geeignete Haupt-Entity für Alexa aus";
+      const title = "Aktiviert eine geeignete Entität; weitere Entitäten können anschließend ergänzt werden";
       if (button.title !== title) button.title = title;
     }
   }
