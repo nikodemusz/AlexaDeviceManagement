@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.16.12
+
+- **Bedienung**: „Event Gateway synchronisieren“ heißt jetzt verständlicher „Änderungen an Alexa senden“.
+- **Tooltips**: Alle statischen und dynamischen Schaltflächen erklären ihre Wirkung beim Darüberfahren oder per Tastaturfokus in einem einheitlichen, gut lesbaren Tooltip.
+- **Event Gateway**: Der Tooltip grenzt den offiziellen Add-/Update-/Delete-Abgleich ausdrücklich vom Schreiben der `alexa.yaml` und vom Home-Assistant-Neustart ab.
+
 ## 2.16.11
 
 - **Fix Export**: Der Home-Assistant-Konfigurationsordner wird über den aktuellen App-Mount `homeassistant_config` schreibbar und explizit unter `/config` eingebunden. Dadurch schreibt das Deployment wieder in die tatsächliche Datei `/config/packages/alexa.yaml` statt in einen veralteten beziehungsweise falschen Containerpfad.

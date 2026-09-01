@@ -10,6 +10,43 @@
   const renderedAreaItems = new Map();
   const AREA_PAGE_SIZE = 25;
 
+  const BUTTON_TOOLTIPS = {
+    "btn-login": "Verbindet die App mit deinem Amazon-Alexa-Konto.",
+    "btn-logout": "Löscht die gespeicherte Alexa-Web-Sitzung aus der App.",
+    "btn-refresh": "Lädt Geräte, Entitäten, Räume und den Alexa-Bestand neu.",
+    "btn-settings": "Öffnet Einstellungen für Event Gateway, Alexa-Gruppen und Export.",
+    "btn-preview": "Zeigt die erzeugte alexa.yaml an, ohne eine Datei zu schreiben.",
+    "btn-deploy": "Speichert die Auswahl in /config/packages/alexa.yaml und prüft anschließend die Home-Assistant-Konfiguration.",
+    "btn-restart": "Startet Home Assistant neu, damit die ausgerollte Alexa-YAML aktiv wird.",
+    "btn-event-sync": "Sendet vorgemerkte neue und geänderte Endpunkte per AddOrUpdateReport sowie entfernte Endpunkte per DeleteReport an die offizielle Alexa Event Gateway API. Schreibt keine alexa.yaml.",
+    "btn-group-sync": "Ordnet bereits vorhandene Alexa-Endpunkte den konfigurierten Alexa-Gruppen zu.",
+    "btn-enable-useful": "Aktiviert alle aktuell sichtbaren, für Alexa sinnvoll erkannten Entitäten.",
+    "btn-disable-visible": "Deaktiviert den Alexa-Export für alle aktuell sichtbaren Entitäten.",
+    "btn-hide-technical": "Blendet aktuell sichtbare Diagnose-, Energie- und andere technische Entitäten aus.",
+    "btn-unhide-visible": "Blendet die durch den aktuellen Filter gefundenen Einträge wieder ein.",
+    "btn-save-settings": "Speichert die Event-Gateway-, Gruppen- und Exporteinstellungen.",
+    "btn-close-yaml": "Schließt die YAML-Vorschau."
+  };
+  const ACTION_TOOLTIPS = {
+    "toggle-area": "Öffnet oder schließt diesen Raum.",
+    "more-area": "Zeigt den nächsten Block von Geräten in diesem Raum.",
+    "toggle-device": "Öffnet oder schließt die Entitäten dieses Geräts.",
+    "prepare-device": "Aktiviert automatisch eine geeignete Entität dieses Geräts. Weitere Entitäten können danach manuell ergänzt werden.",
+    "disable-device-export": "Deaktiviert alle Entitäten dieses Geräts für Alexa.",
+    "toggle-simple-device": "Öffnet oder schließt die manuelle Entitäts- und Namensauswahl.",
+    "hide-device": "Blendet das Gerät in dieser Verwaltung aus, ohne es aus Home Assistant zu löschen.",
+    "show-device": "Blendet das Gerät in dieser Verwaltung wieder ein.",
+    "hide-entity": "Blendet diese Entität in der Verwaltung aus.",
+    "show-entity": "Blendet diese Entität in der Verwaltung wieder ein.",
+    "hide-alexa": "Blendet diesen Alexa-Endpunkt nur in der Verwaltung aus.",
+    "show-alexa": "Blendet diesen Alexa-Endpunkt in der Verwaltung wieder ein.",
+    "rename-alexa": "Ändert den Namen des bereits bei Alexa vorhandenen Endpunkts.",
+    "delete-alexa": "Löscht den bereits bei Alexa vorhandenen Endpunkt.",
+    "assign-group": "Ordnet diesen Alexa-Endpunkt der angegebenen Alexa-Gruppe zu.",
+    "fill-entity": "Übernimmt den automatisch ermittelten Alexa-Namen und die passende Kategorie.",
+    "suggest-simple-name": "Übernimmt den vorgeschlagenen Alexa-Namen in das weiterhin editierbare Namensfeld."
+  };
+
   const STATUS_TEXT = {
     synced: "Synchronisiert",
     pending: "In Alexa ausstehend",
@@ -60,6 +97,40 @@
       button.disabled = false;
       button.textContent = button.dataset.oldText || button.textContent;
     }
+  }
+
+  function buttonTooltipText(element) {
+    if (!element) return "";
+    if (BUTTON_TOOLTIPS[element.id]) return BUTTON_TOOLTIPS[element.id];
+    if (ACTION_TOOLTIPS[element.dataset?.action]) return ACTION_TOOLTIPS[element.dataset.action];
+    if (element.matches('a[href$="/debug"]')) return "Öffnet Diagnoseinformationen für die Fehlersuche.";
+    if (element.value === "cancel" || element.textContent.trim() === "Schließen") return "Schließt dieses Fenster ohne weitere Aktion.";
+    return element.title || "";
+  }
+
+  function showButtonTooltip(element) {
+    const tooltip = document.getElementById("button-tooltip");
+    const text = buttonTooltipText(element);
+    if (!tooltip || !text) return;
+    tooltip.textContent = text;
+    tooltip.classList.add("visible");
+    tooltip.setAttribute("aria-hidden", "false");
+    element.setAttribute("aria-describedby", "button-tooltip");
+    const rect = element.getBoundingClientRect();
+    const tipRect = tooltip.getBoundingClientRect();
+    const left = Math.max(12, Math.min(rect.left + (rect.width - tipRect.width) / 2, window.innerWidth - tipRect.width - 12));
+    const below = rect.bottom + 8;
+    const top = below + tipRect.height <= window.innerHeight - 8 ? below : Math.max(8, rect.top - tipRect.height - 8);
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+  }
+
+  function hideButtonTooltip(element) {
+    const tooltip = document.getElementById("button-tooltip");
+    if (!tooltip) return;
+    tooltip.classList.remove("visible");
+    tooltip.setAttribute("aria-hidden", "true");
+    element?.removeAttribute("aria-describedby");
   }
 
   function entityConfig(entityId) {
@@ -615,6 +686,22 @@
 
   document.getElementById("content").addEventListener("click", event => {
     const button = event.target.closest("button[data-action]"); if (button) handleAction(button);
+  });
+  document.addEventListener("pointerover", event => {
+    const element = event.target.closest("button, a.button");
+    if (element) showButtonTooltip(element);
+  });
+  document.addEventListener("pointerout", event => {
+    const element = event.target.closest("button, a.button");
+    if (element && !element.contains(event.relatedTarget)) hideButtonTooltip(element);
+  });
+  document.addEventListener("focusin", event => {
+    const element = event.target.closest("button, a.button");
+    if (element) showButtonTooltip(element);
+  });
+  document.addEventListener("focusout", event => {
+    const element = event.target.closest("button, a.button");
+    if (element) hideButtonTooltip(element);
   });
   document.getElementById("content").addEventListener("change", async event => {
     const target = event.target, entityId = target.dataset.entity; if (!entityId) return;
