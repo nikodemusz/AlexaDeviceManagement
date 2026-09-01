@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.16.15
+
+- **Fix 403**: Die Home-Assistant-Konfigurationsprüfung verwendet nicht mehr den für Apps mit Standardrolle verbotenen Supervisor-Endpunkt `/core/check`, sondern den freigegebenen Core-REST-Endpunkt `/api/config/core/check_config`.
+- **Berechtigungen**: Für die Prüfung ist keine zusätzliche Supervisor-Managerrolle nötig; die vorhandene, engere Freigabe `homeassistant_api: true` genügt.
+- **Fehlerausgabe**: Das REST-Ergebnis `valid` beziehungsweise konkrete Inhalte aus `errors` werden korrekt ausgewertet und angezeigt.
+
 ## 2.16.14
 
 - **Fix Deployment**: Eine neu installierte oder aktualisierte Event-Gateway-Custom-Integration wird nicht mehr sofort in `alexa.yaml` referenziert. Die App fordert zunächst den notwendigen Home-Assistant-Neustart an und setzt das Deployment danach fort.

@@ -288,18 +288,23 @@ async def _ha_post(path: str, timeout: int = 120) -> tuple[int, dict[str, Any] |
 
 def _result_message(body: dict[str, Any] | list[Any] | str) -> str:
     if isinstance(body, dict):
-        return str(body.get("message") or body.get("error") or body)
+        return str(body.get("message") or body.get("errors") or body.get("error") or body)
     if isinstance(body, list):
         return "Home-Assistant-Dienst wurde ausgeführt."
     return str(body or "Unbekannte Antwort")
 
 
 async def check_config() -> dict[str, Any]:
-    status, body = await _supervisor_post("/core/check", timeout=180)
+    status, body = await _ha_post("/config/core/check_config", timeout=180)
+    valid = (
+        200 <= status < 300
+        and isinstance(body, dict)
+        and body.get("result") == "valid"
+    )
     return {
-        "ok": 200 <= status < 300,
+        "ok": valid,
         "status": status,
-        "message": _result_message(body),
+        "message": "Home-Assistant-Konfiguration ist gültig." if valid else _result_message(body),
         "response": body,
     }
 
