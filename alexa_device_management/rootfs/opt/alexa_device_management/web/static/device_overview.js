@@ -179,10 +179,14 @@
     clearTimeout(saveTimer);
     if (!config) return Promise.resolve();
     const snapshot = JSON.parse(JSON.stringify(config));
-    savePromise = savePromise.then(async () => {
+    savePromise = savePromise.catch(() => {}).then(async () => {
       try {
         const result = await request("/api/ha-export/autosave", {method: "POST", body: JSON.stringify(snapshot)});
-        config = result.configuration || config;
+        if (result.configuration?.updated_at) config.updated_at = result.configuration.updated_at;
+        for (const [entityId, saved] of Object.entries(result.configuration?.entities || {})) {
+          const current = config.entities?.[entityId];
+          if (current && saved?.device_id) current.device_id = saved.device_id;
+        }
       } catch (error) {
         message(`Autosave fehlgeschlagen: ${error.message}`, "err");
         throw error;
@@ -459,7 +463,7 @@
     render();
     try {
       const result = await request("/api/device-overview/visibility", {method: "POST", body: JSON.stringify({kind, ids: values, hidden})});
-      if (result.configuration) config = result.configuration;
+      if (result.configuration?.ui) config.ui = result.configuration.ui;
     } catch (error) {
       applyVisibilityLocally(kind, values, !hidden);
       render();
@@ -575,7 +579,7 @@
       await saveConfig();
       const result = await request("/api/ha-export/deploy", {method: "POST", body: JSON.stringify(config)});
       const event = result.alexa_event_sync;
-      message(`Konfiguration ausgerollt: ${result.selected_count ?? result.selected ?? 0} Entitäten.` + (event?.pending ? `\nEvent Gateway vorgemerkt: ${(event.pending_add_or_update || []).length} Updates, ${(event.pending_delete || []).length} Löschungen.` : ""));
+      message(`Konfiguration geschrieben und geprüft: ${result.selected_count ?? result.selected ?? 0} Entitäten.\nDatei: ${result.path || "/config/packages/alexa.yaml"}` + (event?.pending ? `\nEvent Gateway vorgemerkt: ${(event.pending_add_or_update || []).length} Updates, ${(event.pending_delete || []).length} Löschungen.` : ""));
       await load(false);
     } catch (error) { message(`Deployment fehlgeschlagen: ${error.message}`, "err"); }
     finally { setBusy(button, false); }

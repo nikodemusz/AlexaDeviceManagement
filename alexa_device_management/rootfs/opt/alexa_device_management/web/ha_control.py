@@ -15,13 +15,43 @@ from aiohttp import web
 
 import ha_export
 import server_clean
-from yaml_generator import GeneratorValidationError
+from yaml_generator import GeneratorValidationError, load_yaml_with_secrets
 
 SUPERVISOR_BASE_URL = "http://supervisor"
 HA_API_BASE_URL = "http://supervisor/core/api"
 DEPLOY_STATUS_PATH = pathlib.Path("/data/alexa_device_management/deploy_status.json")
 LIFECYCLE_STATUS_PATH = pathlib.Path("/data/alexa_device_management/lifecycle_status.json")
 _ENTITY_ID_RE = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$", re.IGNORECASE)
+
+
+def verify_deployed_configuration(path: pathlib.Path, config: dict[str, Any]) -> list[str]:
+    """Verify entity selection and custom names from the file visible after deployment."""
+    document = load_yaml_with_secrets(path.read_text(encoding="utf-8"))
+    smart_home = document.get("alexa", {}).get("smart_home", {}) if isinstance(document, dict) else {}
+    deployed = smart_home.get("filter", {}).get("include_entities", [])
+    deployed_entities = {str(entity_id) for entity_id in deployed} if isinstance(deployed, list) else set()
+    raw_entities = config.get("entities", {}) if isinstance(config, dict) else {}
+    expected_entities = {
+        str(entity_id) for entity_id, settings in raw_entities.items()
+        if isinstance(settings, dict) and settings.get("enabled")
+    }
+    if deployed_entities != expected_entities:
+        missing = sorted(expected_entities - deployed_entities)
+        stale = sorted(deployed_entities - expected_entities)
+        raise OSError(f"alexa.yaml verification failed: missing={missing}, stale={stale}")
+
+    deployed_config = smart_home.get("entity_config", {})
+    deployed_config = deployed_config if isinstance(deployed_config, dict) else {}
+    wrong_names = []
+    for entity_id in expected_entities:
+        expected_name = str(raw_entities[entity_id].get("name") or "").strip()
+        actual = deployed_config.get(entity_id, {})
+        actual_name = str(actual.get("name") or "").strip() if isinstance(actual, dict) else ""
+        if expected_name and actual_name != expected_name:
+            wrong_names.append(entity_id)
+    if wrong_names:
+        raise OSError(f"alexa.yaml name verification failed: {sorted(wrong_names)}")
+    return sorted(deployed_entities)
 
 
 def _atomic_write_bytes(path: pathlib.Path, content: bytes) -> None:
@@ -296,6 +326,7 @@ async def checked_deploy(request: web.Request) -> web.Response:
         enabled_entities = _enabled_entities(persisted)
         removed_entities = previous_enabled - enabled_entities
         deployment = ha_export.YAML_GENERATOR.deploy(persisted)
+        deployed_entities = verify_deployed_configuration(target, persisted)
         check = await check_config()
         if not check["ok"]:
             if previous_bytes is None:
@@ -322,6 +353,7 @@ async def checked_deploy(request: web.Request) -> web.Response:
             "ok": True, "saved": True, "deployed": True, "rolled_back": False,
             "path": deployment.path, "backup": deployment.backup, "yaml": deployment.yaml_text,
             "selected": deployment.selected_count, "selected_count": deployment.selected_count,
+            "deployed_entities": deployed_entities,
             "check": check, "alexa_cleanup": alexa_cleanup, "restart_required": True,
         }
         _write_deploy_status({
