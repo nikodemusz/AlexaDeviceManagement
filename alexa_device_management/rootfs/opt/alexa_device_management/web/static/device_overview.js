@@ -581,7 +581,12 @@
       const event = result.alexa_event_sync;
       message(`Konfiguration geschrieben und geprüft: ${result.selected_count ?? result.selected ?? 0} Entitäten.\nDatei: ${result.path || "/config/packages/alexa.yaml"}` + (event?.pending ? `\nEvent Gateway vorgemerkt: ${(event.pending_add_or_update || []).length} Updates, ${(event.pending_delete || []).length} Löschungen.` : ""));
       await load(false);
-    } catch (error) { message(`Deployment fehlgeschlagen: ${error.message}`, "err"); }
+    } catch (error) {
+      const restartHint = error.body?.restart_required ? "\nBitte jetzt „HA neu starten“ und danach erneut ausrollen." : "";
+      const checkDetail = error.body?.check?.message && !error.message.includes(error.body.check.message)
+        ? `\nHome Assistant: ${error.body.check.message}` : "";
+      message(`Deployment fehlgeschlagen: ${error.message}${checkDetail}${restartHint}`, "err");
+    }
     finally { setBusy(button, false); }
   }
 

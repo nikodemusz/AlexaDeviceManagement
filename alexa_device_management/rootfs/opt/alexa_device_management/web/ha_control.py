@@ -336,10 +336,14 @@ async def checked_deploy(request: web.Request) -> web.Response:
                     pass
             else:
                 _atomic_write_bytes(target, previous_bytes)
+            check_detail = str(check.get("message") or "Unbekannter Home-Assistant-Prüffehler")
             result = {
                 "ok": False, "saved": False, "deployed": False, "rolled_back": True,
                 "check": check, "backup": deployment.backup,
-                "error": "Home-Assistant-Konfigurationsprüfung fehlgeschlagen; die bisherige Datei wurde wiederhergestellt.",
+                "error": (
+                    "Home-Assistant-Konfigurationsprüfung fehlgeschlagen; die bisherige Datei wurde "
+                    f"wiederhergestellt. Ursache: {check_detail}"
+                ),
             }
             _write_deploy_status({
                 "state": "failed", "started_at": started_at, "finished_at": int(time.time()),

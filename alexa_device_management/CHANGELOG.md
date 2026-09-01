@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.16.14
+
+- **Fix Deployment**: Eine neu installierte oder aktualisierte Event-Gateway-Custom-Integration wird nicht mehr sofort in `alexa.yaml` referenziert. Die App fordert zunächst den notwendigen Home-Assistant-Neustart an und setzt das Deployment danach fort.
+- **Fehlerdiagnose**: Die vollständige Meldung der Home-Assistant-Konfigurationsprüfung wird in der Geräteoberfläche angezeigt, statt nur den allgemeinen Rollback-Hinweis auszugeben.
+- **Sicherheit**: Beim erforderlichen Event-Gateway-Bootstrap bleibt die bestehende `alexa.yaml` unverändert; erst nach geladenem Custom Component wird geschrieben und geprüft.
+
 ## 2.16.13
 
 - **Fix Export**: Ältere Autosave-Antworten ersetzen nicht mehr das gesamte aktuelle Browsermodell und können dadurch keine zwischenzeitlich geänderten Checkboxen oder Alexa-Namen mehr zurücksetzen.

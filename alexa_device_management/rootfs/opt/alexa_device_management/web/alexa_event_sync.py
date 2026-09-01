@@ -158,7 +158,31 @@ def install(ha_control: Any) -> None:
         else:
             previously_deployed = support._entities_from_yaml(ha_export.ALEXA_YAML_PATH)
 
-        component = support.deploy_component()
+        config_before = ha_export._load_state()
+        settings_before = support._event_settings(config_before)
+        if settings_before["enabled"]:
+            component = support.deploy_component()
+            if component.get("restart_required"):
+                return web.json_response({
+                    "ok": False,
+                    "deployed": False,
+                    "rolled_back": False,
+                    "bootstrap_required": True,
+                    "restart_required": True,
+                    "component": component,
+                    "error": (
+                        "Die Event-Gateway-Komponente wurde installiert oder aktualisiert. "
+                        "Home Assistant muss sie zuerst durch einen Neustart laden. Danach die "
+                        "Konfiguration erneut ausrollen. alexa.yaml wurde noch nicht verändert."
+                    ),
+                }, status=409)
+        else:
+            component = {
+                "installed": (support.COMPONENT_TARGET / "manifest.json").exists(),
+                "path": str(support.COMPONENT_TARGET),
+                "changed_files": [],
+                "restart_required": False,
+            }
         response = await original_checked_deploy(request)
         if response.status >= 300:
             return response
