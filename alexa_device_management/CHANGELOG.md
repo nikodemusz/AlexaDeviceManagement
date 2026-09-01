@@ -1,5 +1,72 @@
 # Changelog
 
+## 2.16.12
+
+- **Bedienung**: „Event Gateway synchronisieren“ heißt jetzt verständlicher „Änderungen an Alexa senden“.
+- **Tooltips**: Alle statischen und dynamischen Schaltflächen erklären ihre Wirkung beim Darüberfahren oder per Tastaturfokus in einem einheitlichen, gut lesbaren Tooltip.
+- **Event Gateway**: Der Tooltip grenzt den offiziellen Add-/Update-/Delete-Abgleich ausdrücklich vom Schreiben der `alexa.yaml` und vom Home-Assistant-Neustart ab.
+
+## 2.16.11
+
+- **Fix Export**: Der Home-Assistant-Konfigurationsordner wird über den aktuellen App-Mount `homeassistant_config` schreibbar und explizit unter `/config` eingebunden. Dadurch schreibt das Deployment wieder in die tatsächliche Datei `/config/packages/alexa.yaml` statt in einen veralteten beziehungsweise falschen Containerpfad.
+
+## 2.16.10
+
+- **Export**: Mehrere Entitäten desselben Home-Assistant-Geräts können gleichzeitig für Alexa aktiviert und in die YAML-Konfiguration exportiert werden.
+- **Alexa-Name**: Das Feld „Name bei Alexa“ ist pro Entität zuverlässig frei editierbar; ein Namensvorschlag kann optional übernommen werden.
+- **Bedienung**: Beim Aktivieren einer Entität wird der vorgeschlagene Alexa-Name sofort sichtbar in das Eingabefeld übernommen.
+
+## 2.16.9
+
+- **Alexa-Name**: In der stabilen manuellen Entitätsauswahl kann für jede Entität wieder ein eigener Alexa-Name eingegeben werden. Änderungen werden automatisch gespeichert und beim Ausrollen als `entity_config.<entity_id>.name` geschrieben.
+- **Kompatibilität**: Aliasnamen werden nicht als wirkungsloses Feld angeboten, da Home Assistants Alexa-Smart-Home-Schema pro Entität nur einen Namen unterstützt.
+
+## 2.16.8
+
+- **Fix**: Die tatsächliche Ursache der UI-Blockade wurde behoben: Der Observer für die Beschriftung von „Gerät exportieren“ änderte den Button bei jeder selbst ausgelösten DOM-Mutation erneut und erzeugte dadurch eine Endlosschleife.
+- **Tests**: Ein Regressionstest stellt sicher, dass Text und Tooltip nur noch geändert werden, wenn ihr Wert tatsächlich abweicht.
+
+## 2.16.7
+
+- **Export**: Die stabile Geräte-Minimalansicht bietet wieder „Gerät exportieren“, „Export deaktivieren“ und eine manuelle Entitätsauswahl per Checkbox.
+- **Stabilität**: Exportänderungen werden direkt gespeichert, ohne die vollständige Geräteübersicht neu zu laden oder den entfernten komplexen Kartenrenderer aufzurufen.
+
+## 2.16.6
+
+- **Stabilität**: Räume verwenden die bereits beim initialen Seitenaufbau berechneten Gerätelisten. Beim Aufklappen werden weder alle 2.312 Entitäten erneut gefiltert noch komplexe Gerätekarten aufgebaut.
+- **Diagnosemodus**: Geöffnete Räume zeigen eine minimale Liste aus Gerätename und Entitätsanzahl. Damit wird der weiterhin blockierende Karten-/Steuerungspfad vollständig umgangen und die eigentliche Geräteliste bleibt nutzbar.
+
+## 2.16.5
+
+- **Fix**: Geräteköpfe eines geöffneten Raums werden ohne HTML-Templates ausschließlich über sichere DOM-Knoten und `textContent` erzeugt. Ungewöhnliche Gerätedaten können den HTML-Parser damit nicht mehr blockieren.
+- **Kompatibilität**: Das in 2.16.4 ergänzte CSS-Containment wurde entfernt, da die Blockade auch bei nur einem Gerät auftrat und im Zusammenspiel mit dem dynamisch wachsenden Raumcontainer problematisch sein kann.
+
+## 2.16.4
+
+- **Fix**: Das Öffnen eines Raums führt keine synchrone DOM-Arbeit mehr im Klick-Handler aus. Geräte werden nach dem Klick in kleinen Gruppen über mehrere Browser-Frames eingefügt, sodass die Oberfläche bedienbar bleibt.
+- **Performance**: CSS-Containment kapselt Layout und Darstellung der Räume sowie der Alexa-Karten. Änderungen in einem Raum lösen damit kein vollständiges Layout des langen Gesamtdokuments mehr aus.
+
+## 2.16.3
+
+- **Fix**: Das Auf- und Zuklappen eines Raums aktualisiert nur noch dessen eigenen Gerätecontainer. Der restliche DOM mit allen HA-Geräten, Entitäten und Alexa-Karten wird nicht mehr bei jedem Klick vollständig ersetzt.
+- **Performance**: Raumaktionen behalten ihren Button im DOM und rendern weiterhin höchstens 25 Geräte je Schritt. Das verhindert die reproduzierbare Blockade des Browser-Hauptthreads beim Öffnen von „Küche“ und anderen Räumen.
+
+## 2.16.2
+
+- **Fix**: Beim Aufklappen eines Raums werden zunächst höchstens 25 Geräte gerendert. Weitere Geräte lassen sich kontrolliert in 25er-Schritten nachladen, damit große Räume den Home-Assistant-WebView nicht mehr durch einen einzigen synchronen DOM-Aufbau zum Absturz bringen.
+- **Cache**: Die Versionskennung der Geräteübersicht wurde aktualisiert, damit Home Assistant die korrigierte JavaScript-Datei zuverlässig neu lädt.
+
+## 2.16.1
+
+- **Fix**: Die Verarbeitung großer oder sehr tief verschachtelter Phoenix-Antworten erfolgt jetzt iterativ und mit festen Grenzen. Dadurch kann die Raum-Anreicherung beim Laden der Geräteliste das Add-on nicht mehr durch rekursive beziehungsweise quadratische Verarbeitung zum Absturz bringen.
+- **Tests**: Regressionstests decken eingebettete Phoenix-Daten, sehr tiefe Strukturen und die Abgrenzung tatsächlicher Gruppenmitglieder ab.
+
+## 2.16.0
+
+- **Geräteexport**: Ganze HA-Geräte lassen sich direkt über die Gerätezeile exportieren; automatisch wird eine geeignete Haupt-Entity gewählt.
+- **Duplikatschutz**: Exportdaten werden um die HA-Geräte-ID ergänzt. Vorschau und Deployment verweigern in dieser Version mehrere aktive Alexa-Endpunkte für dasselbe physische Gerät; diese Einschränkung wurde mit 2.16.10 wieder aufgehoben.
+- **Versionierung**: Entwicklungsstände verwenden keinen `rc`-Zusatz mehr.
+
 ## 2.15.1-rc1
 
 - **Fix**: Versionsgebundene CSS- und JavaScript-URLs verhindern, dass Home-Assistant-Ingress nach einem Update die alte Geräteoberfläche aus dem Browsercache lädt.

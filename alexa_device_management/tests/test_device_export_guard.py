@@ -9,5 +9,5 @@ SCRIPT = (
 
 def test_mutation_observer_relabel_is_idempotent():
     assert 'button.textContent !== "Gerät exportieren"' in SCRIPT
-    assert "button.title !== title" in SCRIPT
     assert 'button.textContent = "Gerät exportieren";' in SCRIPT
+    assert "button.title" not in SCRIPT
