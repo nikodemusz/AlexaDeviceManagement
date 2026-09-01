@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.16.11
+
+- **Fix Export**: Der Home-Assistant-Konfigurationsordner wird über den aktuellen App-Mount `homeassistant_config` schreibbar und explizit unter `/config` eingebunden. Dadurch schreibt das Deployment wieder in die tatsächliche Datei `/config/packages/alexa.yaml` statt in einen veralteten beziehungsweise falschen Containerpfad.
+
 ## 2.16.10
 
 - **Export**: Mehrere Entitäten desselben Home-Assistant-Geräts können gleichzeitig für Alexa aktiviert und in die YAML-Konfiguration exportiert werden.
