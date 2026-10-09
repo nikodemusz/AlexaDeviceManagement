@@ -1,7 +1,8 @@
 """Alexa Smart Home v3 Lambda adapter. Devices are fetched live from HA YAML.
 
-Required environment: GATEWAY_URL, GATEWAY_TOKEN, ALLOWED_LWA_USER_ID.
-Account linking: Login with Amazon, user profile is verified on each request.
+Required environment: GATEWAY_URL, GATEWAY_TOKEN.
+Account linking stays with Home Assistant OAuth for *both* v5 and v6.
+Legacy v5 delegates to HA /api/alexa/smart_home; native v6 reads YAML via gateway.
 """
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ from datetime import datetime, timezone
 
 GATEWAY_URL = os.environ.get("GATEWAY_URL", "").rstrip("/")
 GATEWAY_TOKEN = os.environ.get("GATEWAY_TOKEN", "")
-ALLOWED_LWA_USER_ID = os.environ.get("ALLOWED_LWA_USER_ID", "")
+NATIVE_PREFIX = "native:"
 INTERFACE_ACTIONS = {"Alexa.PowerController", "Alexa.BrightnessController",
                      "Alexa.RangeController", "Alexa.ToggleController"}
 
@@ -45,11 +46,15 @@ def token_for(event):
 
 def verify_account(event):
     token = token_for(event)
-    if not token or not ALLOWED_LWA_USER_ID:
-        raise PermissionError("Missing linked Amazon account")
-    profile = request_json("https://api.amazon.com/user/profile", bearer=token)
-    if profile.get("user_id") != ALLOWED_LWA_USER_ID:
-        raise PermissionError("Unauthorized Amazon account")
+    if not token:
+        raise PermissionError("Missing linked Home Assistant user token")
+    gateway("/v1/authorize", "POST", {"token": token})
+    return token
+
+
+def legacy_request(event, token):
+    return gateway("/v1/legacy", "POST", {"token": token, "event": event})
+
 
 
 def header(namespace, name, message_id, correlation=None):
@@ -104,7 +109,7 @@ def discovery(event, config):
             continue
         capabilities = [{"type": "AlexaInterface", "interface": "Alexa", "version": "3"}]
         capabilities.extend(capability_config(binding) for binding in device["capabilities"])
-        endpoints.append({"endpointId": endpoint_id, "manufacturerName": "Alexa Device Management",
+        endpoints.append({"endpointId": NATIVE_PREFIX + endpoint_id, "manufacturerName": "Alexa Device Management",
                           "friendlyName": device["name"],
                           "description": device.get("description") or device["name"],
                           "displayCategories": [device.get("display_category", "OTHER")],
@@ -141,35 +146,58 @@ def lambda_handler(event, context):
     directive = event.get("directive", {})
     hdr = directive.get("header", {})
     namespace, name = hdr.get("namespace"), hdr.get("name")
-    endpoint_id = directive.get("endpoint", {}).get("endpointId")
+    external_id = directive.get("endpoint", {}).get("endpointId", "")
+    native = isinstance(external_id, str) and external_id.startswith(NATIVE_PREFIX)
+    endpoint_id = external_id[len(NATIVE_PREFIX):] if native else external_id
     try:
-        verify_account(event)
-        config = gateway("/v1/config")
+        token = verify_account(event)
+
+        # A single Alexa skill exposes both backends. The existing endpoint IDs
+        # are never rewritten; only native endpoints receive an explicit prefix.
         if namespace == "Alexa.Discovery" and name == "Discover":
-            return discovery(event, config)
+            legacy = legacy_request(event, token)
+            if legacy.get("event", {}).get("header", {}).get("name") != "Discover.Response":
+                return legacy
+            config = gateway("/v1/config")
+            native_result = discovery(event, config)
+            endpoints = legacy["event"]["payload"]["endpoints"]
+            native_endpoints = native_result["event"]["payload"]["endpoints"]
+            known = {e["endpointId"] for e in endpoints}
+            if any(e["endpointId"] in known for e in native_endpoints):
+                raise ValueError("Endpoint ID collision between native and legacy")
+            endpoints.extend(native_endpoints)
+            return legacy
+
+        # All non-discovery requests for legacy endpoints, including AcceptGrant,
+        # are forwarded unchanged to the existing HA Alexa integration.
+        if not native:
+            return legacy_request(event, token)
+
+        config = gateway("/v1/config")
         device = config["devices"].get(endpoint_id)
         if not device or not device.get("enabled", True):
-            return error(event, "NO_SUCH_ENDPOINT", "Unknown endpoint", endpoint_id)
+            return error(event, "NO_SUCH_ENDPOINT", "Unknown endpoint", external_id)
         bindings = device["capabilities"]
         if namespace == "Alexa" and name == "ReportState":
             states = gateway("/v1/state?" + urllib.parse.urlencode({"endpoint_id": endpoint_id}))["states"]
             values = [state_for(binding, states) for binding in bindings]
-            return response(event, "Alexa", "StateReport", endpoint=endpoint_id, properties=values)
+            return response(event, "Alexa", "StateReport", endpoint=external_id, properties=values)
         if namespace in INTERFACE_ACTIONS and name in ("TurnOn", "TurnOff", "SetBrightness"):
             matching = [b for b in bindings if b["interface"] == namespace
-                        and b.get("instance") == directive.get("header", {}).get("instance")]
+                        and b.get("instance") == hdr.get("instance")]
             if len(matching) != 1:
-                return error(event, "INVALID_DIRECTIVE", "Capability missing", endpoint_id)
+                return error(event, "INVALID_DIRECTIVE", "Capability missing", external_id)
             binding = matching[0]
             value = directive.get("payload", {}).get("brightness")
             gateway("/v1/control", "POST", {"endpoint_id": endpoint_id, "interface": namespace,
                                            "instance": binding.get("instance"), "action": name, "value": value})
             states = gateway("/v1/state?" + urllib.parse.urlencode({"endpoint_id": endpoint_id}))["states"]
-            return response(event, "Alexa", "Response", endpoint=endpoint_id,
+            return response(event, "Alexa", "Response", endpoint=external_id,
                             properties=[state_for(binding, states)])
-        return error(event, "INVALID_DIRECTIVE", "Unsupported directive", endpoint_id)
+        return error(event, "INVALID_DIRECTIVE", "Unsupported directive", external_id)
     except PermissionError:
-        return error(event, "INVALID_AUTHORIZATION_CREDENTIAL", "Account not linked", endpoint_id)
+        return error(event, "INVALID_AUTHORIZATION_CREDENTIAL", "Account not linked", external_id or None)
     except (ValueError, KeyError, TypeError, urllib.error.HTTPError, urllib.error.URLError) as exc:
-        print(f"Alexa request failed: {type(exc).__name__}: {exc}")
-        return error(event, endpoint=endpoint_id)
+        # Never log Alexa's directive: it contains the linked user's access token.
+        print(f"Alexa request failed: {type(exc).__name__}")
+        return error(event, endpoint=external_id or None)
