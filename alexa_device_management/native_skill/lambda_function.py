@@ -191,7 +191,7 @@ def lambda_handler(event, context):
             value = directive.get("payload", {}).get("brightness")
             gateway("/v1/control", "POST", {"endpoint_id": endpoint_id, "interface": namespace,
                                            "instance": binding.get("instance"), "action": name, "value": value, "token": token})
-            states = gateway("/v1/state?" + urllib.parse.urlencode({"endpoint_id": endpoint_id}))["states"]
+            states = gateway("/v1/state", "POST", {"endpoint_id": endpoint_id, "token": token})["states"]
             return response(event, "Alexa", "Response", endpoint=external_id,
                             properties=[state_for(binding, states)])
         return error(event, "INVALID_DIRECTIVE", "Unsupported directive", external_id)
