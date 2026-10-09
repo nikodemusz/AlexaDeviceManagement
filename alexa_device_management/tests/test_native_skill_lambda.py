@@ -65,6 +65,52 @@ class CombinedSkillTests(unittest.TestCase):
         with patch.object(mod, "verify_account", return_value="test-oauth"), patch.object(mod, "gateway", side_effect=gw):
             self.assertIs(mod.lambda_handler(request, None), result)
 
+    def test_cover_power_controller_is_removed_but_position_and_stop_remain(self):
+        endpoints = [
+            {"endpointId": "cover#blind", "displayCategories": ["INTERIOR_BLIND"],
+             "capabilities": [{"interface": name} for name in (
+                 "Alexa.PowerController", "Alexa.RangeController",
+                 "Alexa.PlaybackController", "Alexa.EndpointHealth")]},
+            {"endpointId": "light#lamp", "displayCategories": ["LIGHT"],
+             "capabilities": [{"interface": "Alexa.PowerController"}]},
+        ]
+        mod.normalize_legacy_discovery(endpoints)
+        self.assertEqual([c["interface"] for c in endpoints[0]["capabilities"]],
+                         ["Alexa.RangeController", "Alexa.PlaybackController",
+                          "Alexa.EndpointHealth"])
+        self.assertEqual(endpoints[1]["capabilities"][0]["interface"], "Alexa.PowerController")
+
+    def test_real_contact_sensor_kept_spurious_switch_sensor_removed(self):
+        endpoints = [
+            {"endpointId": "switch#desk", "displayCategories": ["SWITCH"],
+             "capabilities": [{"interface": "Alexa.PowerController"},
+                              {"interface": "Alexa.ContactSensor"}]},
+            {"endpointId": "binary_sensor#door", "displayCategories": ["CONTACT_SENSOR"],
+             "capabilities": [{"interface": "Alexa.ContactSensor"}]},
+        ]
+        mod.normalize_legacy_discovery(endpoints)
+        self.assertEqual([cap["interface"] for cap in endpoints[0]["capabilities"]],
+                         ["Alexa.PowerController"])
+        self.assertEqual([cap["interface"] for cap in endpoints[1]["capabilities"]],
+                         ["Alexa.ContactSensor"])
+
+    def test_legacy_state_properties_match_discovery(self):
+        def props():
+            return [{"namespace": "Alexa.PowerController", "name": "powerState", "value": "ON"},
+                    {"namespace": "Alexa.ContactSensor", "name": "detectionState", "value": "DETECTED"},
+                    {"namespace": "Alexa.RangeController", "name": "rangeValue", "value": 50},
+                    {"namespace": "Alexa.EndpointHealth", "name": "connectivity", "value": {"value": "OK"}}]
+        for eid, missing in (("cover#blind", "Alexa.PowerController"),
+                             ("switch#desk", "Alexa.ContactSensor")):
+            result = {"context": {"properties": props()}}
+            request = event("Alexa", "ReportState", eid)
+            mod.normalize_legacy_response(request, result)
+            self.assertNotIn(missing, [p["namespace"] for p in result["context"]["properties"]])
+            self.assertIn("Alexa.EndpointHealth", [p["namespace"] for p in result["context"]["properties"]])
+        result = {"context": {"properties": props()}}
+        mod.normalize_legacy_response(event("Alexa", "ReportState", "binary_sensor#door"), result)
+        self.assertIn("Alexa.ContactSensor", [p["namespace"] for p in result["context"]["properties"]])
+
     def test_native_state_uses_correct_binding_and_linked_token(self):
         request = event("Alexa", "ReportState", "native:zisterne")
         config = {"devices": {"zisterne": {"name": "Zisterne", "capabilities": [
