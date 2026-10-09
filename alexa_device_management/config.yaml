@@ -21,5 +21,11 @@ map:
   - type: homeassistant_config
     read_only: false
     path: /config
-options: {}
-schema: {}
+ports:
+  8100/tcp: null
+ports_description:
+  8100/tcp: Native Alexa Skill Gateway (proxy HTTPS externally)
+options:
+  native_gateway_token: ""
+schema:
+  native_gateway_token: password?
