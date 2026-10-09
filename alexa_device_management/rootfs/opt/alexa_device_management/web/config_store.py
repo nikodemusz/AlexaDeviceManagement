@@ -65,8 +65,9 @@ class ConfigStore:
                 try:
                     data = json.loads(candidate.read_text(encoding="utf-8"))
                     normalized = self._normalize(data)
-                    if candidate != self.path:
-                        self.save(normalized, create_backup=False)
+                    if (candidate != self.path or normalized["schema_version"] != data.get("schema_version")
+                            or "devices" not in data):
+                        self.save(normalized, create_backup=candidate == self.path)
                     return normalized
                 except (FileNotFoundError, OSError, json.JSONDecodeError, TypeError):
                     continue
