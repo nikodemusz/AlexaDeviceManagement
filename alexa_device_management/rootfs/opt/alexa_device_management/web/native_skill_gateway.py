@@ -119,8 +119,43 @@ async def control_route(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
+
+async def linked_token_request(token: str, endpoint: str, data=None):
+    """Make a HA request using the *linked user's* OAuth access token."""
+    if not isinstance(token, str) or not token or len(token) > 8192:
+        raise web.HTTPUnauthorized(text="Missing linked Home Assistant token")
+    headers = {"Authorization": "Bearer " + token}
+    async with aiohttp.ClientSession(headers=headers) as session:
+        async with session.request("POST" if data is not None else "GET",
+                                   HA_URL + endpoint, json=data,
+                                   timeout=aiohttp.ClientTimeout(total=12)) as result:
+            if result.status in (401, 403):
+                raise web.HTTPUnauthorized(text="Home Assistant authorization rejected")
+            if result.status >= 400:
+                raise web.HTTPBadGateway(text=f"HA rejected directive: {result.status}")
+            return await result.json()
+
+
+async def linked_authorize_route(request: web.Request) -> web.Response:
+    data = await request.json()
+    # The HA API authenticates the Alexa-linked Home Assistant user; never
+    # assume the gateway's machine secret alone authorizes device control.
+    await linked_token_request(data.get("token"), "/")
+    return web.json_response({"authorized": True})
+
+
+async def legacy_route(request: web.Request) -> web.Response:
+    data = await request.json()
+    event, token = data.get("event"), data.get("token")
+    if not isinstance(event, dict) or not isinstance(event.get("directive"), dict):
+        raise web.HTTPBadRequest(text="Invalid Alexa directive")
+    response = await linked_token_request(token, "/alexa/smart_home", event)
+    return web.json_response(response)
+
 def create_app() -> web.Application:
     app = web.Application(middlewares=[authentication], client_max_size=16 * 1024)
+    app.router.add_post("/v1/authorize", linked_authorize_route)
+    app.router.add_post("/v1/legacy", legacy_route)
     app.router.add_get("/v1/config", config_route)
     app.router.add_get("/v1/state", state_route)
     app.router.add_post("/v1/control", control_route)
