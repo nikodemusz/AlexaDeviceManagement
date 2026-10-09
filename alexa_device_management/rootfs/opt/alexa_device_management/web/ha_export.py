@@ -21,6 +21,8 @@ CONFIG_PATH = DATA_DIR / "config.json"
 ALEXA_YAML_PATH = pathlib.Path("/config/packages/alexa.yaml")
 HA_HTTP_URL = os.environ.get("HA_HTTP_URL", "http://supervisor/core/api")
 HA_WS_URL = os.environ.get("HA_WS_URL", "ws://supervisor/core/websocket")
+# Full entity registries can exceed aiohttp's default 4 MiB receive limit.
+HA_WS_MAX_MSG_SIZE = 16 * 1024 * 1024
 SUPERVISOR_TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
 CONFIG_STORE = ConfigStore(CONFIG_PATH, EXPORT_STATE_PATH, ALEXA_YAML_PATH)
 YAML_GENERATOR = AlexaYamlGenerator(ALEXA_YAML_PATH)
@@ -48,7 +50,9 @@ def _headers() -> dict[str, str]:
 async def _ws_commands(commands: list[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     async with aiohttp.ClientSession(headers=_headers()) as session:
-        async with session.ws_connect(HA_WS_URL, heartbeat=30) as ws:
+        async with session.ws_connect(
+            HA_WS_URL, heartbeat=30, max_msg_size=HA_WS_MAX_MSG_SIZE
+        ) as ws:
             first = await ws.receive_json()
             if first.get("type") == "auth_required":
                 await ws.send_json({"type": "auth", "access_token": SUPERVISOR_TOKEN})

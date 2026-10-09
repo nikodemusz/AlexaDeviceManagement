@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.16.16
+
+- **Geräteübersicht**: Home-Assistant-Registrierungen dürfen über WebSocket bis zu 16 MiB groß sein. Dadurch können Installationen mit vielen Entitäten die Übersicht wieder laden, wenn die Antwort das bisherige 4-MiB-Standardlimit überschreitet.
+- **Regressionstest**: Eine Antwort mit 4.284.956 Byte wird vollständig gelesen; Nachrichten oberhalb des neuen Limits werden weiterhin abgewiesen.
+
 ## 2.16.15
 
 - **Fix 403**: Die Home-Assistant-Konfigurationsprüfung verwendet nicht mehr den für Apps mit Standardrolle verbotenen Supervisor-Endpunkt `/core/check`, sondern den freigegebenen Core-REST-Endpunkt `/api/config/core/check_config`.
