@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.17.0
+
+- Neues geräteorientiertes Metadatenmodell (Schema v6) mit mehreren Alexa-Capabilities pro Endpunkt.
+- Rückwärtskompatible Migration bestehender Entity-Konfigurationen, JSON Schema, Tests und KI-Agentendokumentation.
+- Bestehender Home-Assistant-Alexa-Export bleibt vorerst unverändert.
+
 ## 2.16.16
 
 - **Geräteübersicht**: Home-Assistant-Registrierungen dürfen über WebSocket bis zu 16 MiB groß sein. Dadurch können Installationen mit vielen Entitäten die Übersicht wieder laden, wenn die Antwort das bisherige 4-MiB-Standardlimit überschreitet.
