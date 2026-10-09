@@ -1,8 +1,13 @@
 # Device metadata schema v6 (Sprint 1)
 
-Configuration source: `/data/alexa_device_management/config.json`.
-The existing `entities` object and HA Alexa YAML deployment are retained unchanged for backwards compatibility.
-The new `devices` object is **not yet deployed to Amazon**. It is groundwork for a custom Smart Home skill.
+Separate configuration sources:
+
+- **Legacy production integration**: `/data/alexa_device_management/config.json` for UI/entity export and `/config/packages/alexa.yaml` for HA Alexa configuration. These remain untouched by native config operations.
+- **New custom Smart Home skill**: `/config/alexa_device_management/native/config.yaml`, validated and atomically written with `native_skill_config.NativeSkillConfigStore`. It has its own `devices` mapping and defaults to `enabled: false`.
+- The repository's `alexa_device_management/config.yaml` is the **Home Assistant app manifest**, not skill metadata.
+
+A sample is in `alexa_device_management/examples/native-config.yaml`. Do not migrate, copy or enable legacy devices automatically in the native skill; activation and Discovery will be added in later sprints.
+The existing `devices` mapping in the transitional v6 JSON model is kept for compatibility with the original Sprint 1 work, but is **not the authoritative native skill configuration**. Neither `devices` mapping is deployed to Amazon yet.
 
 ## Model
 
@@ -56,11 +61,15 @@ An explicit `devices: {}` intentionally opts out of automatic migration.
 Re-running normalization does not add or duplicate endpoints.
 Grouping multiple sensor entities under a single endpoint is an explicit subsequent edit.
 
+## Parallel operation
+
+The two skills may run under one Alexa account with separate discovery and credential handling. This milestone implements only isolated native configuration storage. To avoid duplicates, explicitly select which logical devices each skill exposes when the new discovery engine is implemented. A new device must remain disabled for native export until deliberately activated. No existing legacy export settings are changed by modifying native YAML.
+
 ## AI-agent checklist
 
 1. Inspect the actual entity IDs, state and units from Home Assistant. Do not invent them.
 2. Look for an existing logical device before adding a new endpoint ID.
 3. Reuse the same endpoint for all related properties; unique controller instances.
-4. Validate with `schemas/device-config.schema.json` and the Python runtime validator before writing.
-5. Save atomically through the ConfigStore, keeping legacy `entities` intact.
+4. Validate native YAML with `schemas/native-skill.schema.json` and `NativeSkillConfigStore.validate` before writing.
+5. Save atomically through `NativeSkillConfigStore` and never modify the legacy ConfigStore for native device configuration.
 6. Inspect preview output before a deployment; Sprint 1's device preview is internal only.
