@@ -1,0 +1,4 @@
+#!/usr/bin/with-contenv sh
+set -eu
+echo "[info] Starting restricted native Alexa Skill API..."
+exec python3 /opt/alexa_device_management/web/native_skill_gateway.py
