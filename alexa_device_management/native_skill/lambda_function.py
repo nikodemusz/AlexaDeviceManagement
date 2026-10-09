@@ -179,7 +179,7 @@ def lambda_handler(event, context):
             return error(event, "NO_SUCH_ENDPOINT", "Unknown endpoint", external_id)
         bindings = device["capabilities"]
         if namespace == "Alexa" and name == "ReportState":
-            states = gateway("/v1/state?" + urllib.parse.urlencode({"endpoint_id": endpoint_id}))["states"]
+            states = gateway("/v1/state", "POST", {"endpoint_id": endpoint_id, "token": token})["states"]
             values = [state_for(binding, states) for binding in bindings]
             return response(event, "Alexa", "StateReport", endpoint=external_id, properties=values)
         if namespace in INTERFACE_ACTIONS and name in ("TurnOn", "TurnOff", "SetBrightness"):
@@ -190,7 +190,7 @@ def lambda_handler(event, context):
             binding = matching[0]
             value = directive.get("payload", {}).get("brightness")
             gateway("/v1/control", "POST", {"endpoint_id": endpoint_id, "interface": namespace,
-                                           "instance": binding.get("instance"), "action": name, "value": value})
+                                           "instance": binding.get("instance"), "action": name, "value": value, "token": token})
             states = gateway("/v1/state?" + urllib.parse.urlencode({"endpoint_id": endpoint_id}))["states"]
             return response(event, "Alexa", "Response", endpoint=external_id,
                             properties=[state_for(binding, states)])
