@@ -98,7 +98,7 @@
         },
         "entity_id": {
           "type": "string",
-          "pattern": "^[a-z_]+\\\\.[A-Za-z0-9_]+$"
+          "pattern": "^[a-z_]+\\.[A-Za-z0-9_]+$"
         },
         "instance": {
           "type": "string",
