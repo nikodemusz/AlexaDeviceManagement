@@ -46,9 +46,10 @@ def active_config() -> dict:
 
 
 async def config_route(request: web.Request) -> web.Response:
-    config = active_config()
+    config = NativeSkillConfigStore().load()
     return web.json_response({"schema_version": config["schema_version"],
-                              "locale": config["locale"], "devices": config["devices"]})
+                              "locale": config["locale"], "enabled": config["enabled"],
+                              "devices": config["devices"] if config["enabled"] else {}})
 
 
 def lookup_binding(config: dict, endpoint_id: str, interface: str, instance: str | None):
