@@ -2,6 +2,8 @@
 
 ## 2.17.0
 
+- GitHub Actions auf Node.js-24-kompatible Checkout- und Python-Setup-Versionen aktualisiert.
+
 - Neues geräteorientiertes Metadatenmodell (Schema v6) mit mehreren Alexa-Capabilities pro Endpunkt.
 - Rückwärtskompatible Migration bestehender Entity-Konfigurationen, JSON Schema, Tests und KI-Agentendokumentation.
 - Bestehender Home-Assistant-Alexa-Export bleibt vorerst unverändert.
