@@ -62,10 +62,10 @@ def lookup_binding(config: dict, endpoint_id: str, interface: str, instance: str
     raise web.HTTPNotFound(text="Unknown capability")
 
 
-async def ha_request(method: str, endpoint: str, payload=None):
-    if not HA_TOKEN:
-        raise web.HTTPServiceUnavailable(text="HA supervisor token unavailable")
-    headers = {"Authorization": f"Bearer {HA_TOKEN}"}
+async def ha_request(method: str, endpoint: str, payload=None, token: str | None = None):
+    if token is None or not isinstance(token, str) or not token:
+        raise web.HTTPUnauthorized(text="User token required")
+    headers = {"Authorization": f"Bearer {token}"}
     async with aiohttp.ClientSession(headers=headers) as session:
         async with session.request(method, HA_URL + endpoint, json=payload,
                                    timeout=aiohttp.ClientTimeout(total=10)) as result:
@@ -79,15 +79,17 @@ async def ha_request(method: str, endpoint: str, payload=None):
 
 
 async def state_route(request: web.Request) -> web.Response:
+    data = await request.json()
     config = active_config()
-    endpoint_id = request.query.get("endpoint_id", "")
+    endpoint_id = data.get("endpoint_id", "")
+    token = data.get("token")
     device = config["devices"].get(endpoint_id)
     if not device or not device.get("enabled", True):
         raise web.HTTPNotFound(text="Unknown endpoint")
     entities = sorted({cap["entity_id"] for cap in device["capabilities"]})
     states = {}
     for entity in entities:
-        states[entity] = await ha_request("GET", "/states/" + entity)
+        states[entity] = await ha_request("GET", "/states/" + entity, token=token)
     return web.json_response({"endpoint_id": endpoint_id, "states": states})
 
 
@@ -116,7 +118,7 @@ async def control_route(request: web.Request) -> web.Response:
     payload = {"entity_id": entity}
     if value is not None:
         payload["brightness_pct"] = value
-    await ha_request("POST", f"/services/{domain}/{service}", payload)
+    await ha_request("POST", f"/services/{domain}/{service}", payload, token=data.get("token"))
     return web.json_response({"ok": True})
 
 
@@ -158,7 +160,7 @@ def create_app() -> web.Application:
     app.router.add_post("/v1/authorize", linked_authorize_route)
     app.router.add_post("/v1/legacy", legacy_route)
     app.router.add_get("/v1/config", config_route)
-    app.router.add_get("/v1/state", state_route)
+    app.router.add_post("/v1/state", state_route)
     app.router.add_post("/v1/control", control_route)
     return app
 
