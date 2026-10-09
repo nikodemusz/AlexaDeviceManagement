@@ -2,6 +2,8 @@
 
 ## 2.17.0
 
+- Eigenes Alexa-Lambda mit paralleler v5-Weiterleitung und v6-Discovery aus HA-YAML; sichere Gateway-API für Status und Steuerung.
+
 - Separate native-skill configuration under `/config/alexa_device_management/native/config.yaml`, disabled by default; legacy JSON/YAML export remains independent.
 
 - GitHub Actions auf Node.js-24-kompatible Checkout- und Python-Setup-Versionen aktualisiert.
