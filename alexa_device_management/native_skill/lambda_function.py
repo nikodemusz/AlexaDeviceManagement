@@ -57,6 +57,45 @@ def legacy_request(event, token):
 
 
 
+def suppressed_legacy_interfaces(endpoint_id, categories=None):
+    """Hide HA-generated capabilities that do not describe the entity type.
+
+    Contact sensors for binary_sensor entities remain untouched. A switch
+    cannot itself report a contact state; real contact sensors must be
+    exported as their own binary_sensor endpoints.
+    """
+    categories = categories or []
+    if endpoint_id.startswith("cover#") or "INTERIOR_BLIND" in categories:
+        return {"Alexa.PowerController"}
+    if endpoint_id.startswith("switch#"):
+        return {"Alexa.ContactSensor"}
+    return set()
+
+
+def normalize_legacy_discovery(endpoints):
+    """Keep v5 endpoint IDs and all actionable cover position capabilities."""
+    for endpoint in endpoints:
+        excluded = suppressed_legacy_interfaces(
+            endpoint.get("endpointId", ""), endpoint.get("displayCategories"))
+        if excluded:
+            endpoint["capabilities"] = [
+                cap for cap in endpoint.get("capabilities", [])
+                if cap.get("interface") not in excluded
+            ]
+
+
+def normalize_legacy_response(request, result):
+    """Match reported properties to Discovery without changing HA controls."""
+    endpoint_id = request.get("directive", {}).get("endpoint", {}).get("endpointId", "")
+    excluded = suppressed_legacy_interfaces(endpoint_id)
+    props = result.get("context", {}).get("properties")
+    if excluded and isinstance(props, list):
+        result["context"]["properties"] = [
+            prop for prop in props if prop.get("namespace") not in excluded
+        ]
+    return result
+
+
 def header(namespace, name, message_id, correlation=None):
     value = {"namespace": namespace, "name": name, "payloadVersion": "3", "messageId": message_id}
     if correlation:
@@ -165,13 +204,14 @@ def lambda_handler(event, context):
             known = {e["endpointId"] for e in endpoints}
             if any(e["endpointId"] in known for e in native_endpoints):
                 raise ValueError("Endpoint ID collision between native and legacy")
+            normalize_legacy_discovery(endpoints)
             endpoints.extend(native_endpoints)
             return legacy
 
         # All non-discovery requests for legacy endpoints, including AcceptGrant,
         # are forwarded unchanged to the existing HA Alexa integration.
         if not native:
-            return legacy_request(event, token)
+            return normalize_legacy_response(event, legacy_request(event, token))
 
         config = gateway("/v1/config")
         device = config["devices"].get(endpoint_id)
