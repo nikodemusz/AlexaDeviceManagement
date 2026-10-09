@@ -24,7 +24,7 @@ class ConfigStoreVisibilityTests(unittest.TestCase):
                 }
             }, create_backup=False)
 
-        self.assertEqual(saved["schema_version"], 5)
+        self.assertEqual(saved["schema_version"], 6)
         self.assertEqual(saved["ui"]["hidden_devices"], ["device-1", "device-2"])
         self.assertEqual(saved["ui"]["hidden_entities"], ["sensor.power"])
         self.assertEqual(saved["ui"]["hidden_alexa"], ["smart_home:endpoint-1"])
