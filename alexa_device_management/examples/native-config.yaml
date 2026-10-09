@@ -1,0 +1,21 @@
+# Template only: do not enable the new skill in production yet.
+schema_version: 6
+enabled: false
+locale: de-DE
+devices:
+  zisterne:
+    name: Zisterne
+    aliases:
+      - meine Zisterne
+    display_category: OTHER
+    capabilities:
+      - interface: Alexa.RangeController
+        instance: volume
+        entity_id: sensor.zisterne_liter
+        unit: Volume.Liters
+        read_only: true
+      - interface: Alexa.RangeController
+        instance: fill
+        entity_id: sensor.zisterne_prozent
+        unit: Percent
+        read_only: true

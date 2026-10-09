@@ -11,12 +11,16 @@ RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt
     && rm /tmp/requirements.txt
 
 COPY rootfs /
+RUN chmod +x /etc/services.d/native-gateway/run
 
 # Validate the runtime sources at build time.
 RUN python3 -m py_compile \
     /opt/alexa_device_management/web/server_clean.py \
     /opt/alexa_device_management/web/server_extended.py \
     /opt/alexa_device_management/web/config_store.py \
+    /opt/alexa_device_management/web/device_model.py \
+    /opt/alexa_device_management/web/native_skill_config.py \
+    /opt/alexa_device_management/web/native_skill_gateway.py \
     /opt/alexa_device_management/web/alexa_cache_service.py \
     /opt/alexa_device_management/web/yaml_generator.py \
     /opt/alexa_device_management/web/discovery_preview.py \
