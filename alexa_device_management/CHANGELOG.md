@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.17.1
+
+- Fix: Alexa-OAuth-Benutzertoken werden direkt über Home Assistant Core statt über den Supervisor-Proxy authentifiziert; Regressionstests für v5/v6.
+
 ## 2.17.0
 
 - Eigenes Alexa-Lambda mit paralleler v5-Weiterleitung und v6-Discovery aus HA-YAML; sichere Gateway-API für Status und Steuerung.
