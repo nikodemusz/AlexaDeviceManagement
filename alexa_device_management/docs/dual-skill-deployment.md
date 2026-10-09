@@ -57,6 +57,14 @@ the Home Assistant user and is passed to the appropriate HA API.
    on Echo and Sonos. **Speech interpretation is Amazon-controlled and remains
    unproven until tested on real devices.**
 
+## Home Assistant OAuth routing
+
+The native gateway sends linked Home Assistant user OAuth tokens to Core's
+`http://homeassistant:8123/api`, not the Supervisor proxy. Optionally override
+this internal target through `HA_USER_HTTP_URL` (full API base URL, ending in
+`/api`) if the container environment uses a different Core hostname.
+The externally visible Lambda gateway URL and token remain unchanged.
+
 ## Security and limitations
 
 - The gateway on TCP/8100 is separate from app ingress. Each request requires
