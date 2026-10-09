@@ -15,12 +15,13 @@ from typing import Any
 import yaml
 
 from yaml_generator import load_yaml_with_secrets
+from device_model import migrate_v5_entities, validate_devices
 
 
 class ConfigStore:
     """Thread-safe JSON store with atomic writes and YAML migration."""
 
-    SCHEMA_VERSION = 5
+    SCHEMA_VERSION = 6
 
     def __init__(self, path: pathlib.Path, legacy_path: pathlib.Path, alexa_yaml_path: pathlib.Path) -> None:
         self.path = path
@@ -35,6 +36,7 @@ class ConfigStore:
             "schema_version": ConfigStore.SCHEMA_VERSION,
             "locale": "de-DE",
             "entities": {},
+            "devices": {},
             "group_sync": {
                 "enabled": True,
                 "create_missing": True,
@@ -122,6 +124,11 @@ class ConfigStore:
         if isinstance(data, dict):
             result["locale"] = str(data.get("locale") or "de-DE")
             result["entities"] = data.get("entities") if isinstance(data.get("entities"), dict) else {}
+            # Explicit devices (including an empty mapping) always win over migration.
+            # Old entity exports remain untouched for the existing HA integration.
+            raw_devices = (data["devices"] if "devices" in data
+                           else migrate_v5_entities(result["entities"]))
+            result["devices"] = validate_devices(raw_devices)
 
             raw_ui = data.get("ui")
             if isinstance(raw_ui, dict):
