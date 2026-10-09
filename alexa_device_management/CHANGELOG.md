@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.17.2
+
+- v5-Rollläden ohne überflüssigen Ein-/Ausschalter; echte Kontaktsensoren bleiben erhalten, falsche Kontakt-Capabilities an Schaltern werden ausgeblendet. Statusantworten entsprechend angepasst.
+
 ## 2.17.1
 
 - Fix: Alexa-OAuth-Benutzertoken werden direkt über Home Assistant Core statt über den Supervisor-Proxy authentifiziert; Regressionstests für v5/v6.
