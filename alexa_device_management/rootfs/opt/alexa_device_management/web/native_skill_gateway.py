@@ -18,7 +18,9 @@ from device_model import DeviceModelError
 
 OPTIONS = Path("/data/options.json")
 HA_URL = os.environ.get("HA_HTTP_URL", "http://supervisor/core/api")
-HA_TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
+# User OAuth tokens must be validated by Home Assistant Core directly, NOT
+# through the Supervisor proxy (which requires a Supervisor-specific token).
+HA_USER_URL = os.environ.get("HA_USER_HTTP_URL", "http://homeassistant:8123/api").rstrip("/")
 
 
 def secret() -> str:
@@ -67,7 +69,7 @@ async def ha_request(method: str, endpoint: str, payload=None, token: str | None
         raise web.HTTPUnauthorized(text="User token required")
     headers = {"Authorization": f"Bearer {token}"}
     async with aiohttp.ClientSession(headers=headers) as session:
-        async with session.request(method, HA_URL + endpoint, json=payload,
+        async with session.request(method, HA_USER_URL + endpoint, json=payload,
                                    timeout=aiohttp.ClientTimeout(total=10)) as result:
             if result.status == 404:
                 raise web.HTTPNotFound(text="HA entity/service not found")
@@ -130,7 +132,7 @@ async def linked_token_request(token: str, endpoint: str, data=None):
     headers = {"Authorization": "Bearer " + token}
     async with aiohttp.ClientSession(headers=headers) as session:
         async with session.request("POST" if data is not None else "GET",
-                                   HA_URL + endpoint, json=data,
+                                   HA_USER_URL + endpoint, json=data,
                                    timeout=aiohttp.ClientTimeout(total=12)) as result:
             if result.status in (401, 403):
                 raise web.HTTPUnauthorized(text="Home Assistant authorization rejected")
