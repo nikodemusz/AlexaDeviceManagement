@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Alexa Device Management configuration v6",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "devices"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 6
+    },
+    "locale": {
+      "type": "string"
+    },
+    "entities": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "devices": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/device"
+      }
+    },
+    "group_sync": {
+      "type": "object"
+    },
+    "event_gateway": {
+      "type": "object"
+    },
+    "ui": {
+      "type": "object"
+    },
+    "updated_at": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "device": {
+      "type": "object",
+      "required": [
+        "name",
+        "capabilities"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "description": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "display_category": {
+          "type": "string"
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/capability"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "capability": {
+      "type": "object",
+      "required": [
+        "interface",
+        "entity_id"
+      ],
+      "properties": {
+        "interface": {
+          "enum": [
+            "Alexa.PowerController",
+            "Alexa.BrightnessController",
+            "Alexa.RangeController",
+            "Alexa.ToggleController"
+          ]
+        },
+        "entity_id": {
+          "type": "string",
+          "pattern": "^[a-z_]+\\\\.[A-Za-z0-9_]+$"
+        },
+        "instance": {
+          "type": "string",
+          "minLength": 1
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "read_only": {
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "interface": {
+                "enum": [
+                  "Alexa.RangeController",
+                  "Alexa.ToggleController"
+                ]
+              }
+            },
+            "required": [
+              "interface"
+            ]
+          },
+          "then": {
+            "required": [
+              "instance"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "instance"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "interface": {
+                "const": "Alexa.RangeController"
+              }
+            },
+            "required": [
+              "interface"
+            ]
+          },
+          "then": {
+            "required": [
+              "unit"
+            ],
+            "properties": {
+              "read_only": {
+                "const": true
+              }
+            }
+          }
+        }
+      ],
+      "additionalProperties": true
+    }
+  }
+}
