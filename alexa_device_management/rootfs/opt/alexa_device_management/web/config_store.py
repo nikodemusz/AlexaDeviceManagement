@@ -205,4 +205,5 @@ class ConfigStore:
                 })
         except (OSError, yaml.YAMLError, AttributeError, TypeError):
             pass
+        state["devices"] = migrate_v5_entities(state["entities"])
         return state
