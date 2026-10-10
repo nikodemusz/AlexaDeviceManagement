@@ -21,6 +21,9 @@
 .migration .global-panel{margin:20px 0;padding:16px;border:1px solid #a8b0ba;border-radius:8px}
 .migration .global-panel label{display:flex;gap:10px;align-items:center;font-weight:600}
 .migration .config-feedback{margin-top:8px;white-space:pre-wrap}
+.migration .state-badge{display:inline-block;margin-left:10px;padding:4px 9px;border-radius:999px;font-weight:700;background:#e5e7eb;color:#20242a}
+.migration .state-badge.active{background:#d7f5df;color:#17632a}
+.migration .requirement{display:block;margin-top:5px;font-size:.82rem;color:#9b3c19}
 </style></head><body>
 <header class="topbar"><div><h1>Migration v5 → v6</h1><div class="subtitle">Geräte kontrolliert auf die native Alexa-Skill umstellen</div></div>
 <div class="top-actions"><a class="button secondary" href="{{INGRESS_PATH}}/devices">Zur Geräteübersicht</a></div></header>
@@ -30,7 +33,7 @@
 <label><input type="checkbox" id="global-v6"> Native v6-Skill global aktivieren</label>
 <p class="hint">Aktiviert die native Discovery für bereits aktivierte v6-Geräte. Es werden keine Entwürfe automatisch aktiviert und keine v5-Geräte gelöscht.</p>
 <button id="save-global" class="button primary">v6-Einstellung speichern</button>
-<span id="global-state" role="status"></span>
+<span id="global-state" class="state-badge" role="status"></span>
 </section>
 <details id="config-details"><summary>Native v6-Konfiguration prüfen und bearbeiten</summary>
 <p class="hint">Datei: <code>/config/alexa_device_management/native/config.yaml</code>. Änderungen erst validieren und dann explizit speichern.</p>
@@ -56,12 +59,16 @@ let configRevision=null, validatedYaml=null;
 const yamlEditor=document.getElementById("native-yaml");
 yamlEditor.addEventListener("input",()=>{validatedYaml=null;document.getElementById("config-feedback").textContent="Ungespeicherte Änderungen – erneut prüfen.";});
 function configFeedback(text){document.getElementById("config-feedback").textContent=text;}
+function applyConfig(c){
+ configRevision=c.revision;yamlEditor.value=c.yaml;validatedYaml=null;
+ const state=document.getElementById("global-state");
+ document.getElementById("global-v6").checked=c.global_enabled;
+ state.textContent=c.global_enabled?"AKTIV":"DEAKTIVIERT";state.classList.toggle("active",c.global_enabled);
+}
 async function loadConfig(){
  try{
  const c=await api("/api/native-migration/config");
- configRevision=c.revision;yamlEditor.value=c.yaml;validatedYaml=null;
- document.getElementById("global-v6").checked=c.global_enabled;
- document.getElementById("global-state").textContent=c.global_enabled?"v6 global aktiv":"v6 global deaktiviert";
+ applyConfig(c);
  configFeedback(c.devices_count+" native Geräte geladen.");
  }catch(e){configFeedback("Konfiguration konnte nicht geladen werden: "+e.message)}
 }
@@ -78,15 +85,14 @@ document.getElementById("save-config").onclick=async()=>{
  if(validatedYaml!==yamlEditor.value){configFeedback("Bitte die aktuelle YAML zuerst prüfen.");return}
  if(!confirm("Validierte native v6-Konfiguration speichern? Bestehende native Geräte können sich dadurch ändern."))return;
  try{const r=await api("/api/native-migration/config/save","POST",{yaml:yamlEditor.value,revision:configRevision});
- configRevision=r.config.revision;validatedYaml=null;yamlEditor.value=r.config.yaml;render(r.data);configFeedback("Konfiguration gespeichert.");}
+ applyConfig(r.config);render(r.data);configFeedback("Konfiguration gespeichert.");}
  catch(e){configFeedback("Speichern fehlgeschlagen: "+e.message)}
 };
 document.getElementById("save-global").onclick=async()=>{
  const enabled=document.getElementById("global-v6").checked;
  if(!confirm(enabled?"Native v6-Skill global aktivieren? Bereits aktive native Geräte erscheinen bei Alexa.":"Native v6-Skill global deaktivieren? Die nativen Geräte werden bei der nächsten Discovery nicht mehr angeboten."))return;
  try{const r=await api("/api/native-migration/global","POST",{enabled,revision:configRevision});
- configRevision=r.config.revision;yamlEditor.value=r.config.yaml;validatedYaml=null;render(r.data);
- document.getElementById("global-state").textContent=enabled?"v6 global aktiv":"v6 global deaktiviert";configFeedback("Globale Einstellung gespeichert.");}
+ applyConfig(r.config);render(r.data);configFeedback("Globale Einstellung gespeichert.");}
  catch(e){configFeedback(e.message);await loadConfig()}
 };
 function el(tag,text){const node=document.createElement(tag);node.textContent=text;return node}
@@ -104,22 +110,25 @@ function render(data){
  if(!data.rows.length){const tr=el("tr","");const td=el("td","Keine migrierbaren Geräte vorhanden.");td.colSpan=5;tr.append(td);rows.append(tr);return}
  for(const d of data.rows){
   const tr=document.createElement("tr");
-  for(const value of [d.name+" ("+(d.entity_id||d.id)+")",d.legacy_id||"—",d.capabilities.join(", "),({candidate:"Vorschlag",draft:"Entwurf (inaktiv)",native_active:"v6 aktiv"})[d.status]||d.status])
+  for(const value of [d.name+" ("+(d.entity_id||d.id)+")",d.legacy_id||"—",d.capabilities.join(", ")||"—",({candidate:"Vorschlag",draft:"Entwurf (inaktiv)",native_active:"v6 aktiv",unsupported:"Nicht unterstützt"})[d.status]||d.status])
    tr.append(el("td",value));
   const cell=document.createElement("td");
-  if(d.status!=="candidate"){
+  if(d.status==="unsupported"){
+   cell.append(el("span","Keine automatische Migration"));
+  }else if(d.status!=="candidate"){
    const button=el("button",d.enabled?"Zu v5 zurück":"v6 aktivieren");
    button.className="button "+(d.enabled?"secondary":"primary");
-   button.disabled=!d.enabled&&!data.global_enabled;
+   button.disabled=!d.enabled&&!d.can_activate;
    button.title=d.enabled?"v6 deaktivieren; v5 wird bei der nächsten Alexa-Gerätesuche wieder sichtbar":"v6 aktivieren; ersetzt v5 bei der nächsten Gerätesuche";
    button.addEventListener("click",async()=>{
      const enabled=!d.enabled;
      if(!confirm(enabled?"Gerät "+d.name+" auf v6 umstellen? Bestehende Alexa-Routinen können betroffen sein.":"v6 für "+d.name+" deaktivieren und v5 wieder bereitstellen?"))return;
      button.disabled=true;
-     try{const response=await api("/api/native-migration/activate","POST",{id:d.id,enabled});render(response.data);message("Konfiguration gespeichert. Jetzt Alexa-Gerätesuche durchführen.")}
-     catch(e){message("Fehler: "+e.message);button.disabled=false}
+     try{const response=await api("/api/native-migration/activate","POST",{id:d.id,enabled,revision:configRevision});applyConfig(response.config);render(response.data);message("Konfiguration gespeichert. Jetzt Alexa-Gerätesuche durchführen.")}
+     catch(e){message("Aktivierung fehlgeschlagen: "+e.message);button.disabled=false;await loadConfig()}
    });cell.append(button);
   }else cell.append(el("span","Zuerst Entwurf übernehmen"));
+  if(d.blocked_reason){const reason=el("span",d.blocked_reason);reason.className="requirement";cell.append(reason)}
   tr.append(cell);rows.append(tr);
  }
  message("Vorschau: "+data.preview.added.length+" neue Entwürfe · "+data.preview.unsupported.length+" nicht automatisch unterstützte Geräte.");
@@ -128,8 +137,8 @@ async function load(){try{render(await api("/api/native-migration"))}catch(e){me
 document.getElementById("preview").onclick=load;
 document.getElementById("import").onclick=async()=>{
  if(!confirm("Deaktivierte v6-Entwürfe erzeugen? Bestehende v5- und v6-Konfigurationen bleiben erhalten."))return;
- try{const r=await api("/api/native-migration/import","POST");render(r.data);message(r.report.added.length+" deaktivierte v6-Entwürfe angelegt. Keine Geräte wurden automatisch umgestellt.")}
- catch(e){message("Import fehlgeschlagen: "+e.message)}
+ try{const r=await api("/api/native-migration/import","POST",{revision:configRevision});applyConfig(r.config);render(r.data);message(r.report.added.length+" deaktivierte v6-Entwürfe angelegt. Keine Geräte wurden automatisch umgestellt.")}
+ catch(e){message("Import fehlgeschlagen: "+e.message);await loadConfig()}
 };
 load();
 loadConfig();

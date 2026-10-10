@@ -52,31 +52,37 @@ class MigrationUITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(data["rows"]), 2)
         self.assertEqual(len(self.native.load()["devices"]), 1)
 
-        r = await self.client.post("/api/native-migration/import")
+        revision = (await (await self.client.get("/api/native-migration/config")).json())["revision"]
+        r = await self.client.post("/api/native-migration/import", json={"revision": revision})
         self.assertEqual(r.status, 200)
         data = await r.json()
         self.assertEqual(len(data["report"]["added"]), 2)
         self.assertFalse(self.native.load()["devices"]["ha:light.desk"]["enabled"])
         self.assertIn("zisterne", self.native.load()["devices"])
 
+        revision = data["config"]["revision"]
         r = await self.client.post("/api/native-migration/activate", json={
-            "id": "ha:light.desk", "enabled": True})
+            "id": "ha:light.desk", "enabled": True, "revision": revision})
         self.assertEqual(r.status, 200)
         self.assertTrue(self.native.load()["devices"]["ha:light.desk"]["enabled"])
 
+        data = await r.json()
         r = await self.client.post("/api/native-migration/activate", json={
-            "id": "ha:light.desk", "enabled": False})
+            "id": "ha:light.desk", "enabled": False,
+            "revision": data["config"]["revision"]})
         self.assertEqual(r.status, 200)
         self.assertFalse(self.native.load()["devices"]["ha:light.desk"]["enabled"])
         self.assertEqual(self.original, self.legacy.path.read_bytes())
 
     async def test_cannot_activate_when_native_skill_is_disabled(self):
-        await self.client.post("/api/native-migration/import")
+        revision = (await (await self.client.get("/api/native-migration/config")).json())["revision"]
+        await self.client.post("/api/native-migration/import", json={"revision": revision})
         config = self.native.load()
         config["enabled"] = False
         self.native.save(config)
         r = await self.client.post("/api/native-migration/activate", json={
-            "id": "ha:light.desk", "enabled": True})
+            "id": "ha:light.desk", "enabled": True,
+            "revision": (await (await self.client.get("/api/native-migration/config")).json())["revision"]})
         self.assertEqual(r.status, 409)
 
     async def test_global_activation_and_yaml_editor_validation(self):
@@ -116,8 +122,26 @@ class MigrationUITests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unknown_device_rejected(self):
         r = await self.client.post("/api/native-migration/activate", json={
-            "id": "zisterne", "enabled": False})
+            "id": "zisterne", "enabled": False,
+            "revision": (await (await self.client.get("/api/native-migration/config")).json())["revision"]})
         self.assertEqual(r.status, 400)
+
+    async def test_unsupported_devices_are_visible_with_reason(self):
+        config = self.legacy.load()
+        config["entities"]["sensor.temperature"] = {"enabled": True, "name": "Temperatur"}
+        self.legacy.save(config, create_backup=False)
+        data = await (await self.client.get("/api/native-migration")).json()
+        row = next(row for row in data["rows"] if row["entity_id"] == "sensor.temperature")
+        self.assertEqual(row["status"], "unsupported")
+        self.assertFalse(row["can_activate"])
+        self.assertIn("nicht automatisch", row["blocked_reason"])
+
+    async def test_import_and_activation_reject_stale_revision(self):
+        loaded = await (await self.client.get("/api/native-migration/config")).json()
+        self.native.save({**self.native.load(), "locale": "en-US"})
+        r = await self.client.post("/api/native-migration/import",
+                                   json={"revision": loaded["revision"]})
+        self.assertEqual(r.status, 409)
 
 
 if __name__ == "__main__":
