@@ -79,6 +79,41 @@ class MigrationUITests(unittest.IsolatedAsyncioTestCase):
             "id": "ha:light.desk", "enabled": True})
         self.assertEqual(r.status, 409)
 
+    async def test_global_activation_and_yaml_editor_validation(self):
+        response = await self.client.get("/api/native-migration/config")
+        self.assertEqual(response.status, 200)
+        loaded = await response.json()
+        self.assertIn("zisterne", loaded["yaml"])
+        revision = loaded["revision"]
+        r = await self.client.post("/api/native-migration/global",
+                                   json={"enabled": False, "revision": revision})
+        self.assertEqual(r.status, 200)
+        self.assertFalse(self.native.load()["enabled"])
+
+        r = await self.client.post("/api/native-migration/config/validate",
+                                   json={"yaml": "schema_version: 5\\nenabled: true\\nlocale: de-DE\\ndevices: {}"})
+        self.assertEqual(r.status, 400)
+        self.assertEqual(self.native.load()["devices"]["zisterne"]["name"], "Zisterne")
+
+        current = await (await self.client.get("/api/native-migration/config")).json()
+        modified = current["yaml"].replace("enabled: false", "enabled: true", 1)
+        r = await self.client.post("/api/native-migration/config/validate",
+                                   json={"yaml": modified})
+        self.assertEqual(r.status, 200)
+        r = await self.client.post("/api/native-migration/config/save",
+                                   json={"yaml": modified, "revision": current["revision"]})
+        self.assertEqual(r.status, 200)
+        self.assertTrue(self.native.load()["enabled"])
+        self.assertEqual(self.original, self.legacy.path.read_bytes())
+
+    async def test_rejects_stale_editor_without_modifying_file(self):
+        before = await (await self.client.get("/api/native-migration/config")).json()
+        self.native.save({**self.native.load(), "locale": "en-US"})
+        r = await self.client.post("/api/native-migration/config/save",
+                                   json={"yaml": before["yaml"], "revision": before["revision"]})
+        self.assertEqual(r.status, 409)
+        self.assertEqual(self.native.load()["locale"], "en-US")
+
     async def test_unknown_device_rejected(self):
         r = await self.client.post("/api/native-migration/activate", json={
             "id": "zisterne", "enabled": False})
