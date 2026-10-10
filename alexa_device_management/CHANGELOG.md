@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.20.0
+
+- Neue UI „v5 → v6 Migration“ mit Vorschau, deaktiviertem Import sowie Aktivierung und Rollback einzelner Geräte; v5-Export bleibt unverändert.
+
 ## 2.19.0
 
 - Native v6-Rollläden: Positionsabfrage, absolute und relative Positionssteuerung sowie Stopp; deaktivierte Migrationsentwürfe für v5-Cover.
