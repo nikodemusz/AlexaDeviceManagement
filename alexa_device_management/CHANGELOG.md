@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.22.0
+
+- Migrationsoberfläche zeigt den globalen v6-Status deutlich, erklärt nicht automatisch migrierbare Geräte und nennt blockierende Voraussetzungen direkt am Gerät.
+- Import und Einzelaktivierung schützen bestehende native YAML-Änderungen vor parallelem Überschreiben; UI, Status und Editor bleiben nach jeder Aktion synchron.
+
 ## 2.21.0
 
 - v6-Migrationsoberfläche: globale native Aktivierung, editierbare YAML-Konfiguration mit Validierung, sicherer Speicherung und Konflikterkennung; Einzelgeräte-Migration bleibt explizit.

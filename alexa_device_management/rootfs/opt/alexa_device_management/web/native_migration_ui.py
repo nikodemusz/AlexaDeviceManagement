@@ -33,7 +33,26 @@ def summary(legacy, native):
             "capabilities": [cap["interface"] for cap in device["capabilities"]],
             "status": ("native_active" if device.get("enabled", True)
                        else "draft") if key in native["devices"] else "candidate",
+            "can_activate": bool(native["enabled"] and key in native["devices"]
+                                 and not device.get("enabled", True)),
+            "blocked_reason": ("Native v6 ist global deaktiviert."
+                               if key in native["devices"] and not device.get("enabled", True)
+                               and not native["enabled"] else None),
         })
+    for entity_id in preview["unsupported"]:
+        settings = legacy.get("entities", {}).get(entity_id, {})
+        rows.append({
+            "id": "unsupported:" + entity_id,
+            "name": str(settings.get("name") or entity_id),
+            "entity_id": entity_id,
+            "legacy_id": entity_id.replace(".", "#", 1),
+            "enabled": False,
+            "capabilities": [],
+            "status": "unsupported",
+            "can_activate": False,
+            "blocked_reason": "Dieser Gerätetyp kann noch nicht automatisch nach v6 migriert werden.",
+        })
+    rows.sort(key=lambda row: (row["name"].casefold(), row["id"]))
     return {"global_enabled": native["enabled"], "rows": rows,
             "preview": preview, "native_count": len(native["devices"]),
             "legacy_count": sum(bool(d.get("enabled")) for d in legacy.get("entities", {}).values()
@@ -110,11 +129,17 @@ def create_routes(store):
 
     async def import_drafts(request):
         # Deliberate action; only add disabled drafts. Existing YAML stays as-is.
+        body = await request.json()
         current = NATIVE_STORE.load()
+        if not isinstance(body, dict) or body.get("revision") != config_revision(current):
+            return web.json_response({"error": "Configuration changed; reload first"}, status=409)
         proposed, report = prepare(store.load(), current)
         if report["added"]:
             NATIVE_STORE.save(proposed)
-        return web.json_response({"ok": True, "report": report, "data": summary(store.load(), NATIVE_STORE.load())})
+        saved = NATIVE_STORE.load()
+        return web.json_response({"ok": True, "report": report,
+                                  "config": config_payload(saved),
+                                  "data": summary(store.load(), saved)})
 
     async def activate(request):
         body = await request.json()
@@ -122,6 +147,8 @@ def create_routes(store):
         if not isinstance(key, str) or type(enabled) is not bool:
             raise web.HTTPBadRequest(text="id and boolean enabled required")
         config = NATIVE_STORE.load()
+        if body.get("revision") != config_revision(config):
+            return web.json_response({"error": "Configuration changed; reload first"}, status=409)
         device = config["devices"].get(key)
         if device is None or not device.get("replaces_legacy_endpoint"):
             raise web.HTTPBadRequest(text="Unknown migration draft")
@@ -131,7 +158,9 @@ def create_routes(store):
         proposed = copy.deepcopy(config)
         proposed["devices"][key]["enabled"] = enabled
         NATIVE_STORE.save(proposed)
-        return web.json_response({"ok": True, "data": summary(store.load(), proposed)})
+        saved = NATIVE_STORE.load()
+        return web.json_response({"ok": True, "config": config_payload(saved),
+                                  "data": summary(store.load(), saved)})
 
     return page, status, import_drafts, activate, read_config, validate_config, save_config, set_global
 
