@@ -336,7 +336,8 @@ def lambda_handler(event, context):
             elif name == "AdjustTargetTemperature":
                 value = action_payload.get("targetSetpointDelta")
             elif name == "SetThermostatMode":
-                value = action_payload.get("thermostatMode")
+                mode = action_payload.get("thermostatMode")
+                value = mode.get("value") if isinstance(mode, dict) else mode
             else:
                 value = None
             gateway("/v1/control", "POST", {"endpoint_id": endpoint_id, "interface": namespace,
