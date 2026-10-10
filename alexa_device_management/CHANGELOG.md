@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.23.1
+
+- Kompaktere Entitätslisten in der mobilen Ansicht; v6-Migrationstabelle als schmale Gerätekarten statt horizontaler Tabelle.
+
 ## 2.23.0
 
 - Native v6-Massenmigration mit Mehrfachauswahl, gestaffelter Aktivierung und Rollback (max. 50 Geräte je Transaktion).
