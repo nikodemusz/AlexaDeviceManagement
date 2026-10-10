@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.21.0
+
+- v6-Migrationsoberfläche: globale native Aktivierung, editierbare YAML-Konfiguration mit Validierung, sicherer Speicherung und Konflikterkennung; Einzelgeräte-Migration bleibt explizit.
+
 ## 2.20.1
 
 - Gruppenabruf akzeptiert HTTP 299 mit gültigen Phoenix-JSON-Daten; Fehler zeigen keine privaten Antwortinhalte.
