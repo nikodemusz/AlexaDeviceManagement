@@ -24,6 +24,40 @@
 .migration .state-badge{display:inline-block;margin-left:10px;padding:4px 9px;border-radius:999px;font-weight:700;background:#e5e7eb;color:#20242a}
 .migration .state-badge.active{background:#d7f5df;color:#17632a}
 .migration .requirement{display:block;margin-top:5px;font-size:.82rem;color:#9b3c19}
+
+@media(max-width:700px){
+ .migration{margin:10px auto;padding:0 8px;font-size:12px;line-height:1.4}
+ .migration .controls{gap:6px;margin:9px 0}
+ .migration .controls .button{padding:6px 8px;font-size:11px}
+ .migration .notice{padding:8px;margin:7px 0;font-size:11px}
+ .migration .table-wrap{overflow:visible}
+ .migration table,.migration tbody{display:block;width:100%;background:transparent}
+ .migration thead{display:none}
+ .migration tbody tr{
+   display:grid;grid-template-columns:22px minmax(0,1fr);
+   column-gap:7px;row-gap:3px;
+   padding:7px 8px;margin-bottom:5px;
+   border:1px solid var(--line);border-radius:8px;
+   background:var(--panel);
+ }
+ .migration tbody td{
+   display:block;min-width:0;padding:0;border:0;
+   font-size:11px;line-height:1.35;
+   overflow-wrap:anywhere;
+ }
+ .migration tbody td:nth-child(1){grid-column:1;grid-row:1}
+ .migration tbody td:nth-child(1) input{width:16px;height:16px}
+ .migration tbody td:nth-child(2){grid-column:2;font-size:12px;font-weight:650}
+ .migration tbody td:nth-child(3),
+ .migration tbody td:nth-child(4){grid-column:2;font-size:10px;color:var(--muted)}
+ .migration tbody td:nth-child(5){grid-column:2;font-size:10px}
+ .migration tbody td:nth-child(6){grid-column:2;margin-top:3px}
+ .migration tbody td:nth-child(6) .button{font-size:11px;padding:5px 8px}
+ .migration tbody td[colspan]{grid-column:1/-1}
+ .migration .requirement{font-size:10px}
+ .migration .global-panel,.migration details{padding:9px;margin:10px 0}
+ .migration textarea{font-size:12px;min-height:260px}
+}
 </style></head><body>
 <header class="topbar"><div><h1>Migration v5 → v6</h1><div class="subtitle">Geräte kontrolliert auf die native Alexa-Skill umstellen</div></div>
 <div class="top-actions"><a class="button secondary" href="{{INGRESS_PATH}}/devices">Zur Geräteübersicht</a></div></header>
