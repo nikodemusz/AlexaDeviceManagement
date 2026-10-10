@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.18.0
+
+- Stufenweise v5→v6-Migration: Vorschau und deaktivierte Geräteentwürfe ohne Änderung des v5-Exports; bei gezielter Aktivierung keine doppelte Discovery, jederzeit rückgängig.
+
 ## 2.17.2
 
 - v5-Rollläden ohne überflüssigen Ein-/Ausschalter; echte Kontaktsensoren bleiben erhalten, falsche Kontakt-Capabilities an Schaltern werden ausgeblendet. Statusantworten entsprechend angepasst.
