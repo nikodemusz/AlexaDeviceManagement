@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.20.1
+
+- Gruppenabruf akzeptiert HTTP 299 mit gültigen Phoenix-JSON-Daten; Fehler zeigen keine privaten Antwortinhalte.
+- Geräteübersicht ordnet aktive native v6-Endpunkte allen gebundenen HA-Entitäten zu, getrennt vom v5-Export. „In Alexa zugeordnet“ bestätigt ausdrücklich keine funktionierende Statusübertragung.
+- Lambda verarbeitet AcceptGrant mit `payload.grantee.token`; v5-Capabilities und Statusantworten bleiben konsistent mit den direkt von Home Assistant gesendeten Ereignissen.
+- Native Discovery, ReportState und Steuerantworten enthalten EndpointHealth und alle abrufbaren Eigenschaften; nicht verfügbare Zustände werden nicht als „aus“ gemeldet, HA-Messzeitpunkte bleiben erhalten und Authentifizierungsfehler werden korrekt weitergegeben.
+- JSON-Schemas akzeptieren bereits unterstützte native Rollladenposition und Stopp; Regressionstests für Gruppen, Zuordnung, OAuth und Protokollkonsistenz.
+- Die Lambda-Korrekturen benötigen eine separate Aktualisierung in AWS. Keine automatische Änderung bestehender Geräte, Skill-Verknüpfungen oder Konfigurationen.
+
 ## 2.20.0
 
 - Neue UI „v5 → v6 Migration“ mit Vorschau, deaktiviertem Import sowie Aktivierung und Rollback einzelner Geräte; v5-Export bleibt unverändert.

@@ -7,6 +7,7 @@ Legacy v5 delegates to HA /api/alexa/smart_home; native v6 reads YAML via gatewa
 from __future__ import annotations
 
 import json
+import math
 import os
 import urllib.error
 import urllib.parse
@@ -41,6 +42,9 @@ def gateway(path, method="GET", payload=None):
 
 def token_for(event):
     directive = event["directive"]
+    hdr = directive.get("header", {})
+    if (hdr.get("namespace"), hdr.get("name")) == ("Alexa.Authorization", "AcceptGrant"):
+        return directive.get("payload", {}).get("grantee", {}).get("token")
     return (directive.get("payload", {}).get("scope", {}).get("token")
             or directive.get("endpoint", {}).get("scope", {}).get("token"))
 
@@ -58,21 +62,6 @@ def legacy_request(event, token):
 
 
 
-def suppressed_legacy_interfaces(endpoint_id, categories=None):
-    """Hide HA-generated capabilities that do not describe the entity type.
-
-    Contact sensors for binary_sensor entities remain untouched. A switch
-    cannot itself report a contact state; real contact sensors must be
-    exported as their own binary_sensor endpoints.
-    """
-    categories = categories or []
-    if endpoint_id.startswith("cover#") or "INTERIOR_BLIND" in categories:
-        return {"Alexa.PowerController"}
-    if endpoint_id.startswith("switch#"):
-        return {"Alexa.ContactSensor"}
-    return set()
-
-
 def migrated_legacy_ids(config):
     """Only actively enabled native devices can replace a v5 Discovery entry."""
     replacements = set()
@@ -83,30 +72,6 @@ def migrated_legacy_ids(config):
         if isinstance(old_id, str) and old_id:
             replacements.add(old_id)
     return replacements
-
-
-def normalize_legacy_discovery(endpoints):
-    """Keep v5 endpoint IDs and all actionable cover position capabilities."""
-    for endpoint in endpoints:
-        excluded = suppressed_legacy_interfaces(
-            endpoint.get("endpointId", ""), endpoint.get("displayCategories"))
-        if excluded:
-            endpoint["capabilities"] = [
-                cap for cap in endpoint.get("capabilities", [])
-                if cap.get("interface") not in excluded
-            ]
-
-
-def normalize_legacy_response(request, result):
-    """Match reported properties to Discovery without changing HA controls."""
-    endpoint_id = request.get("directive", {}).get("endpoint", {}).get("endpointId", "")
-    excluded = suppressed_legacy_interfaces(endpoint_id)
-    props = result.get("context", {}).get("properties")
-    if excluded and isinstance(props, list):
-        result["context"]["properties"] = [
-            prop for prop in props if prop.get("namespace") not in excluded
-        ]
-    return result
 
 
 def header(namespace, name, message_id, correlation=None):
@@ -164,6 +129,9 @@ def discovery(event, config):
             continue
         capabilities = [{"type": "AlexaInterface", "interface": "Alexa", "version": "3"}]
         capabilities.extend(capability_config(binding) for binding in device["capabilities"])
+        capabilities.append({"type": "AlexaInterface", "interface": "Alexa.EndpointHealth", "version": "3.1",
+                             "properties": {"supported": [{"name": "connectivity"}],
+                                            "proactivelyReported": False, "retrievable": True}})
         endpoints.append({"endpointId": NATIVE_PREFIX + endpoint_id, "manufacturerName": "Alexa Device Management",
                           "friendlyName": device["name"],
                           "description": device.get("description") or device["name"],
@@ -172,33 +140,87 @@ def discovery(event, config):
     return response(event, "Alexa.Discovery", "Discover.Response", {"endpoints": endpoints})
 
 
+class EndpointUnavailable(ValueError):
+    """No trustworthy state is available for a bound HA entity."""
+
+
+def available_state(binding, states):
+    state = states.get(binding["entity_id"])
+    if not isinstance(state, dict) or state.get("state") in (None, "unknown", "unavailable"):
+        raise EndpointUnavailable("Bound HA entity is unavailable")
+    return state
+
+
+def numeric_state(value):
+    try:
+        number = float(value)
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise EndpointUnavailable("Numeric device state missing") from exc
+    if not math.isfinite(number):
+        raise EndpointUnavailable("Non-finite device state")
+    return number
+
+
+def sample_time(state):
+    for key in ("last_updated", "last_changed"):
+        value = state.get(key)
+        if isinstance(value, str):
+            try:
+                moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                if moment.tzinfo is not None:
+                    return moment.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+            except ValueError:
+                pass
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def state_for(binding, states):
-    state = states[binding["entity_id"]]
+    state = available_state(binding, states)
     value = state["state"]
     interface = binding["interface"]
     if interface in ("Alexa.PowerController", "Alexa.ToggleController"):
+        if value not in ("on", "off"):
+            raise EndpointUnavailable("Switch state is unavailable")
         mapped = "ON" if value == "on" else "OFF"
         prop = "powerState" if interface == "Alexa.PowerController" else "toggleState"
     elif interface == "Alexa.BrightnessController":
         prop = "brightness"
         value = state.get("attributes", {}).get("brightness")
+        if value is None and state["state"] == "off":
+            value = 0
         if value is None:
-            raise ValueError("Brightness missing")
-        mapped = round(100 * float(value) / 255)
+            raise EndpointUnavailable("Brightness missing")
+        number = numeric_state(value)
+        if not 0 <= number <= 255:
+            raise EndpointUnavailable("Brightness outside HA range")
+        mapped = round(100 * number / 255)
     elif interface == "Alexa.RangeController":
         if binding["entity_id"].startswith("cover."):
             value = state.get("attributes", {}).get("current_position")
             if value is None:
-                raise ValueError("Cover position unavailable")
-        prop, mapped = "rangeValue", float(value)
+                raise EndpointUnavailable("Cover position unavailable")
+        prop, mapped = "rangeValue", numeric_state(value)
     else:
         raise ValueError("Unsupported controller")
     data = {"namespace": interface, "name": prop, "value": mapped,
-            "timeOfSample": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "timeOfSample": sample_time(state),
             "uncertaintyInMilliseconds": 1000}
     if binding.get("instance"):
         data["instance"] = binding["instance"]
     return data
+
+
+def state_properties(bindings, states):
+    """Return every retrievable property plus the discovered endpoint health."""
+    for binding in bindings:
+        available_state(binding, states)
+    properties = [state_for(binding, states) for binding in bindings
+                  if binding["interface"] != "Alexa.PlaybackController"]
+    properties.append({"namespace": "Alexa.EndpointHealth", "name": "connectivity",
+                       "value": {"value": "OK"},
+                       "timeOfSample": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                       "uncertaintyInMilliseconds": 0})
+    return properties
 
 
 def lambda_handler(event, context):
@@ -230,14 +252,16 @@ def lambda_handler(event, context):
             replacement_ids = migrated_legacy_ids(config)
             if replacement_ids:
                 endpoints[:] = [e for e in endpoints if e["endpointId"] not in replacement_ids]
-            normalize_legacy_discovery(endpoints)
+            # HA sends ChangeReport/AddOrUpdateReport directly to Amazon with
+            # its original capabilities. Filtering only synchronous messages
+            # would make Discovery and proactive reports contradict each other.
             endpoints.extend(native_endpoints)
             return legacy
 
         # All non-discovery requests for legacy endpoints, including AcceptGrant,
         # are forwarded unchanged to the existing HA Alexa integration.
         if not native:
-            return normalize_legacy_response(event, legacy_request(event, token))
+            return legacy_request(event, token)
 
         config = gateway("/v1/config")
         device = config["devices"].get(endpoint_id)
@@ -246,8 +270,7 @@ def lambda_handler(event, context):
         bindings = device["capabilities"]
         if namespace == "Alexa" and name == "ReportState":
             states = gateway("/v1/state", "POST", {"endpoint_id": endpoint_id, "token": token})["states"]
-            values = [state_for(binding, states) for binding in bindings
-                      if binding["interface"] != "Alexa.PlaybackController"]
+            values = state_properties(bindings, states)
             return response(event, "Alexa", "StateReport", endpoint=external_id, properties=values)
         if namespace in INTERFACE_ACTIONS and name in (
                 "TurnOn", "TurnOff", "SetBrightness", "SetRangeValue",
@@ -257,6 +280,8 @@ def lambda_handler(event, context):
             if len(matching) != 1:
                 return error(event, "INVALID_DIRECTIVE", "Capability missing", external_id)
             binding = matching[0]
+            if binding.get("read_only", namespace == "Alexa.RangeController"):
+                return error(event, "INVALID_DIRECTIVE", "Read-only capability", external_id)
             action_payload = directive.get("payload", {})
             if name == "SetBrightness":
                 value = action_payload.get("brightness")
@@ -268,15 +293,22 @@ def lambda_handler(event, context):
                 value = None
             gateway("/v1/control", "POST", {"endpoint_id": endpoint_id, "interface": namespace,
                                            "instance": binding.get("instance"), "action": name, "value": value, "token": token})
-            if namespace == "Alexa.PlaybackController":
-                return response(event, "Alexa", "Response", endpoint=external_id, properties=[])
             states = gateway("/v1/state", "POST", {"endpoint_id": endpoint_id, "token": token})["states"]
             return response(event, "Alexa", "Response", endpoint=external_id,
-                            properties=[state_for(binding, states)])
+                            properties=state_properties(bindings, states))
         return error(event, "INVALID_DIRECTIVE", "Unsupported directive", external_id)
     except PermissionError:
         return error(event, "INVALID_AUTHORIZATION_CREDENTIAL", "Account not linked", external_id or None)
-    except (ValueError, KeyError, TypeError, urllib.error.HTTPError, urllib.error.URLError) as exc:
+    except EndpointUnavailable:
+        return error(event, "ENDPOINT_UNREACHABLE", "Device state unavailable", external_id or None)
+    except urllib.error.HTTPError as exc:
+        # Do not include the response body: it may contain account data.
+        kind = {401: "INVALID_AUTHORIZATION_CREDENTIAL", 403: "INVALID_DIRECTIVE",
+                404: "ENDPOINT_UNREACHABLE", 400: "INVALID_DIRECTIVE",
+                503: "BRIDGE_UNREACHABLE", 504: "BRIDGE_UNREACHABLE"}.get(exc.code, "INTERNAL_ERROR")
+        print(f"Alexa gateway request failed: HTTP {exc.code}")
+        return error(event, kind, endpoint=external_id or None)
+    except (ValueError, KeyError, TypeError, urllib.error.URLError) as exc:
         # Never log Alexa's directive: it contains the linked user's access token.
         print(f"Alexa request failed: {type(exc).__name__}")
         return error(event, endpoint=external_id or None)

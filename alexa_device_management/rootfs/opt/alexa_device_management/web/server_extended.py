@@ -19,7 +19,7 @@ import ha_export_overrides
 import native_migration_ui
 import server_clean
 
-APP_VERSION = "2.20.0"
+APP_VERSION = "2.20.1"
 
 
 @web.middleware

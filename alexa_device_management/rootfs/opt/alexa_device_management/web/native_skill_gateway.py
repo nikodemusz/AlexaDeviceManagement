@@ -71,6 +71,8 @@ async def ha_request(method: str, endpoint: str, payload=None, token: str | None
     async with aiohttp.ClientSession(headers=headers) as session:
         async with session.request(method, HA_USER_URL + endpoint, json=payload,
                                    timeout=aiohttp.ClientTimeout(total=10)) as result:
+            if result.status in (401, 403):
+                raise web.HTTPUnauthorized(text="Home Assistant authorization rejected")
             if result.status == 404:
                 raise web.HTTPNotFound(text="HA entity/service not found")
             if result.status >= 400:

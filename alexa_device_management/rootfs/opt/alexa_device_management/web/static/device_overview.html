@@ -36,7 +36,7 @@
       <select id="status-filter">
         <option value="all">Alle sichtbaren</option>
         <option value="selected">Für Alexa ausgewählt</option>
-        <option value="synced">Synchronisiert</option>
+        <option value="synced">In Alexa zugeordnet</option>
         <option value="pending">Ausstehend</option>
         <option value="only_alexa">Noch in Alexa vorhanden</option>
         <option value="problems">Probleme und Duplikate</option>
@@ -55,6 +55,7 @@
     </section>
 
     <section id="summary" class="summary"></section>
+    <p class="muted">Die Zuordnung vergleicht Endpunkt-IDs mit v5- und aktiven v6-Bindungen. Sie bestätigt keinen erfolgreichen Zustands- oder Steuerungsabgleich. Die Exportfelder bearbeiten v5; native Geräte werden unter „v5 → v6 Migration“ verwaltet.</p>
     <div id="message" class="message hidden"></div>
     <section id="content" class="content"><div class="loading">Geräte werden geladen…</div></section>
   </main>

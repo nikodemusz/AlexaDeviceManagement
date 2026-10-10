@@ -48,7 +48,7 @@
   };
 
   const STATUS_TEXT = {
-    synced: "Synchronisiert",
+    synced: "In Alexa zugeordnet",
     pending: "In Alexa ausstehend",
     only_alexa: "Deaktiviert, aber noch in Alexa",
     duplicate: "Mehrfach in Alexa",
@@ -217,7 +217,7 @@
     else if (hidden) return false;
     if (filter.area && device.area_id !== filter.area) return false;
     if (filter.domain && entity.domain !== filter.domain) return false;
-    if (filter.status === "selected" && !entity.export.enabled) return false;
+    if (filter.status === "selected" && !entity.export.enabled && !entity.native?.enabled) return false;
     if (filter.status === "synced" && entity.status !== "synced") return false;
     if (filter.status === "pending" && entity.status !== "pending") return false;
     if (filter.status === "only_alexa" && entity.status !== "only_alexa") return false;
@@ -245,7 +245,7 @@
 
   function renderSummary() {
     const s = model.summary || {};
-    const cards = [["HA-Geräte", s.ha_devices || 0], ["HA-Entitäten", s.ha_entities || 0], ["Für Alexa", s.selected || 0], ["Synchronisiert", s.synced || 0], ["Ausstehend", s.pending || 0], ["Noch in Alexa", s.only_alexa || 0], ["Duplikate", s.duplicates || 0], ["Nur Alexa", s.alexa_only || 0], ["Ausgeblendet", s.hidden || 0]];
+    const cards = [["HA-Geräte", s.ha_devices || 0], ["HA-Entitäten", s.ha_entities || 0], ["Für Alexa", s.selected || 0], ["In Alexa zugeordnet", s.synced || 0], ["Davon nativ v6", s.native_selected || 0], ["Ausstehend", s.pending || 0], ["Noch in Alexa", s.only_alexa || 0], ["Duplikate", s.duplicates || 0], ["Nur Alexa", s.alexa_only || 0], ["Ausgeblendet", s.hidden || 0]];
     document.getElementById("summary").innerHTML = cards.map(([label, value]) => `<div class="summary-card"><strong>${value}</strong>${esc(label)}</div>`).join("");
   }
 
@@ -273,7 +273,7 @@
     const exportData = entity.export;
     const matches = entity.alexa?.matches || [];
     const categories = (model.display_categories || []).map(category => `<option value="${attr(category)}" ${exportData.display_category === category ? "selected" : ""}>${esc(category)}</option>`).join("");
-    return `<article class="entity status-${attr(entity.status)} ${entity.hidden ? "hidden-item" : ""}" data-entity="${attr(entity.entity_id)}"><div class="entity-top"><input class="export-toggle" type="checkbox" data-entity="${attr(entity.entity_id)}" ${exportData.enabled ? "checked" : ""} title="Für Alexa exportieren"><div><div class="entity-name">${esc(entity.name || entity.entity_id)}</div><div class="entity-id">${esc(entity.entity_id)}</div><div class="badges">${statusBadge(entity.status)}${matches.length ? `<span class="badge alexa">${matches.length} Alexa-Endpunkt${matches.length === 1 ? "" : "e"}</span>` : ""}${isTechnical(entity) ? '<span class="badge">technisch</span>' : ""}${entity.hidden ? '<span class="badge hidden-badge">ausgeblendet</span>' : ""}</div></div><button class="button secondary small" data-action="${entity.hidden_directly ? "show-entity" : "hide-entity"}" data-entity="${attr(entity.entity_id)}">${entity.hidden_directly ? "Einblenden" : "Ausblenden"}</button></div><div class="fields"><div class="field"><label>Alexa-Name</label><input class="export-name" data-entity="${attr(entity.entity_id)}" value="${attr(exportData.name)}" placeholder="${attr(suggestedName(entity, device))}"></div><div class="field"><label>Kategorie</label><select class="export-category" data-entity="${attr(entity.entity_id)}"><option value="">Automatisch</option>${categories}</select></div><div class="field full"><label>Alexa-Gruppe</label><input class="export-group" data-entity="${attr(entity.entity_id)}" value="${attr(exportData.alexa_group)}" list="group-list" placeholder="${attr(device.area_name || "")}"></div></div><div class="entity-actions"><button class="button secondary small" data-action="fill-entity" data-entity="${attr(entity.entity_id)}">Vorschlag übernehmen</button></div>${matches.map(match => alexaMatchHtml(match, entity)).join("")}</article>`;
+    return `<article class="entity status-${attr(entity.status)} ${entity.hidden ? "hidden-item" : ""}" data-entity="${attr(entity.entity_id)}"><div class="entity-top"><input class="export-toggle" type="checkbox" data-entity="${attr(entity.entity_id)}" ${exportData.enabled ? "checked" : ""} title="Für Alexa exportieren"><div><div class="entity-name">${esc(entity.name || entity.entity_id)}</div><div class="entity-id">${esc(entity.entity_id)}</div><div class="badges">${statusBadge(entity.status)}${entity.native?.enabled ? '<span class="badge alexa">Nativ v6</span>' : ""}${matches.length ? `<span class="badge alexa">${matches.length} Alexa-Endpunkt${matches.length === 1 ? "" : "e"}</span>` : ""}${isTechnical(entity) ? '<span class="badge">technisch</span>' : ""}${entity.hidden ? '<span class="badge hidden-badge">ausgeblendet</span>' : ""}</div></div><button class="button secondary small" data-action="${entity.hidden_directly ? "show-entity" : "hide-entity"}" data-entity="${attr(entity.entity_id)}">${entity.hidden_directly ? "Einblenden" : "Ausblenden"}</button></div><div class="fields"><div class="field"><label>Alexa-Name</label><input class="export-name" data-entity="${attr(entity.entity_id)}" value="${attr(exportData.name)}" placeholder="${attr(suggestedName(entity, device))}"></div><div class="field"><label>Kategorie</label><select class="export-category" data-entity="${attr(entity.entity_id)}"><option value="">Automatisch</option>${categories}</select></div><div class="field full"><label>Alexa-Gruppe</label><input class="export-group" data-entity="${attr(entity.entity_id)}" value="${attr(exportData.alexa_group)}" list="group-list" placeholder="${attr(device.area_name || "")}"></div></div><div class="entity-actions"><button class="button secondary small" data-action="fill-entity" data-entity="${attr(entity.entity_id)}">Vorschlag übernehmen</button></div>${matches.map(match => alexaMatchHtml(match, entity)).join("")}</article>`;
   }
 
   function deviceHtml(device, entities) {
@@ -359,7 +359,7 @@
       name.textContent = String(item.device.name || item.device.device_id || "Unbekanntes Gerät");
       const detail = document.createElement("span");
       detail.className = "muted";
-      const selected = item.entities.filter(entity => entity.export?.enabled).length;
+      const selected = item.entities.filter(entity => entity.export?.enabled || entity.native?.enabled).length;
       detail.textContent = `${item.entities.length} Entität${item.entities.length === 1 ? "" : "en"} • ${selected} für Alexa`;
       info.append(name, detail);
       const actions = document.createElement("div");

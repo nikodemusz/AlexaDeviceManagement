@@ -93,7 +93,8 @@
             "Alexa.PowerController",
             "Alexa.BrightnessController",
             "Alexa.RangeController",
-            "Alexa.ToggleController"
+            "Alexa.ToggleController",
+            "Alexa.PlaybackController"
           ]
         },
         "entity_id": {
@@ -110,6 +111,12 @@
         },
         "read_only": {
           "type": "boolean"
+        },
+        "supported_operations": {
+          "type": "array",
+          "const": [
+            "Stop"
+          ]
         }
       },
       "allOf": [
@@ -154,10 +161,55 @@
           "then": {
             "required": [
               "unit"
-            ],
+            ]
+          }
+        },
+        {
+          "if": {
             "properties": {
+              "interface": {
+                "const": "Alexa.RangeController"
+              },
               "read_only": {
-                "const": true
+                "const": false
+              }
+            },
+            "required": [
+              "interface",
+              "read_only"
+            ]
+          },
+          "then": {
+            "properties": {
+              "entity_id": {
+                "pattern": "^cover\\."
+              },
+              "instance": {
+                "const": "cover.position"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "interface": {
+                "const": "Alexa.PlaybackController"
+              }
+            },
+            "required": [
+              "interface"
+            ]
+          },
+          "then": {
+            "properties": {
+              "entity_id": {
+                "pattern": "^cover\\."
+              },
+              "supported_operations": {
+                "const": [
+                  "Stop"
+                ]
               }
             }
           }

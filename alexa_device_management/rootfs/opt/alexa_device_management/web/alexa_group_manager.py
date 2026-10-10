@@ -179,13 +179,27 @@ def _enrich_cookie_aliases(data: dict[str, Any]) -> dict[str, Any]:
 
 async def _load_groups(server: Any, data: dict[str, Any]) -> list[dict[str, Any]]:
     status, body = await server.alexa_raw_get("/api/phoenix", data)
-    if status != 200:
-        raise AlexaGroupError(f"Alexa-Gruppen konnten nicht geladen werden (HTTP {status}): {body[:200]}")
+    if not 200 <= status < 300:
+        # Response bodies can contain account information or session material.
+        raise AlexaGroupError(f"Alexa-Gruppen konnten nicht geladen werden (HTTP {status}).")
     try:
         payload = json.loads(body)
     except json.JSONDecodeError as exc:
         raise AlexaGroupError("Alexa hat ungültige Phoenix-Daten geliefert.") from exc
-    return extract_groups(payload)
+    if not isinstance(payload, dict):
+        raise AlexaGroupError("Alexa hat ungültige Phoenix-Daten geliefert.")
+    parsed = _parse_nested(payload)
+    network = parsed.get("networkDetail")
+    if parsed.get("error") or parsed.get("errors") or (
+        isinstance(network, dict) and (network.get("error") or network.get("errors"))
+    ):
+        raise AlexaGroupError("Alexa hat beim Phoenix-Abruf einen Fehler gemeldet.")
+    groups = extract_groups(parsed)
+    if status != 200 and not groups and not (
+        isinstance(network, (dict, list)) or parsed.get("groups") == []
+    ):
+        raise AlexaGroupError("Alexa hat keine erkennbaren Phoenix-Gruppendaten geliefert.")
+    return groups
 
 
 def _device_identifiers(device: dict[str, Any]) -> set[str]:
