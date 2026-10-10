@@ -46,9 +46,15 @@
 <div class="controls"><button id="preview" class="button secondary">Vorschau aktualisieren</button>
 <button id="import" class="button primary">Entwürfe übernehmen</button>
 <span id="counts"></span></div>
+<div class="controls">
+<label><input id="select-all" type="checkbox"> Alle vorbereiteten Geräte auswählen</label>
+<button id="bulk-on" class="button primary">Auswahl auf v6 migrieren</button>
+<button id="bulk-off" class="button secondary">Auswahl zu v5 zurück</button>
+<span id="selected-count" aria-live="polite">0 ausgewählt</span>
+</div>
 <div id="message" class="notice" role="status" aria-live="polite">Lade Migration…</div>
 <div id="warning" class="notice" hidden>Die native v6-Konfiguration ist global deaktiviert. Aktiviere sie über den Schalter oben, bevor du einzelne Geräte auf v6 umstellst.</div>
-<div class="table-wrap"><table><thead><tr><th>Gerät / Entität</th><th>v5-Endpunkt</th><th>v6-Funktionen</th><th>Status</th><th>Aktion</th></tr></thead>
+<div class="table-wrap"><table><thead><tr><th>Auswahl</th><th>Gerät / Entität</th><th>v5-Endpunkt</th><th>v6-Funktionen</th><th>Status</th><th>Aktion</th></tr></thead>
 <tbody id="rows"><tr><td colspan="5">Lade Geräte…</td></tr></tbody></table></div>
 <p class="hint">Achtung: Neue v6-Endpunkt-IDs werden von Alexa als neue Geräte erkannt. Räume und Routinen müssen gegebenenfalls neu zugeordnet werden. Eine Gerätesuche in Alexa ist nach jeder Umstellung erforderlich. Der v5-Export wird nicht verändert.</p>
 </main>
@@ -103,13 +109,24 @@ async function api(path,method="GET",data){
  return response;
 }
 function message(s){msg.textContent=s}
+let currentRows=[];
+function updateSelectionCount(){
+ document.getElementById("selected-count").textContent=document.querySelectorAll(".migration-check:checked").length+" ausgewählt";
+}
 function render(data){
+ currentRows=data.rows;
  document.getElementById("counts").textContent=data.legacy_count+" v5-Freigaben · "+data.native_count+" v6-Geräte";
  document.getElementById("warning").hidden=data.global_enabled;
  rows.replaceChildren();
- if(!data.rows.length){const tr=el("tr","");const td=el("td","Keine migrierbaren Geräte vorhanden.");td.colSpan=5;tr.append(td);rows.append(tr);return}
+ if(!data.rows.length){const tr=el("tr","");const td=el("td","Keine migrierbaren Geräte vorhanden.");td.colSpan=6;tr.append(td);rows.append(tr);return}
  for(const d of data.rows){
   const tr=document.createElement("tr");
+  const choose=document.createElement("td");
+  const check=document.createElement("input");
+  check.type="checkbox";check.className="migration-check";check.dataset.id=d.id;
+  check.disabled=d.status==="candidate"||d.status==="unsupported";
+  check.addEventListener("change",updateSelectionCount);
+  choose.append(check);tr.append(choose);
   for(const value of [d.name+" ("+(d.entity_id||d.id)+")",d.legacy_id||"—",d.capabilities.join(", ")||"—",({candidate:"Vorschlag",draft:"Entwurf (inaktiv)",native_active:"v6 aktiv",unsupported:"Nicht unterstützt"})[d.status]||d.status])
    tr.append(el("td",value));
   const cell=document.createElement("td");
@@ -131,6 +148,7 @@ function render(data){
   if(d.blocked_reason){const reason=el("span",d.blocked_reason);reason.className="requirement";cell.append(reason)}
   tr.append(cell);rows.append(tr);
  }
+ updateSelectionCount();
  message("Vorschau: "+data.preview.added.length+" neue Entwürfe · "+data.preview.unsupported.length+" nicht automatisch unterstützte Geräte.");
 }
 async function load(){try{render(await api("/api/native-migration"))}catch(e){message("Fehler: "+e.message)}}
@@ -140,6 +158,32 @@ document.getElementById("import").onclick=async()=>{
  try{const r=await api("/api/native-migration/import","POST",{revision:configRevision});applyConfig(r.config);render(r.data);message(r.report.added.length+" deaktivierte v6-Entwürfe angelegt. Keine Geräte wurden automatisch umgestellt.")}
  catch(e){message("Import fehlgeschlagen: "+e.message);await loadConfig()}
 };
+document.getElementById("select-all").addEventListener("change",event=>{
+ document.querySelectorAll(".migration-check:not(:disabled)").forEach(c=>{c.checked=event.target.checked});
+ updateSelectionCount();
+});
+async function bulk(enabled){
+ const ids=[...document.querySelectorAll(".migration-check:checked")].map(c=>c.dataset.id);
+ if(!ids.length){message("Bitte zuerst Geräte auswählen.");return}
+ if(enabled&&!document.getElementById("global-v6").checked){message("Bitte v6 zunächst global aktivieren.");return}
+ if(!confirm(ids.length+" ausgewählte Geräte "+(enabled?"auf v6 umstellen":"auf v5 zurückstellen")+"? Alexa behandelt neue v6-Endpunkte als neue Geräte. Räume und Routinen können betroffen sein."))return;
+ const buttons=[document.getElementById("bulk-on"),document.getElementById("bulk-off")];
+ buttons.forEach(b=>b.disabled=true);
+ try{
+  let last;
+  for(let i=0;i<ids.length;i+=50){
+   const group=ids.slice(i,i+50);
+   last=await api("/api/native-migration/bulk","POST",{ids:group,enabled,revision:configRevision});
+   configRevision=last.config.revision;
+   message("Migration: "+Math.min(i+50,ids.length)+" / "+ids.length+" gespeichert …");
+  }
+  applyConfig(last.config);render(last.data);
+  message(ids.length+" Geräte aktualisiert. Jetzt Alexa-Gerätesuche durchführen. Räume und Routinen prüfen.");
+ }catch(e){message("Massenmigration unterbrochen: "+e.message+". Bereits gespeicherte Blöcke bleiben erhalten. Bitte Status neu laden.");await load();await loadConfig()}
+ finally{buttons.forEach(b=>b.disabled=false);document.getElementById("select-all").checked=false}
+}
+document.getElementById("bulk-on").onclick=()=>bulk(true);
+document.getElementById("bulk-off").onclick=()=>bulk(false);
 load();
 loadConfig();
 </script></body></html>
