@@ -86,7 +86,7 @@ The externally visible Lambda gateway URL and token remain unchanged.
 The migration **never disables or changes** the legacy `config.json` or
 `/config/packages/alexa.yaml`. It proposes disabled native device drafts for
 enabled `light`, `switch` and `fan` entities only. Unsupported devices such as
-`cover`, `climate`, sensors and complex device capabilities are reported and
+`climate`, sensors and complex device capabilities are reported and
 must be migrated manually after native protocol support exists.
 
 Inside the running add-on container (or with paths pointing at equivalent
@@ -121,3 +121,15 @@ an HA add-on update alone is insufficient.
 
 For a local preview against files outside the add-on container:
 `python3 native_migration.py --legacy /path/to/config.json --native /path/to/config.yaml`.
+
+## Native covers (2.19.0)
+
+Migration drafts now include `cover` entities as disabled v6 endpoints with
+`Alexa.RangeController` position (0–100 %, 0=closed, 100=open) and
+`Alexa.PlaybackController` Stop. The gateway calls Home Assistant
+`cover.set_cover_position` / `cover.stop_cover` and reads
+`current_position`. Covers without an available numeric
+`current_position`, `SET_POSITION` or `STOP` support must stay on v5.
+Inspect and explicitly enable each migrated cover individually; do not enable
+migration drafts in bulk. Alexa retains the old endpoint until a device refresh
+or deletion. This feature requires updating both HA app and AWS Lambda.
