@@ -80,3 +80,44 @@ The externally visible Lambda gateway URL and token remain unchanged.
   Full independence from HA's Alexa component comes only after retiring v5.
 - A failing HA or gateway makes both backends unavailable. Test safely using
   staging before changing an active Alexa Skill.
+
+## Staged v5 → v6 migration (2.18.0)
+
+The migration **never disables or changes** the legacy `config.json` or
+`/config/packages/alexa.yaml`. It proposes disabled native device drafts for
+enabled `light`, `switch` and `fan` entities only. Unsupported devices such as
+`cover`, `climate`, sensors and complex device capabilities are reported and
+must be migrated manually after native protocol support exists.
+
+Inside the running add-on container (or with paths pointing at equivalent
+files on a development machine):
+
+```bash
+cd /opt/alexa_device_management/web
+python3 native_migration.py
+python3 native_migration.py --apply
+```
+
+`--apply` **only adds disabled drafts** to
+`/config/alexa_device_management/native/config.yaml`. Existing native
+devices (including `zisterne`) remain untouched; repeated execution is safe.
+Back up that YAML before manual edits.
+
+To migrate **one device at a time**, inspect its capability, enable
+`enabled: true` on that device in the native YAML, and make sure global
+`enabled: true` is set. Its optional `replaces_legacy_endpoint`
+points at the corresponding HA-v5 endpoint ID, e.g. `light#desk`.
+The Lambda then hides only that v5 endpoint from subsequent Discovery;
+its v5 export and old endpoint control remain available for rollback.
+Alexa sees the new `native:ha:light.desk` ID as a **new device** and may
+retain a stale v5 copy until a device sync/delete. Check rooms and routines
+manually, and do not remove legacy YAML until the entire migration is proven.
+
+To roll back, set the individual native device's `enabled: false`, run
+Discovery again and reassign Alexa routines if needed. The original v5
+endpoint reappears. **Re-deploy the AWS Lambda** from
+`native_skill/lambda_function.py` to activate discovery cutover logic;
+an HA add-on update alone is insufficient.
+
+For a local preview against files outside the add-on container:
+`python3 native_migration.py --legacy /path/to/config.json --native /path/to/config.yaml`.
