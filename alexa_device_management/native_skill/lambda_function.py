@@ -72,6 +72,18 @@ def suppressed_legacy_interfaces(endpoint_id, categories=None):
     return set()
 
 
+def migrated_legacy_ids(config):
+    """Only actively enabled native devices can replace a v5 Discovery entry."""
+    replacements = set()
+    for device in config.get("devices", {}).values():
+        if not device.get("enabled", True) or not device.get("capabilities"):
+            continue
+        old_id = device.get("replaces_legacy_endpoint")
+        if isinstance(old_id, str) and old_id:
+            replacements.add(old_id)
+    return replacements
+
+
 def normalize_legacy_discovery(endpoints):
     """Keep v5 endpoint IDs and all actionable cover position capabilities."""
     for endpoint in endpoints:
@@ -204,6 +216,12 @@ def lambda_handler(event, context):
             known = {e["endpointId"] for e in endpoints}
             if any(e["endpointId"] in known for e in native_endpoints):
                 raise ValueError("Endpoint ID collision between native and legacy")
+            # A user-enabled migration draft replaces exactly its designated
+            # legacy endpoint in Discovery. Legacy exports remain untouched,
+            # so disabling the draft immediately restores v5 on next Discover.
+            replacement_ids = migrated_legacy_ids(config)
+            if replacement_ids:
+                endpoints[:] = [e for e in endpoints if e["endpointId"] not in replacement_ids]
             normalize_legacy_discovery(endpoints)
             endpoints.extend(native_endpoints)
             return legacy
