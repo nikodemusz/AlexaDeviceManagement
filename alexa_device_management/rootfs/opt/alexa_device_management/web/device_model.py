@@ -13,7 +13,7 @@ ENDPOINT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 LEGACY_ENDPOINT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:#-]{0,127}$")
 SUPPORTED_INTERFACES = frozenset({
     "Alexa.PowerController", "Alexa.BrightnessController",
-    "Alexa.RangeController", "Alexa.ToggleController",
+    "Alexa.RangeController", "Alexa.ToggleController", "Alexa.PlaybackController",
 })
 INSTANCE_INTERFACES = frozenset({"Alexa.RangeController", "Alexa.ToggleController"})
 
@@ -104,7 +104,11 @@ def validate_devices(devices: Any) -> dict[str, dict[str, Any]]:
                 if not isinstance(cap.get("unit"), str) or not cap["unit"].strip():
                     raise DeviceModelError(f"{endpoint_id}: RangeController requires unit")
                 if cap.get("read_only", True) is not True:
-                    raise DeviceModelError(f"{endpoint_id}: writable ranges not implemented")
+                    if not entity_id.startswith("cover.") or instance != "cover.position":
+                        raise DeviceModelError(f"{endpoint_id}: writable ranges only supported for cover.position")
+            if interface == "Alexa.PlaybackController":
+                if not entity_id.startswith("cover.") or cap.get("supported_operations", ["Stop"]) != ["Stop"]:
+                    raise DeviceModelError(f"{endpoint_id}: PlaybackController only supports cover Stop")
         if replaces is not None:
             if replaces in legacy_replacements:
                 raise DeviceModelError(f"{endpoint_id}: duplicate legacy replacement {replaces!r}")
