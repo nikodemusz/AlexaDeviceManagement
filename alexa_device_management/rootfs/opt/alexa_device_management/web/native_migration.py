@@ -20,10 +20,15 @@ def candidate(entity_id, settings):
     if not isinstance(entity_id, str) or "." not in entity_id:
         return None
     domain, _ = entity_id.split(".", 1)
-    if domain not in ("light", "switch", "fan", "cover"):
+    if domain not in ("light", "switch", "fan", "cover", "climate", "binary_sensor", "sensor"):
         return None
     # HA-v5 endpoint IDs are domain#object_id, independent of the friendly name.
     legacy_endpoint_id = entity_id.replace(".", "#", 1)
+    category = str(settings.get("display_category") or "").upper()
+    if domain == "binary_sensor" and category not in ("CONTACT_SENSOR", "MOTION_SENSOR"):
+        return None
+    if domain == "sensor" and category != "TEMPERATURE_SENSOR":
+        return None
     if domain == "cover":
         bindings = [
             {"interface": "Alexa.RangeController", "instance": "cover.position",
@@ -33,12 +38,21 @@ def candidate(entity_id, settings):
             {"interface": "Alexa.PlaybackController", "entity_id": entity_id,
              "supported_operations": ["Stop"]},
         ]
+    elif domain == "climate":
+        bindings = [{"interface": "Alexa.ThermostatController", "entity_id": entity_id}]
+    elif domain == "binary_sensor":
+        bindings = [{"interface": "Alexa.ContactSensor" if category == "CONTACT_SENSOR"
+                     else "Alexa.MotionSensor", "entity_id": entity_id}]
+    elif domain == "sensor":
+        bindings = [{"interface": "Alexa.TemperatureSensor", "entity_id": entity_id}]
     else:
         bindings = [{"interface": "Alexa.PowerController", "entity_id": entity_id}]
     return {
         "name": str(settings.get("name") or entity_id),
         "description": str(settings.get("description") or ""),
         "display_category": ("INTERIOR_BLIND" if domain == "cover" else
+                             "THERMOSTAT" if domain == "climate" else
+                             category if domain in ("sensor", "binary_sensor") else
                              "LIGHT" if domain == "light" else "SWITCH"),
         "enabled": False,
         "replaces_legacy_endpoint": legacy_endpoint_id,
