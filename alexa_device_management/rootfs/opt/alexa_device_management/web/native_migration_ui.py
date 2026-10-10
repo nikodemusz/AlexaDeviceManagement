@@ -5,10 +5,12 @@ No Alexa deletion, v5 YAML mutation, or bulk activation.
 from __future__ import annotations
 
 import copy
+import hashlib
+import yaml
 from aiohttp import web
 
 from native_migration import prepare
-from native_skill_config import NativeSkillConfigStore
+from native_skill_config import NativeSkillConfigStore, NativeSkillConfigError
 from device_model import DeviceModelError
 
 NATIVE_STORE = NativeSkillConfigStore()
@@ -38,6 +40,20 @@ def summary(legacy, native):
                                 if isinstance(d, dict))}
 
 
+def config_revision(value):
+    """Optimistic lock against overwriting a concurrent edit."""
+    import json
+    canonical = json.dumps(value, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def config_payload(value):
+    return {"yaml": yaml.safe_dump(value, allow_unicode=True, sort_keys=False),
+            "revision": config_revision(value),
+            "global_enabled": value["enabled"],
+            "devices_count": len(value["devices"])}
+
+
 def create_routes(store):
     async def page(request):
         from ha_export import STATIC_DIR
@@ -47,6 +63,50 @@ def create_routes(store):
 
     async def status(request):
         return web.json_response(summary(store.load(), NATIVE_STORE.load()))
+
+    async def read_config(request):
+        return web.json_response(config_payload(NATIVE_STORE.load()))
+
+    async def validate_config(request):
+        body = await request.json()
+        if not isinstance(body, dict) or not isinstance(body.get("yaml"), str):
+            raise web.HTTPBadRequest(text="YAML text required")
+        try:
+            parsed = yaml.safe_load(body["yaml"])
+            normalized = NATIVE_STORE.validate(parsed)
+        except (yaml.YAMLError, NativeSkillConfigError, DeviceModelError, TypeError, ValueError) as exc:
+            return web.json_response({"valid": False, "error": str(exc)}, status=400)
+        return web.json_response({"valid": True, "devices_count": len(normalized["devices"]),
+                                  "global_enabled": normalized["enabled"]})
+
+    async def save_config(request):
+        body = await request.json()
+        if not isinstance(body, dict) or not isinstance(body.get("yaml"), str):
+            raise web.HTTPBadRequest(text="YAML text required")
+        current = NATIVE_STORE.load()
+        if body.get("revision") != config_revision(current):
+            return web.json_response({"error": "Native configuration changed; reload before saving"}, status=409)
+        try:
+            proposed = NATIVE_STORE.validate(yaml.safe_load(body["yaml"]))
+        except (yaml.YAMLError, NativeSkillConfigError, DeviceModelError, TypeError, ValueError) as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        NATIVE_STORE.save(proposed)
+        return web.json_response({"ok": True, "config": config_payload(NATIVE_STORE.load()),
+                                  "data": summary(store.load(), NATIVE_STORE.load())})
+
+    async def set_global(request):
+        body = await request.json()
+        enabled = body.get("enabled") if isinstance(body, dict) else None
+        if type(enabled) is not bool:
+            raise web.HTTPBadRequest(text="Boolean enabled required")
+        current = NATIVE_STORE.load()
+        if body.get("revision") != config_revision(current):
+            return web.json_response({"error": "Configuration changed; reload first"}, status=409)
+        updated = copy.deepcopy(current)
+        updated["enabled"] = enabled
+        NATIVE_STORE.save(updated)
+        return web.json_response({"ok": True, "config": config_payload(NATIVE_STORE.load()),
+                                  "data": summary(store.load(), NATIVE_STORE.load())})
 
     async def import_drafts(request):
         # Deliberate action; only add disabled drafts. Existing YAML stays as-is.
@@ -73,12 +133,16 @@ def create_routes(store):
         NATIVE_STORE.save(proposed)
         return web.json_response({"ok": True, "data": summary(store.load(), proposed)})
 
-    return page, status, import_drafts, activate
+    return page, status, import_drafts, activate, read_config, validate_config, save_config, set_global
 
 
 def register_routes(app, legacy_store):
-    page, status, import_drafts, activate = create_routes(legacy_store)
+    page, status, import_drafts, activate, read_config, validate_config, save_config, set_global = create_routes(legacy_store)
     app.router.add_get("/migration", page)
+    app.router.add_get("/api/native-migration/config", read_config)
+    app.router.add_post("/api/native-migration/config/validate", validate_config)
+    app.router.add_post("/api/native-migration/config/save", save_config)
+    app.router.add_post("/api/native-migration/global", set_global)
     app.router.add_get("/api/native-migration", status)
     app.router.add_post("/api/native-migration/import", import_drafts)
     app.router.add_post("/api/native-migration/activate", activate)
