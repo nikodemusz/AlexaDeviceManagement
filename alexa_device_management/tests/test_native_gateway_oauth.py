@@ -7,6 +7,7 @@ import pathlib
 import sys
 import unittest
 from unittest.mock import patch
+from aiohttp import web
 
 WEB = pathlib.Path(__file__).resolve().parents[1] / "rootfs/opt/alexa_device_management/web"
 sys.path.insert(0, str(WEB))
@@ -43,6 +44,14 @@ class FakeSession:
 
 
 class GatewayOAuthTests(unittest.TestCase):
+    def test_expired_ha_user_token_is_not_masked_as_gateway_failure(self):
+        for status in (401, 403):
+            with self.subTest(status=status), patch.object(FakeResponse, "status", status), \
+                 patch.object(gateway.aiohttp, "ClientSession",
+                              side_effect=lambda **kwargs: FakeSession(kwargs["headers"], [])):
+                with self.assertRaises(web.HTTPUnauthorized):
+                    asyncio.run(gateway.ha_request("GET", "/states/light.example", token="expired-test-token"))
+
     def test_linked_authorize_uses_core_not_supervisor(self):
         calls = []
         with patch.object(gateway.aiohttp, "ClientSession",

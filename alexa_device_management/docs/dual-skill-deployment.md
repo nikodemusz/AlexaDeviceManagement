@@ -65,6 +65,36 @@ this internal target through `HA_USER_HTTP_URL` (full API base URL, ending in
 `/api`) if the container environment uses a different Core hostname.
 The externally visible Lambda gateway URL and token remain unchanged.
 
+## Protocol corrections in 2.20.1
+
+Update the HA app **and separately deploy** the bundled
+`native_skill/lambda_function.py` to the existing AWS Lambda to apply all fixes.
+No account relinking, endpoint deletion or native draft activation is part of
+this update. An app update alone cannot replace deployed Lambda code.
+
+- AcceptGrant reads the linked HA user token from `payload.grantee.token` and
+  delegates the original authorization grant to Home Assistant. This allows
+  future valid grants to be processed; it does not repair an existing revoked
+  or expired LWA event-gateway authorization by itself.
+- Legacy Discovery and synchronous responses retain all Home Assistant
+  capabilities. Home Assistant sends proactive events directly, so filtering
+  ContactSensor on switches or PowerController on legacy covers only in Lambda
+  would create an inconsistent contract. Native covers still expose position
+  and Stop without PowerController.
+- Native endpoints advertise retrievable EndpointHealth with proactive
+  reporting disabled. StateReport and successful control responses return all
+  retrievable properties and connectivity. Unknown, unavailable or missing HA
+  state returns ENDPOINT_UNREACHABLE rather than a fabricated OFF state; no
+  unavailable-value cache is implied. HA property timestamps are preserved in
+  UTC, while connectivity records the current successful gateway observation.
+- The overview reads active bindings from the separate native YAML, including
+  several sensor values belonging to one endpoint. Its association counts are
+  not an end-to-end connectivity test; v5 export checkboxes still edit v5 only.
+
+Protocol references: [AcceptGrant](https://developer.amazon.com/docs/alexaplus/device-apis/alexa-authorization.html),
+[StateReport](https://developer.amazon.com/docs/alexaplus/device-apis/alexa-statereport.html),
+[EndpointHealth](https://developer.amazon.com/docs/alexaplus/device-apis/alexa-endpointhealth.html).
+
 ## Security and limitations
 
 - The gateway on TCP/8100 is separate from app ingress. Each request requires

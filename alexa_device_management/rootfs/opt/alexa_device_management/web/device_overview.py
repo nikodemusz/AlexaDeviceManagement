@@ -10,6 +10,7 @@ from aiohttp import web
 
 import alexa_group_manager
 import ha_export
+from native_skill_config import NativeSkillConfigStore
 
 STATIC_DIR = ha_export.STATIC_DIR
 
@@ -134,8 +135,11 @@ def _public_alexa_device(
 def _entity_matches(
     entity_id: str,
     devices: list[dict[str, Any]],
+    native_endpoint_ids: Iterable[str] = (),
 ) -> list[int]:
     expected = _canonical(entity_id)
+    for endpoint_id in native_endpoint_ids:
+        expected.update(_canonical(endpoint_id))
     matches: list[int] = []
     for index, device in enumerate(devices):
         if str(device.get("source") or "") == "echo":
@@ -145,6 +149,24 @@ def _entity_matches(
         if explicit == entity_id.lower() or expected & identifiers:
             matches.append(index)
     return matches
+
+
+def _native_bindings(config: dict[str, Any]) -> dict[str, list[str]]:
+    """Read only active YAML devices; transitional legacy JSON is not v6."""
+    bindings: dict[str, list[str]] = {}
+    if not config.get("enabled"):
+        return bindings
+    for endpoint_id, device in config.get("devices", {}).items():
+        if not device.get("enabled", True):
+            continue
+        for capability in device.get("capabilities", []):
+            entity_id = capability.get("entity_id")
+            if entity_id:
+                ids = bindings.setdefault(entity_id, [])
+                external_id = "native:" + endpoint_id
+                if external_id not in ids:
+                    ids.append(external_id)
+    return bindings
 
 
 def _entity_status(enabled: bool, match_count: int) -> str:
@@ -175,6 +197,7 @@ def build_overview(
     alexa_devices: list[dict[str, Any]],
     groups: list[dict[str, Any]],
     config: dict[str, Any],
+    native_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Join HA entities and Alexa endpoints without fuzzy name matching."""
     ui = config.get("ui") if isinstance(config.get("ui"), dict) else {}
@@ -182,6 +205,7 @@ def build_overview(
     hidden_entities = {str(value) for value in ui.get("hidden_entities", [])}
     hidden_alexa = {str(value) for value in ui.get("hidden_alexa", [])}
     entity_config = config.get("entities") if isinstance(config.get("entities"), dict) else {}
+    native_bindings = _native_bindings(native_config or {})
 
     public_alexa = [_public_alexa_device(device, groups) for device in alexa_devices]
     matched_indexes: set[int] = set()
@@ -191,6 +215,7 @@ def build_overview(
         "ha_devices": 0,
         "ha_entities": 0,
         "selected": 0,
+        "native_selected": 0,
         "synced": 0,
         "pending": 0,
         "only_alexa": 0,
@@ -215,15 +240,17 @@ def build_overview(
             if not isinstance(settings, dict):
                 settings = {}
             enabled = bool(settings.get("enabled"))
-            match_indexes = _entity_matches(entity_id, alexa_devices)
+            native_ids = native_bindings.get(entity_id, [])
+            match_indexes = _entity_matches(entity_id, alexa_devices, native_ids)
             matched_indexes.update(match_indexes)
             matches = [public_alexa[index] for index in match_indexes]
-            status = _entity_status(enabled, len(matches))
+            status = _entity_status(enabled or bool(native_ids), len(matches))
             statuses.append(status)
             hidden = entity_id in hidden_entities or device_id in hidden_devices
 
             summary["ha_entities"] += 1
-            summary["selected"] += int(enabled)
+            summary["selected"] += int(enabled or bool(native_ids))
+            summary["native_selected"] += int(bool(native_ids))
             summary["hidden"] += int(hidden)
             if status == "synced":
                 summary["synced"] += 1
@@ -248,6 +275,7 @@ def build_overview(
                     "count": len(matches),
                     "matches": matches,
                 },
+                "native": {"enabled": bool(native_ids), "endpoint_ids": list(native_ids)},
                 "status": status,
                 "hidden": hidden,
                 "hidden_directly": entity_id in hidden_entities,
@@ -272,7 +300,7 @@ def build_overview(
         item["hidden"] = item["key"] in hidden_alexa
         if item["source"] == "echo":
             item["status"] = "alexa_device"
-        elif item["lifecycle"] == "orphaned" or item["source"] == "graphql":
+        elif item["lifecycle"] == "orphaned":
             item["status"] = "orphaned"
         else:
             item["status"] = "unmatched"
@@ -312,6 +340,12 @@ async def overview(request: web.Request) -> web.Response:
     try:
         ha_inventory = await ha_export._inventory()
         config = store.load()
+        native_config = {}
+        try:
+            native_config = NativeSkillConfigStore().load()
+        except ValueError:
+            # A broken optional v6 config must not take down the v5 overview.
+            warnings.append("Native v6-Konfiguration konnte nicht validiert werden.")
 
         alexa_devices: list[dict[str, Any]] = []
         groups: list[dict[str, Any]] = []
@@ -332,7 +366,7 @@ async def overview(request: web.Request) -> web.Response:
             except Exception as exc:
                 warnings.append(f"Alexa-Gruppen: {exc}")
 
-        result = build_overview(ha_inventory, alexa_devices, groups, config)
+        result = build_overview(ha_inventory, alexa_devices, groups, config, native_config)
         result.update({
             "ok": True,
             "alexa_connected": server.is_configured(),

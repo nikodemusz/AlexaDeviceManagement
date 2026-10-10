@@ -10,6 +10,8 @@ sys.path.insert(0, str(WEB_DIR))
 
 from alexa_group_manager import (
     _ensure_assignment,
+    _load_groups,
+    AlexaGroupError,
     extract_groups,
 )
 
@@ -82,6 +84,35 @@ class AlexaGroupParserTests(unittest.TestCase):
 
 
 class AlexaGroupAssignmentTests(unittest.IsolatedAsyncioTestCase):
+    async def test_accepts_valid_phoenix_body_with_http_299(self) -> None:
+        server = FakeServer()
+        async def get(path, data):
+            return 299, server._payload()
+        server.alexa_raw_get = get
+        groups = await _load_groups(server, {})
+        self.assertEqual(groups[0]["name"], "Wohnzimmer")
+
+    async def test_rejects_invalid_299_body_and_does_not_leak_error_body(self) -> None:
+        server = FakeServer()
+        for status, body in ((299, "<html>expired login</html>"), (299, "[]"), (299, "{}"),
+                             (299, '{"error":"session expired"}'),
+                             (401, "private-session-marker"), (500, "private-session-marker")):
+            with self.subTest(status=status, body=body):
+                async def get(path, data):
+                    return status, body
+                server.alexa_raw_get = get
+                with self.assertRaises(AlexaGroupError) as caught:
+                    await _load_groups(server, {})
+                self.assertNotIn("private-session-marker", str(caught.exception))
+
+    async def test_http_299_still_allows_an_empty_valid_group_inventory(self) -> None:
+        server = FakeServer()
+        server.groups = []
+        async def get(path, data):
+            return 299, server._payload()
+        server.alexa_raw_get = get
+        self.assertEqual(await _load_groups(server, {}), [])
+
     async def test_adds_device_without_removing_existing_members(self) -> None:
         server = FakeServer()
         groups = extract_groups(json.loads(server._payload()))
