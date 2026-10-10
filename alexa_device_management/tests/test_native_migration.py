@@ -42,12 +42,15 @@ class MigrationTests(unittest.TestCase):
         original = copy.deepcopy(self.native)
         result, report = prepare(self.legacy, self.native)
         self.assertEqual(self.native, original)
-        self.assertEqual(report["added"], ["light.desk", "switch.plug"])
-        self.assertEqual(report["unsupported"], ["cover.blind", "sensor.temp"])
+        self.assertEqual(report["added"], ["cover.blind", "light.desk", "switch.plug"])
+        self.assertEqual(report["unsupported"], ["sensor.temp"])
         self.assertFalse(result["devices"]["ha:light.desk"]["enabled"])
         self.assertEqual(result["devices"]["ha:light.desk"]["replaces_legacy_endpoint"],
                          "light#desk")
         self.assertIn("zisterne", result["devices"])
+        self.assertEqual(result["devices"]["ha:cover.blind"]["display_category"], "INTERIOR_BLIND")
+        self.assertEqual([cap["interface"] for cap in result["devices"]["ha:cover.blind"]["capabilities"]],
+                         ["Alexa.RangeController", "Alexa.PlaybackController"])
         NativeSkillConfigStore.validate(result)
         self.assertEqual(module.migrated_legacy_ids(result), set())
 
