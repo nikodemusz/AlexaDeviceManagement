@@ -20,7 +20,7 @@ def candidate(entity_id, settings):
     if not isinstance(entity_id, str) or "." not in entity_id:
         return None
     domain, _ = entity_id.split(".", 1)
-    if domain not in ("light", "switch", "fan", "input_boolean"):
+    if domain not in ("light", "switch", "fan"):
         return None
     # HA-v5 endpoint IDs are domain#object_id, independent of the friendly name.
     legacy_endpoint_id = entity_id.replace(".", "#", 1)
