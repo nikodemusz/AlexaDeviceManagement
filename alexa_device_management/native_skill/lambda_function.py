@@ -17,7 +17,8 @@ GATEWAY_URL = os.environ.get("GATEWAY_URL", "").rstrip("/")
 GATEWAY_TOKEN = os.environ.get("GATEWAY_TOKEN", "")
 NATIVE_PREFIX = "native:"
 INTERFACE_ACTIONS = {"Alexa.PowerController", "Alexa.BrightnessController",
-                     "Alexa.RangeController", "Alexa.ToggleController"}
+                     "Alexa.RangeController", "Alexa.ToggleController",
+                     "Alexa.PlaybackController"}
 
 
 def request_json(url, method="GET", payload=None, bearer=None):
@@ -133,6 +134,9 @@ def error(event, kind="INTERNAL_ERROR", message="Unable to process request", end
 
 def capability_config(binding):
     name = binding["interface"]
+    if name == "Alexa.PlaybackController":
+        return {"type": "AlexaInterface", "interface": name, "version": "3",
+                "supportedOperations": binding.get("supported_operations", ["Stop"])}
     capability = {"type": "AlexaInterface", "interface": name, "version": "3",
                   "properties": {"supported": [], "proactivelyReported": False, "retrievable": True}}
     prop = {"Alexa.PowerController": "powerState", "Alexa.BrightnessController": "brightness",
@@ -148,7 +152,7 @@ def capability_config(binding):
                                                            "maximumValue": binding.get("maximum", 10000),
                                                            "precision": binding.get("precision", 1)},
                                         "unitOfMeasure": binding["unit"]}
-    if binding.get("read_only") or name == "Alexa.RangeController":
+    if binding.get("read_only", True) and name == "Alexa.RangeController":
         capability["properties"]["nonControllable"] = True
     return capability
 
@@ -182,6 +186,10 @@ def state_for(binding, states):
             raise ValueError("Brightness missing")
         mapped = round(100 * float(value) / 255)
     elif interface == "Alexa.RangeController":
+        if binding["entity_id"].startswith("cover."):
+            value = state.get("attributes", {}).get("current_position")
+            if value is None:
+                raise ValueError("Cover position unavailable")
         prop, mapped = "rangeValue", float(value)
     else:
         raise ValueError("Unsupported controller")
@@ -238,17 +246,30 @@ def lambda_handler(event, context):
         bindings = device["capabilities"]
         if namespace == "Alexa" and name == "ReportState":
             states = gateway("/v1/state", "POST", {"endpoint_id": endpoint_id, "token": token})["states"]
-            values = [state_for(binding, states) for binding in bindings]
+            values = [state_for(binding, states) for binding in bindings
+                      if binding["interface"] != "Alexa.PlaybackController"]
             return response(event, "Alexa", "StateReport", endpoint=external_id, properties=values)
-        if namespace in INTERFACE_ACTIONS and name in ("TurnOn", "TurnOff", "SetBrightness"):
+        if namespace in INTERFACE_ACTIONS and name in (
+                "TurnOn", "TurnOff", "SetBrightness", "SetRangeValue",
+                "AdjustRangeValue", "Stop"):
             matching = [b for b in bindings if b["interface"] == namespace
                         and b.get("instance") == hdr.get("instance")]
             if len(matching) != 1:
                 return error(event, "INVALID_DIRECTIVE", "Capability missing", external_id)
             binding = matching[0]
-            value = directive.get("payload", {}).get("brightness")
+            action_payload = directive.get("payload", {})
+            if name == "SetBrightness":
+                value = action_payload.get("brightness")
+            elif name == "SetRangeValue":
+                value = action_payload.get("rangeValue")
+            elif name == "AdjustRangeValue":
+                value = action_payload.get("rangeValueDelta")
+            else:
+                value = None
             gateway("/v1/control", "POST", {"endpoint_id": endpoint_id, "interface": namespace,
                                            "instance": binding.get("instance"), "action": name, "value": value, "token": token})
+            if namespace == "Alexa.PlaybackController":
+                return response(event, "Alexa", "Response", endpoint=external_id, properties=[])
             states = gateway("/v1/state", "POST", {"endpoint_id": endpoint_id, "token": token})["states"]
             return response(event, "Alexa", "Response", endpoint=external_id,
                             properties=[state_for(binding, states)])
