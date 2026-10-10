@@ -14,16 +14,37 @@
 .migration button:disabled{opacity:.5;cursor:not-allowed}
 .migration .table-wrap{overflow-x:auto}
 .migration .hint{font-size:.88rem;opacity:.8}
+.migration textarea{display:block;box-sizing:border-box;width:100%;min-height:360px;font:13px/1.55 monospace;padding:12px;border:1px solid #a8b0ba;border-radius:6px;background:#fff;color:#20242a}
+.migration .config-bar{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:12px 0}
+.migration details{margin:20px 0;padding:16px;border:1px solid #b8c1ca;border-radius:8px}
+.migration summary{cursor:pointer;font-weight:600}
+.migration .global-panel{margin:20px 0;padding:16px;border:1px solid #a8b0ba;border-radius:8px}
+.migration .global-panel label{display:flex;gap:10px;align-items:center;font-weight:600}
+.migration .config-feedback{margin-top:8px;white-space:pre-wrap}
 </style></head><body>
 <header class="topbar"><div><h1>Migration v5 → v6</h1><div class="subtitle">Geräte kontrolliert auf die native Alexa-Skill umstellen</div></div>
 <div class="top-actions"><a class="button secondary" href="{{INGRESS_PATH}}/devices">Zur Geräteübersicht</a></div></header>
 <main class="migration">
 <p>Bestehende v5-Geräte bleiben aktiv. Eine Übernahme legt ausschließlich <strong>deaktivierte</strong> v6-Entwürfe an. Die Umstellung und Rücknahme erfolgen einzeln.</p>
+<section class="global-panel">
+<label><input type="checkbox" id="global-v6"> Native v6-Skill global aktivieren</label>
+<p class="hint">Aktiviert die native Discovery für bereits aktivierte v6-Geräte. Es werden keine Entwürfe automatisch aktiviert und keine v5-Geräte gelöscht.</p>
+<button id="save-global" class="button primary">v6-Einstellung speichern</button>
+<span id="global-state" role="status"></span>
+</section>
+<details id="config-details"><summary>Native v6-Konfiguration prüfen und bearbeiten</summary>
+<p class="hint">Datei: <code>/config/alexa_device_management/native/config.yaml</code>. Änderungen erst validieren und dann explizit speichern.</p>
+<div class="config-bar"><button id="load-config" class="button secondary">Konfiguration neu laden</button>
+<button id="validate-config" class="button secondary">YAML prüfen</button>
+<button id="save-config" class="button primary">Validierte Konfiguration speichern</button></div>
+<textarea id="native-yaml" spellcheck="false" aria-label="Native v6 YAML-Konfiguration"></textarea>
+<div id="config-feedback" class="config-feedback" role="status" aria-live="polite"></div>
+</details>
 <div class="controls"><button id="preview" class="button secondary">Vorschau aktualisieren</button>
 <button id="import" class="button primary">Entwürfe übernehmen</button>
 <span id="counts"></span></div>
 <div id="message" class="notice" role="status" aria-live="polite">Lade Migration…</div>
-<div id="warning" class="notice" hidden>Die native v6-Konfiguration ist global deaktiviert. Zum Aktivieren einzelner Geräte muss <code>enabled: true</code> in <code>/config/alexa_device_management/native/config.yaml</code> gesetzt sein.</div>
+<div id="warning" class="notice" hidden>Die native v6-Konfiguration ist global deaktiviert. Aktiviere sie über den Schalter oben, bevor du einzelne Geräte auf v6 umstellst.</div>
 <div class="table-wrap"><table><thead><tr><th>Gerät / Entität</th><th>v5-Endpunkt</th><th>v6-Funktionen</th><th>Status</th><th>Aktion</th></tr></thead>
 <tbody id="rows"><tr><td colspan="5">Lade Geräte…</td></tr></tbody></table></div>
 <p class="hint">Achtung: Neue v6-Endpunkt-IDs werden von Alexa als neue Geräte erkannt. Räume und Routinen müssen gegebenenfalls neu zugeordnet werden. Eine Gerätesuche in Alexa ist nach jeder Umstellung erforderlich. Der v5-Export wird nicht verändert.</p>
@@ -31,6 +52,43 @@
 <script>
 const BASE="{{INGRESS_PATH}}";
 const rows=document.getElementById("rows"), msg=document.getElementById("message");
+let configRevision=null, validatedYaml=null;
+const yamlEditor=document.getElementById("native-yaml");
+yamlEditor.addEventListener("input",()=>{validatedYaml=null;document.getElementById("config-feedback").textContent="Ungespeicherte Änderungen – erneut prüfen.";});
+function configFeedback(text){document.getElementById("config-feedback").textContent=text;}
+async function loadConfig(){
+ try{
+ const c=await api("/api/native-migration/config");
+ configRevision=c.revision;yamlEditor.value=c.yaml;validatedYaml=null;
+ document.getElementById("global-v6").checked=c.global_enabled;
+ document.getElementById("global-state").textContent=c.global_enabled?"v6 global aktiv":"v6 global deaktiviert";
+ configFeedback(c.devices_count+" native Geräte geladen.");
+ }catch(e){configFeedback("Konfiguration konnte nicht geladen werden: "+e.message)}
+}
+document.getElementById("load-config").onclick=()=>{
+ if(validatedYaml===null && yamlEditor.value && !confirm("Ungespeicherte Änderungen verwerfen und Konfiguration neu laden?"))return;
+ loadConfig();
+};
+document.getElementById("validate-config").onclick=async()=>{
+ try{const r=await api("/api/native-migration/config/validate","POST",{yaml:yamlEditor.value});
+ validatedYaml=yamlEditor.value;configFeedback("YAML gültig: "+r.devices_count+" Geräte. Global: "+(r.global_enabled?"aktiv":"inaktiv")+". Noch nicht gespeichert.");
+ }catch(e){validatedYaml=null;configFeedback("YAML ungültig: "+e.message)}
+};
+document.getElementById("save-config").onclick=async()=>{
+ if(validatedYaml!==yamlEditor.value){configFeedback("Bitte die aktuelle YAML zuerst prüfen.");return}
+ if(!confirm("Validierte native v6-Konfiguration speichern? Bestehende native Geräte können sich dadurch ändern."))return;
+ try{const r=await api("/api/native-migration/config/save","POST",{yaml:yamlEditor.value,revision:configRevision});
+ configRevision=r.config.revision;validatedYaml=null;yamlEditor.value=r.config.yaml;render(r.data);configFeedback("Konfiguration gespeichert.");}
+ catch(e){configFeedback("Speichern fehlgeschlagen: "+e.message)}
+};
+document.getElementById("save-global").onclick=async()=>{
+ const enabled=document.getElementById("global-v6").checked;
+ if(!confirm(enabled?"Native v6-Skill global aktivieren? Bereits aktive native Geräte erscheinen bei Alexa.":"Native v6-Skill global deaktivieren? Die nativen Geräte werden bei der nächsten Discovery nicht mehr angeboten."))return;
+ try{const r=await api("/api/native-migration/global","POST",{enabled,revision:configRevision});
+ configRevision=r.config.revision;yamlEditor.value=r.config.yaml;validatedYaml=null;render(r.data);
+ document.getElementById("global-state").textContent=enabled?"v6 global aktiv":"v6 global deaktiviert";configFeedback("Globale Einstellung gespeichert.");}
+ catch(e){configFeedback(e.message);await loadConfig()}
+};
 function el(tag,text){const node=document.createElement(tag);node.textContent=text;return node}
 async function api(path,method="GET",data){
  const r=await fetch(BASE+path,{method,headers:data?{"Content-Type":"application/json"}:{},body:data?JSON.stringify(data):undefined});
@@ -74,4 +132,5 @@ document.getElementById("import").onclick=async()=>{
  catch(e){message("Import fehlgeschlagen: "+e.message)}
 };
 load();
+loadConfig();
 </script></body></html>
