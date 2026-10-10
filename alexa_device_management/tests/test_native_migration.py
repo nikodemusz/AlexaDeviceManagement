@@ -10,7 +10,8 @@ import unittest
 WEB = pathlib.Path(__file__).resolve().parents[1] / "rootfs/opt/alexa_device_management/web"
 sys.path.insert(0, str(WEB))
 from native_migration import prepare
-from native_skill_config import NativeSkillConfigStore, NativeSkillConfigError
+from native_skill_config import NativeSkillConfigStore
+from device_model import DeviceModelError
 
 LAMBDA = pathlib.Path(__file__).resolve().parents[1] / "native_skill/lambda_function.py"
 spec = importlib.util.spec_from_file_location("migration_lambda", LAMBDA)
@@ -70,7 +71,7 @@ class MigrationTests(unittest.TestCase):
             "replaces_legacy_endpoint": "light#desk",
             "capabilities": [{"interface": "Alexa.PowerController",
                               "entity_id": "light.desk"}]}
-        with self.assertRaises(NativeSkillConfigError):
+        with self.assertRaises(DeviceModelError):
             NativeSkillConfigStore.validate(proposed)
 
     def test_file_is_not_created_in_preview(self):
