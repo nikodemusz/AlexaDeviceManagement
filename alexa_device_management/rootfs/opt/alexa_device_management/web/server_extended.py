@@ -16,6 +16,7 @@ import discovery_preview
 import ha_control
 import ha_export
 import ha_export_overrides
+import native_migration_ui
 import server_clean
 
 APP_VERSION = "2.16.15"
@@ -58,6 +59,7 @@ def create_app() -> web.Application:
     alexa_event_sync.register_routes(app)
     device_overview.register_routes(app, server_clean, ha_export.CONFIG_STORE)
     ha_export.register_routes(app)
+    native_migration_ui.register_routes(app, ha_export.CONFIG_STORE)
     ha_control.register_routes(app)
     discovery_preview.register_routes(app)
     consistency_check.register_routes(app)
