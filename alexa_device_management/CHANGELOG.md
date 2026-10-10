@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.19.0
+
+- Native v6-Rollläden: Positionsabfrage, absolute und relative Positionssteuerung sowie Stopp; deaktivierte Migrationsentwürfe für v5-Cover.
+
 ## 2.18.0
 
 - Stufenweise v5→v6-Migration: Vorschau und deaktivierte Geräteentwürfe ohne Änderung des v5-Exports; bei gezielter Aktivierung keine doppelte Discovery, jederzeit rückgängig.

@@ -101,7 +101,7 @@ async def control_route(request: web.Request) -> web.Response:
     interface = data.get("interface")
     instance = data.get("instance")
     binding = lookup_binding(config, data.get("endpoint_id", ""), interface, instance)
-    if binding.get("read_only", False) or interface == "Alexa.RangeController":
+    if binding.get("read_only", False):
         raise web.HTTPForbidden(text="Read-only capability")
     entity = binding["entity_id"]
     domain = entity.split(".", 1)[0]
@@ -115,11 +115,29 @@ async def control_route(request: web.Request) -> web.Response:
         service = "turn_on"
     elif interface == "Alexa.ToggleController" and action in ("TurnOn", "TurnOff") and domain in ("switch", "input_boolean"):
         service, value = ("turn_on" if action == "TurnOn" else "turn_off"), None
+    elif domain == "cover" and interface == "Alexa.PlaybackController" and action == "Stop":
+        service, value = "stop_cover", None
+    elif domain == "cover" and interface == "Alexa.RangeController" and action in ("SetRangeValue", "AdjustRangeValue"):
+        value = data.get("value")
+        if type(value) not in (int, float) or not -100 <= value <= 100:
+            raise web.HTTPBadRequest(text="Invalid cover position")
+        if action == "AdjustRangeValue":
+            state = await ha_request("GET", "/states/" + entity, token=data.get("token"))
+            position = state.get("attributes", {}).get("current_position")
+            if type(position) not in (int, float):
+                raise web.HTTPBadRequest(text="Cover position unavailable")
+            value += position
+        if not 0 <= value <= 100:
+            raise web.HTTPBadRequest(text="Cover position outside 0..100")
+        service = "set_cover_position"
     else:
         raise web.HTTPBadRequest(text="Unsupported action/domain")
     payload = {"entity_id": entity}
     if value is not None:
-        payload["brightness_pct"] = value
+        if domain == "cover":
+            payload["position"] = round(value)
+        else:
+            payload["brightness_pct"] = value
     await ha_request("POST", f"/services/{domain}/{service}", payload, token=data.get("token"))
     return web.json_response({"ok": True})
 
