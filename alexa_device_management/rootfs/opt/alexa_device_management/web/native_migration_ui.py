@@ -162,11 +162,39 @@ def create_routes(store):
         return web.json_response({"ok": True, "config": config_payload(saved),
                                   "data": summary(store.load(), saved)})
 
-    return page, status, import_drafts, activate, read_config, validate_config, save_config, set_global
+    async def bulk_activate(request):
+        body = await request.json()
+        if not isinstance(body, dict) or type(body.get("enabled")) is not bool:
+            raise web.HTTPBadRequest(text="enabled boolean required")
+        ids = body.get("ids")
+        if not isinstance(ids, list) or not ids or len(ids) > 50 or any(
+                not isinstance(item, str) for item in ids) or len(set(ids)) != len(ids):
+            raise web.HTTPBadRequest(text="Select 1–50 unique migration device IDs")
+        current = NATIVE_STORE.load()
+        if body.get("revision") != config_revision(current):
+            return web.json_response({"error": "Configuration changed; reload first"}, status=409)
+        if body["enabled"] and not current["enabled"]:
+            raise web.HTTPConflict(text="Native v6 is globally disabled")
+        for key in ids:
+            device = current["devices"].get(key)
+            if not device or not device.get("replaces_legacy_endpoint") or not device.get("capabilities"):
+                raise web.HTTPBadRequest(text="Selection includes an invalid migration device")
+        proposed = copy.deepcopy(current)
+        for key in ids:
+            proposed["devices"][key]["enabled"] = body["enabled"]
+        # Validate whole batch before atomic write; never partially activate.
+        NATIVE_STORE.validate(proposed)
+        NATIVE_STORE.save(proposed)
+        saved = NATIVE_STORE.load()
+        return web.json_response({"ok": True, "changed": len(ids),
+                                  "config": config_payload(saved),
+                                  "data": summary(store.load(), saved)})
+
+    return page, status, import_drafts, activate, read_config, validate_config, save_config, set_global, bulk_activate
 
 
 def register_routes(app, legacy_store):
-    page, status, import_drafts, activate, read_config, validate_config, save_config, set_global = create_routes(legacy_store)
+    page, status, import_drafts, activate, read_config, validate_config, save_config, set_global, bulk_activate = create_routes(legacy_store)
     app.router.add_get("/migration", page)
     app.router.add_get("/api/native-migration/config", read_config)
     app.router.add_post("/api/native-migration/config/validate", validate_config)
@@ -175,3 +203,5 @@ def register_routes(app, legacy_store):
     app.router.add_get("/api/native-migration", status)
     app.router.add_post("/api/native-migration/import", import_drafts)
     app.router.add_post("/api/native-migration/activate", activate)
+    app.router.add_post("/api/native-migration/bulk", bulk_activate)
+
