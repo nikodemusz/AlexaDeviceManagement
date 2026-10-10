@@ -10,6 +10,7 @@ from copy import deepcopy
 from typing import Any
 
 ENDPOINT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+LEGACY_ENDPOINT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:#-]{0,127}$")
 SUPPORTED_INTERFACES = frozenset({
     "Alexa.PowerController", "Alexa.BrightnessController",
     "Alexa.RangeController", "Alexa.ToggleController",
@@ -74,7 +75,7 @@ def validate_devices(devices: Any) -> dict[str, dict[str, Any]]:
             raise DeviceModelError(f"{endpoint_id}: aliases must be non-empty strings")
         replaces = raw.get("replaces_legacy_endpoint")
         if replaces is not None and (not isinstance(replaces, str) or
-                                     not ENDPOINT_RE.fullmatch(replaces) or
+                                     not LEGACY_ENDPOINT_RE.fullmatch(replaces) or
                                      replaces.startswith("native:")):
             raise DeviceModelError(f"{endpoint_id}: invalid replaces_legacy_endpoint")
         capabilities = raw.get("capabilities", [])
