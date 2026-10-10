@@ -58,6 +58,7 @@ def validate_devices(devices: Any) -> dict[str, dict[str, Any]]:
     if not isinstance(devices, dict):
         raise DeviceModelError("devices must be an object")
     result: dict[str, dict[str, Any]] = {}
+    legacy_replacements: set[str] = set()
     for endpoint_id, raw in devices.items():
         if not isinstance(endpoint_id, str) or not ENDPOINT_RE.fullmatch(endpoint_id):
             raise DeviceModelError(f"invalid endpoint ID: {endpoint_id!r}")
@@ -71,6 +72,11 @@ def validate_devices(devices: Any) -> dict[str, dict[str, Any]]:
             not isinstance(a, str) or not a.strip() for a in aliases
         ):
             raise DeviceModelError(f"{endpoint_id}: aliases must be non-empty strings")
+        replaces = raw.get("replaces_legacy_endpoint")
+        if replaces is not None and (not isinstance(replaces, str) or
+                                     not ENDPOINT_RE.fullmatch(replaces) or
+                                     replaces.startswith("native:")):
+            raise DeviceModelError(f"{endpoint_id}: invalid replaces_legacy_endpoint")
         capabilities = raw.get("capabilities", [])
         if not isinstance(capabilities, list):
             raise DeviceModelError(f"{endpoint_id}: capabilities must be a list")
@@ -98,6 +104,10 @@ def validate_devices(devices: Any) -> dict[str, dict[str, Any]]:
                     raise DeviceModelError(f"{endpoint_id}: RangeController requires unit")
                 if cap.get("read_only", True) is not True:
                     raise DeviceModelError(f"{endpoint_id}: writable ranges not implemented")
+        if replaces is not None:
+            if replaces in legacy_replacements:
+                raise DeviceModelError(f"{endpoint_id}: duplicate legacy replacement {replaces!r}")
+            legacy_replacements.add(replaces)
         normalized = deepcopy(raw)
         normalized.setdefault("description", "")
         normalized.setdefault("display_category", "OTHER")
