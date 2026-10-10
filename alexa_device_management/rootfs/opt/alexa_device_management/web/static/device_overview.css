@@ -55,3 +55,43 @@ pre{margin:0;max-height:70vh;overflow:auto;padding:16px;background:#111827;color
 .simple-entity-row .simple-alexa-name input { width: 100%; height: auto; padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 7px; background: var(--panel); color: var(--text); }
 .simple-entity-row .simple-name-suggestion { width: auto; height: auto; }
 @media(max-width:700px){.simple-device-row{grid-template-columns:1fr}.simple-device-row .device-actions{justify-content:flex-start}.simple-entity-row{grid-template-columns:auto minmax(0,1fr)}.simple-entity-row .simple-alexa-name{grid-column:2}}
+
+
+/* Dense but readable entity lists on narrow screens. Keep form fields at
+   16px on iOS to avoid involuntary browser zoom when editing names. */
+@media(max-width:700px){
+  .simple-device-list{gap:4px;margin:5px 0}
+  .simple-device-row{gap:5px;padding:7px 8px;border-radius:7px}
+  .simple-device-row strong{font-size:12px;line-height:1.25}
+  .simple-device-row .muted{font-size:10px;line-height:1.3}
+  .simple-entity-list{gap:0;padding-top:4px}
+  .simple-entity-row{
+    grid-template-columns:16px minmax(0,1fr);
+    gap:3px 6px;padding:5px 0;
+    border-bottom:1px solid var(--line);
+    font-size:11px;line-height:1.3;
+  }
+  .simple-entity-row:last-child{border-bottom:0}
+  .simple-entity-row input[type="checkbox"]{width:16px;height:16px}
+  .simple-entity-row .simple-alexa-name{
+    grid-column:2;grid-template-columns:auto minmax(0,1fr) auto;
+    gap:5px;font-size:11px;line-height:1.3;
+  }
+  .simple-entity-row .simple-alexa-name input:not([type="checkbox"]){
+    min-width:0;padding:4px 6px;font-size:16px;line-height:1.2;
+  }
+  .entity-grid{padding:5px;gap:5px}
+  .entity{padding:7px;border-radius:8px;font-size:11px;line-height:1.35}
+  .entity-top{gap:5px}
+  .entity-top input[type="checkbox"]{width:17px;height:17px}
+  .entity-name{font-size:12px;line-height:1.3}
+  .entity-id,.alexa-meta{font-size:10px}
+  .badges{margin-top:3px;gap:3px}
+  .badge{padding:2px 5px;font-size:10px}
+  .fields{gap:5px;margin-top:5px}
+  .field label{font-size:10px;margin-bottom:2px}
+  .field input,.field select{padding:5px 6px;font-size:16px}
+  .entity-actions,.alexa-match{margin-top:5px}
+  .alexa-match{padding-top:5px}
+  .button.small{padding:4px 6px;font-size:11px}
+}
