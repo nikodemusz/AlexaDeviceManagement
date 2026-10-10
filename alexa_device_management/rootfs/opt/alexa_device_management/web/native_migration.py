@@ -20,15 +20,26 @@ def candidate(entity_id, settings):
     if not isinstance(entity_id, str) or "." not in entity_id:
         return None
     domain, _ = entity_id.split(".", 1)
-    if domain not in ("light", "switch", "fan"):
+    if domain not in ("light", "switch", "fan", "cover"):
         return None
     # HA-v5 endpoint IDs are domain#object_id, independent of the friendly name.
     legacy_endpoint_id = entity_id.replace(".", "#", 1)
-    bindings = [{"interface": "Alexa.PowerController", "entity_id": entity_id}]
+    if domain == "cover":
+        bindings = [
+            {"interface": "Alexa.RangeController", "instance": "cover.position",
+             "entity_id": entity_id, "unit": "Alexa.Unit.Percent",
+             "minimum": 0, "maximum": 100, "precision": 1,
+             "read_only": False, "capability_names": ["Position"]},
+            {"interface": "Alexa.PlaybackController", "entity_id": entity_id,
+             "supported_operations": ["Stop"]},
+        ]
+    else:
+        bindings = [{"interface": "Alexa.PowerController", "entity_id": entity_id}]
     return {
         "name": str(settings.get("name") or entity_id),
         "description": str(settings.get("description") or ""),
-        "display_category": ("LIGHT" if domain == "light" else "SWITCH"),
+        "display_category": ("INTERIOR_BLIND" if domain == "cover" else
+                             "LIGHT" if domain == "light" else "SWITCH"),
         "enabled": False,
         "replaces_legacy_endpoint": legacy_endpoint_id,
         "capabilities": bindings,
