@@ -19,7 +19,7 @@ GATEWAY_TOKEN = os.environ.get("GATEWAY_TOKEN", "")
 NATIVE_PREFIX = "native:"
 INTERFACE_ACTIONS = {"Alexa.PowerController", "Alexa.BrightnessController",
                      "Alexa.RangeController", "Alexa.ToggleController",
-                     "Alexa.PlaybackController"}
+                     "Alexa.PlaybackController", "Alexa.ThermostatController"}
 
 
 def request_json(url, method="GET", payload=None, bearer=None):
@@ -102,10 +102,17 @@ def capability_config(binding):
     if name == "Alexa.PlaybackController":
         return {"type": "AlexaInterface", "interface": name, "version": "3",
                 "supportedOperations": binding.get("supported_operations", ["Stop"])}
+    if name == "Alexa.ThermostatController":
+        return {"type": "AlexaInterface", "interface": name, "version": "3",
+                "properties": {"supported": [{"name": "targetSetpoint"}, {"name": "thermostatMode"}],
+                               "proactivelyReported": False, "retrievable": True},
+                "configuration": {"supportsScheduling": False}}
     capability = {"type": "AlexaInterface", "interface": name, "version": "3",
                   "properties": {"supported": [], "proactivelyReported": False, "retrievable": True}}
     prop = {"Alexa.PowerController": "powerState", "Alexa.BrightnessController": "brightness",
-            "Alexa.RangeController": "rangeValue", "Alexa.ToggleController": "toggleState"}[name]
+            "Alexa.RangeController": "rangeValue", "Alexa.ToggleController": "toggleState",
+            "Alexa.ContactSensor": "detectionState", "Alexa.MotionSensor": "detectionState",
+            "Alexa.TemperatureSensor": "temperature"}[name]
     capability["properties"]["supported"] = [{"name": prop}]
     if name in ("Alexa.RangeController", "Alexa.ToggleController"):
         capability["instance"] = binding["instance"]
@@ -194,6 +201,15 @@ def state_for(binding, states):
         if not 0 <= number <= 255:
             raise EndpointUnavailable("Brightness outside HA range")
         mapped = round(100 * number / 255)
+    elif interface in ("Alexa.ContactSensor", "Alexa.MotionSensor"):
+        if value not in ("on", "off"):
+            raise EndpointUnavailable("Sensor state unavailable")
+        prop, mapped = "detectionState", "DETECTED" if value == "on" else "NOT_DETECTED"
+    elif interface == "Alexa.TemperatureSensor":
+        prop = "temperature"
+        if binding["entity_id"].startswith("climate."):
+            value = state.get("attributes", {}).get("current_temperature")
+        mapped = {"value": numeric_state(value), "scale": "CELSIUS"}
     elif interface == "Alexa.RangeController":
         if binding["entity_id"].startswith("cover."):
             value = state.get("attributes", {}).get("current_position")
@@ -210,12 +226,37 @@ def state_for(binding, states):
     return data
 
 
+def thermostat_properties(binding, states):
+    state = available_state(binding, states)
+    attributes = state.get("attributes", {})
+    target = numeric_state(attributes.get("temperature"))
+    mode = str(state.get("state") or "").lower()
+    modes = {"heat": "HEAT", "cool": "COOL", "auto": "AUTO", "heat_cool": "AUTO",
+             "off": "OFF", "eco": "ECO"}
+    if mode not in modes:
+        raise EndpointUnavailable("Thermostat mode unavailable")
+    stamp = sample_time(state)
+    return [
+        {"namespace": "Alexa.ThermostatController", "name": "targetSetpoint",
+         "value": {"value": target, "scale": "CELSIUS"},
+         "timeOfSample": stamp, "uncertaintyInMilliseconds": 1000},
+        {"namespace": "Alexa.ThermostatController", "name": "thermostatMode",
+         "value": modes[mode], "timeOfSample": stamp, "uncertaintyInMilliseconds": 1000},
+    ]
+
+
 def state_properties(bindings, states):
     """Return every retrievable property plus the discovered endpoint health."""
     for binding in bindings:
         available_state(binding, states)
-    properties = [state_for(binding, states) for binding in bindings
-                  if binding["interface"] != "Alexa.PlaybackController"]
+    properties = []
+    for binding in bindings:
+        if binding["interface"] == "Alexa.PlaybackController":
+            continue
+        if binding["interface"] == "Alexa.ThermostatController":
+            properties.extend(thermostat_properties(binding, states))
+        else:
+            properties.append(state_for(binding, states))
     properties.append({"namespace": "Alexa.EndpointHealth", "name": "connectivity",
                        "value": {"value": "OK"},
                        "timeOfSample": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -274,7 +315,8 @@ def lambda_handler(event, context):
             return response(event, "Alexa", "StateReport", endpoint=external_id, properties=values)
         if namespace in INTERFACE_ACTIONS and name in (
                 "TurnOn", "TurnOff", "SetBrightness", "SetRangeValue",
-                "AdjustRangeValue", "Stop"):
+                "AdjustRangeValue", "Stop", "SetTargetTemperature",
+                "AdjustTargetTemperature", "SetThermostatMode"):
             matching = [b for b in bindings if b["interface"] == namespace
                         and b.get("instance") == hdr.get("instance")]
             if len(matching) != 1:
@@ -289,6 +331,13 @@ def lambda_handler(event, context):
                 value = action_payload.get("rangeValue")
             elif name == "AdjustRangeValue":
                 value = action_payload.get("rangeValueDelta")
+            elif name == "SetTargetTemperature":
+                value = action_payload.get("targetSetpoint")
+            elif name == "AdjustTargetTemperature":
+                value = action_payload.get("targetSetpointDelta")
+            elif name == "SetThermostatMode":
+                mode = action_payload.get("thermostatMode")
+                value = mode.get("value") if isinstance(mode, dict) else mode
             else:
                 value = None
             gateway("/v1/control", "POST", {"endpoint_id": endpoint_id, "interface": namespace,

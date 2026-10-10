@@ -14,6 +14,8 @@ LEGACY_ENDPOINT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:#-]{0,127}$")
 SUPPORTED_INTERFACES = frozenset({
     "Alexa.PowerController", "Alexa.BrightnessController",
     "Alexa.RangeController", "Alexa.ToggleController", "Alexa.PlaybackController",
+    "Alexa.ContactSensor", "Alexa.MotionSensor", "Alexa.TemperatureSensor",
+    "Alexa.ThermostatController",
 })
 INSTANCE_INTERFACES = frozenset({"Alexa.RangeController", "Alexa.ToggleController"})
 
@@ -106,6 +108,14 @@ def validate_devices(devices: Any) -> dict[str, dict[str, Any]]:
                 if cap.get("read_only", True) is not True:
                     if not entity_id.startswith("cover.") or instance != "cover.position":
                         raise DeviceModelError(f"{endpoint_id}: writable ranges only supported for cover.position")
+            if interface == "Alexa.ContactSensor" and not entity_id.startswith("binary_sensor."):
+                raise DeviceModelError(f"{endpoint_id}: ContactSensor requires binary_sensor")
+            if interface == "Alexa.MotionSensor" and not entity_id.startswith("binary_sensor."):
+                raise DeviceModelError(f"{endpoint_id}: MotionSensor requires binary_sensor")
+            if interface == "Alexa.TemperatureSensor" and not entity_id.startswith(("sensor.", "climate.")):
+                raise DeviceModelError(f"{endpoint_id}: TemperatureSensor requires sensor or climate")
+            if interface == "Alexa.ThermostatController" and not entity_id.startswith("climate."):
+                raise DeviceModelError(f"{endpoint_id}: ThermostatController requires climate")
             if interface == "Alexa.PlaybackController":
                 if not entity_id.startswith("cover.") or cap.get("supported_operations", ["Stop"]) != ["Stop"]:
                     raise DeviceModelError(f"{endpoint_id}: PlaybackController only supports cover Stop")

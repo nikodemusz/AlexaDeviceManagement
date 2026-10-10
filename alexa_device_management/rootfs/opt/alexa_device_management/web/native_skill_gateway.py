@@ -132,11 +132,36 @@ async def control_route(request: web.Request) -> web.Response:
         if not 0 <= value <= 100:
             raise web.HTTPBadRequest(text="Cover position outside 0..100")
         service = "set_cover_position"
+    elif domain == "climate" and interface == "Alexa.ThermostatController":
+        value = data.get("value")
+        if action in ("SetTargetTemperature", "AdjustTargetTemperature"):
+            if not isinstance(value, dict) or value.get("scale") != "CELSIUS":
+                raise web.HTTPBadRequest(text="Celsius setpoint required")
+            number = value.get("value")
+            if type(number) not in (int, float) or not -40 <= number <= 50:
+                raise web.HTTPBadRequest(text="Invalid thermostat setpoint")
+            if action == "AdjustTargetTemperature":
+                current = await ha_request("GET", "/states/" + entity, token=data.get("token"))
+                base = current.get("attributes", {}).get("temperature")
+                if type(base) not in (int, float):
+                    raise web.HTTPBadRequest(text="Thermostat setpoint unavailable")
+                number += base
+            service, value = "set_temperature", {"temperature": number}
+        elif action == "SetThermostatMode":
+            mode = {"HEAT": "heat", "COOL": "cool", "AUTO": "auto",
+                    "OFF": "off", "ECO": "eco"}.get(value)
+            if mode is None:
+                raise web.HTTPBadRequest(text="Unsupported thermostat mode")
+            service, value = "set_hvac_mode", {"hvac_mode": mode}
+        else:
+            raise web.HTTPBadRequest(text="Unsupported thermostat action")
     else:
         raise web.HTTPBadRequest(text="Unsupported action/domain")
     payload = {"entity_id": entity}
     if value is not None:
-        if domain == "cover":
+        if domain == "climate":
+            payload.update(value)
+        elif domain == "cover":
             payload["position"] = round(value)
         else:
             payload["brightness_pct"] = value

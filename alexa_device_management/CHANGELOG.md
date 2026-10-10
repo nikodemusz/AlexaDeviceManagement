@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.23.0
+
+- Native v6-Massenmigration mit Mehrfachauswahl, gestaffelter Aktivierung und Rollback (max. 50 Geräte je Transaktion).
+- Zusätzliche native Controller für Thermostate, Kontakt-, Bewegungs- und Temperatursensoren; nicht eindeutig klassifizierte Sensoren bleiben ausgeschlossen.
+
 ## 2.22.0
 
 - Migrationsoberfläche zeigt den globalen v6-Status deutlich, erklärt nicht automatisch migrierbare Geräte und nennt blockierende Voraussetzungen direkt am Gerät.
