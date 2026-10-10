@@ -82,7 +82,7 @@ class MigrationTests(unittest.TestCase):
             self.assertFalse(path.exists())
             store.save(proposed)
             self.assertTrue(path.exists())
-            self.assertEqual(store.load(), proposed)
+            self.assertEqual(store.load(), NativeSkillConfigStore.validate(proposed))
 
 
 if __name__ == "__main__":
