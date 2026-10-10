@@ -111,6 +111,50 @@ class CombinedSkillTests(unittest.TestCase):
         mod.normalize_legacy_response(event("Alexa", "ReportState", "binary_sensor#door"), result)
         self.assertIn("Alexa.ContactSensor", [p["namespace"] for p in result["context"]["properties"]])
 
+    def test_cover_discovery_has_position_and_stop_without_power_switch(self):
+        bindings = [
+            {"interface": "Alexa.RangeController", "instance": "cover.position",
+             "entity_id": "cover.blind", "unit": "Alexa.Unit.Percent",
+             "read_only": False, "minimum": 0, "maximum": 100},
+            {"interface": "Alexa.PlaybackController", "entity_id": "cover.blind",
+             "supported_operations": ["Stop"]},
+        ]
+        result = mod.discovery(event(), {"devices": {
+            "blind": {"name": "Rollladen", "display_category": "INTERIOR_BLIND",
+                      "capabilities": bindings}}})
+        caps = result["event"]["payload"]["endpoints"][0]["capabilities"]
+        self.assertEqual([cap["interface"] for cap in caps],
+                         ["Alexa", "Alexa.RangeController", "Alexa.PlaybackController"])
+        self.assertNotIn("nonControllable", caps[1]["properties"])
+        self.assertEqual(caps[2]["supportedOperations"], ["Stop"])
+
+    def test_cover_reports_position_from_attributes_not_on_state(self):
+        b = {"interface": "Alexa.RangeController", "instance": "cover.position",
+             "entity_id": "cover.blind", "unit": "Alexa.Unit.Percent",
+             "read_only": False}
+        value = mod.state_for(b, {"cover.blind": {
+            "state": "open", "attributes": {"current_position": 37}}})
+        self.assertEqual(value["value"], 37)
+
+    def test_cover_stop_is_forwarded_without_state_property(self):
+        req = event("Alexa.PlaybackController", "Stop", "native:blind")
+        req["directive"]["header"]["instance"] = None
+        config = {"devices": {"blind": {"name": "Blind", "capabilities": [
+            {"interface": "Alexa.PlaybackController", "entity_id": "cover.blind"}]}}}
+        calls = []
+        def gw(path, method="GET", payload=None):
+            calls.append((path, payload))
+            if path == "/v1/config":
+                return config
+            if path == "/v1/control":
+                return {"ok": True}
+            raise AssertionError(path)
+        with patch.object(mod, "verify_account", return_value="test-oauth"), patch.object(mod, "gateway", side_effect=gw):
+            result = mod.lambda_handler(req, None)
+        self.assertEqual(result["event"]["header"]["name"], "Response")
+        self.assertEqual(result["context"]["properties"], [])
+        self.assertEqual(calls[-1][1]["action"], "Stop")
+
     def test_native_state_uses_correct_binding_and_linked_token(self):
         request = event("Alexa", "ReportState", "native:zisterne")
         config = {"devices": {"zisterne": {"name": "Zisterne", "capabilities": [
