@@ -94,7 +94,11 @@
             "Alexa.BrightnessController",
             "Alexa.RangeController",
             "Alexa.ToggleController",
-            "Alexa.PlaybackController"
+            "Alexa.PlaybackController",
+            "Alexa.ContactSensor",
+            "Alexa.MotionSensor",
+            "Alexa.TemperatureSensor",
+            "Alexa.ThermostatController"
           ]
         },
         "entity_id": {
