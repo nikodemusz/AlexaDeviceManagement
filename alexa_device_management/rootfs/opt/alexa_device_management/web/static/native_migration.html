@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Migration v5 → v6</title>
-<link rel="stylesheet" href="{{INGRESS_PATH}}/static/device_overview.css">
+<link rel="stylesheet" href="{{INGRESS_PATH}}/static/device_overview.css?v=2.24.0">
 <style>
 .migration{max-width:1100px;margin:28px auto;padding:0 18px;color:inherit}
 .migration table{width:100%;border-collapse:collapse;background:var(--card-bg,#fff)}
@@ -62,12 +62,18 @@
 <header class="topbar"><div><h1>Migration v5 → v6</h1><div class="subtitle">Geräte kontrolliert auf die native Alexa-Skill umstellen</div></div>
 <div class="top-actions"><a class="button secondary" href="{{INGRESS_PATH}}/devices">Zur Geräteübersicht</a></div></header>
 <main class="migration">
-<p>Bestehende v5-Geräte bleiben aktiv. Eine Übernahme legt ausschließlich <strong>deaktivierte</strong> v6-Entwürfe an. Die Umstellung und Rücknahme erfolgen einzeln.</p>
+<p>Eine Übernahme legt zunächst <strong>deaktivierte</strong> v6-Entwürfe an. Nach der kontrollierten Migration kann v5 vollständig und dauerhaft beendet werden.</p>
 <section class="global-panel">
 <label><input type="checkbox" id="global-v6"> Native v6-Skill global aktivieren</label>
 <p class="hint">Aktiviert die native Discovery für bereits aktivierte v6-Geräte. Es werden keine Entwürfe automatisch aktiviert und keine v5-Geräte gelöscht.</p>
 <button id="save-global" class="button primary">v6-Einstellung speichern</button>
 <span id="global-state" class="state-badge" role="status"></span>
+</section>
+<section class="global-panel">
+<strong>v5 vollständig beenden</strong>
+<p class="hint">Deaktiviert den bisherigen Home-Assistant-v5-Export dauerhaft, entfernt seine Alexa-Endpunkte und startet Home Assistant neu. Aktive v6-Geräte bleiben bestehen.</p>
+<button id="retire-v5" class="button danger">Alle v5-Geräte löschen und v5 abschalten</button>
+<button id="finish-v5" class="button secondary">Verbliebene v5-Löschungen an Alexa senden</button>
 </section>
 <details id="config-details"><summary>Native v6-Konfiguration prüfen und bearbeiten</summary>
 <p class="hint">Datei: <code>/config/alexa_device_management/native/config.yaml</code>. Änderungen erst validieren und dann explizit speichern.</p>
@@ -90,7 +96,7 @@
 <div id="warning" class="notice" hidden>Die native v6-Konfiguration ist global deaktiviert. Aktiviere sie über den Schalter oben, bevor du einzelne Geräte auf v6 umstellst.</div>
 <div class="table-wrap"><table><thead><tr><th>Auswahl</th><th>Gerät / Entität</th><th>v5-Endpunkt</th><th>v6-Funktionen</th><th>Status</th><th>Aktion</th></tr></thead>
 <tbody id="rows"><tr><td colspan="5">Lade Geräte…</td></tr></tbody></table></div>
-<p class="hint">Achtung: Neue v6-Endpunkt-IDs werden von Alexa als neue Geräte erkannt. Räume und Routinen müssen gegebenenfalls neu zugeordnet werden. Eine Gerätesuche in Alexa ist nach jeder Umstellung erforderlich. Der v5-Export wird nicht verändert.</p>
+<p class="hint">Achtung: Neue v6-Endpunkt-IDs werden von Alexa als neue Geräte erkannt. Räume und Routinen müssen gegebenenfalls neu zugeordnet werden. Eine Gerätesuche in Alexa ist nach jeder Umstellung erforderlich.</p>
 </main>
 <script>
 const BASE="{{INGRESS_PATH}}";
@@ -150,6 +156,9 @@ function updateSelectionCount(){
 function render(data){
  currentRows=data.rows;
  document.getElementById("counts").textContent=data.legacy_count+" v5-Freigaben · "+data.native_count+" v6-Geräte";
+ document.getElementById("retire-v5").disabled=data.legacy_export_enabled===false;
+ if(data.legacy_export_enabled===false)document.getElementById("retire-v5").textContent="v5 ist abgeschaltet";
+ document.getElementById("bulk-off").textContent=data.legacy_export_enabled===false?"Auswahl v6 deaktivieren":"Auswahl zu v5 zurück";
  document.getElementById("warning").hidden=data.global_enabled;
  rows.replaceChildren();
  if(!data.rows.length){const tr=el("tr","");const td=el("td","Keine migrierbaren Geräte vorhanden.");td.colSpan=6;tr.append(td);rows.append(tr);return}
@@ -167,7 +176,7 @@ function render(data){
   if(d.status==="unsupported"){
    cell.append(el("span","Keine automatische Migration"));
   }else if(d.status!=="candidate"){
-   const button=el("button",d.enabled?"Zu v5 zurück":"v6 aktivieren");
+   const button=el("button",d.enabled?(data.legacy_export_enabled===false?"v6 deaktivieren":"Zu v5 zurück"):"v6 aktivieren");
    button.className="button "+(d.enabled?"secondary":"primary");
    button.disabled=!d.enabled&&!d.can_activate;
    button.title=d.enabled?"v6 deaktivieren; v5 wird bei der nächsten Alexa-Gerätesuche wieder sichtbar":"v6 aktivieren; ersetzt v5 bei der nächsten Gerätesuche";
@@ -218,6 +227,29 @@ async function bulk(enabled){
 }
 document.getElementById("bulk-on").onclick=()=>bulk(true);
 document.getElementById("bulk-off").onclick=()=>bulk(false);
+document.getElementById("retire-v5").onclick=async()=>{
+ if(!confirm("Wirklich ALLE v5-Geräte aus Alexa löschen und den v5-Export dauerhaft abschalten? Aktive v6-Geräte bleiben bestehen."))return;
+ const button=document.getElementById("retire-v5");button.disabled=true;
+ try{
+  const loaded=await api("/api/ha-export/config");
+  const legacy=loaded.configuration;
+  legacy.legacy_export_enabled=false;
+  for(const settings of Object.values(legacy.entities||{}))if(settings&&typeof settings==="object")settings.enabled=false;
+  const deployed=await api("/api/ha-export/deploy","POST",legacy);
+  const cleanup=deployed.alexa_cleanup||{}, pending=deployed.alexa_event_sync?.pending_delete||[];
+  await api("/api/ha-export/restart","POST",{});
+  button.textContent="v5 ist abgeschaltet";
+  message("v5 ist abgeschaltet. "+(cleanup.deleted_removed||[]).length+" v5-Endpunkte wurden direkt gelöscht. "+pending.length+" Löschungen sind noch für den Alexa-Abgleich vorgemerkt. Home Assistant wird neu gestartet.");
+ }catch(e){message("v5-Abschaltung fehlgeschlagen: "+e.message);button.disabled=false}
+};
+document.getElementById("finish-v5").onclick=async()=>{
+ const button=document.getElementById("finish-v5");button.disabled=true;
+ try{
+  const result=await api("/api/ha-export/event-sync","POST",{force:false});
+  message("Alexa-Abgleich abgeschlossen: "+(result.official?.delete_count||0)+" verbliebene v5-Endpunkte gelöscht.");
+ }catch(e){message("Alexa-Abgleich noch nicht möglich: "+e.message+" Bitte warten, bis Home Assistant vollständig gestartet ist.")}
+ finally{button.disabled=false}
+};
 load();
 loadConfig();
 </script></body></html>

@@ -35,6 +35,7 @@ class ConfigStore:
         return {
             "schema_version": ConfigStore.SCHEMA_VERSION,
             "locale": "de-DE",
+            "legacy_export_enabled": True,
             "entities": {},
             "devices": {},
             "group_sync": {
@@ -124,6 +125,7 @@ class ConfigStore:
         result = self.default()
         if isinstance(data, dict):
             result["locale"] = str(data.get("locale") or "de-DE")
+            result["legacy_export_enabled"] = bool(data.get("legacy_export_enabled", True))
             result["entities"] = data.get("entities") if isinstance(data.get("entities"), dict) else {}
             # Explicit devices (including an empty mapping) always win over migration.
             # Old entity exports remain untouched for the existing HA integration.

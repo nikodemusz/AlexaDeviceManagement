@@ -54,6 +54,7 @@ def summary(legacy, native):
         })
     rows.sort(key=lambda row: (row["name"].casefold(), row["id"]))
     return {"global_enabled": native["enabled"], "rows": rows,
+            "legacy_export_enabled": legacy.get("legacy_export_enabled", True),
             "preview": preview, "native_count": len(native["devices"]),
             "legacy_count": sum(bool(d.get("enabled")) for d in legacy.get("entities", {}).values()
                                 if isinstance(d, dict))}

@@ -49,6 +49,7 @@ class MigrationUITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status, 200)
         data = await r.json()
         self.assertEqual(data["preview"]["added"], ["cover.blind", "light.desk"])
+        self.assertTrue(data["legacy_export_enabled"])
         self.assertEqual(len(data["rows"]), 2)
         self.assertEqual(len(self.native.load()["devices"]), 1)
 
