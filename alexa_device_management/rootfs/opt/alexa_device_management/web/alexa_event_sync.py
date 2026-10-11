@@ -9,6 +9,7 @@ from aiohttp import web
 
 import alexa_event_support as support
 import ha_export
+from native_skill_config import NativeSkillConfigStore, NativeSkillConfigError
 
 _HA_CONTROL: Any = None
 _ORIGINAL_CLEANUP: Callable[[set[str], set[str]], Awaitable[dict[str, Any]]] | None = None
@@ -45,8 +46,20 @@ async def sync_now(request: web.Request) -> web.Response:
 
     current_entities = support._enabled_entities(config)
     stored = support._read_status()
-    add_or_update = set(stored.get("pending_add_or_update") or [])
-    delete = set(stored.get("pending_delete") or [])
+    if current_entities != support._entities_from_yaml(ha_export.ALEXA_YAML_PATH):
+        return web.json_response({
+            "ok": False,
+            "error": "Die Auswahl wurde geändert. Zuerst ausrollen und Home Assistant neu starten, danach Alexa abgleichen.",
+        }, status=409)
+    add_or_update = set(stored.get("pending_add_or_update") or []) & current_entities
+    try:
+        native_config = NativeSkillConfigStore().load()
+    except NativeSkillConfigError:
+        return web.json_response({"ok": False, "error": "Native v6-Konfiguration ungültig; Alexa-Löschungen sind zum Schutz aktiver Geräte blockiert."}, status=409)
+    delete = support.removal_candidates(
+        {"entities": {entity: {"enabled": True} for entity in current_entities}},
+        set(), set(stored.get("pending_delete") or []), [], native_config,
+    )
     if force or not add_or_update:
         add_or_update = set(current_entities)
 
@@ -152,6 +165,10 @@ def install(ha_control: Any) -> None:
         return support._empty_cleanup(removed_entities)
 
     async def checked_deploy(request: web.Request) -> web.Response:
+        try:
+            native_config = NativeSkillConfigStore().load()
+        except NativeSkillConfigError:
+            return web.json_response({"ok": False, "error": "Native v6-Konfiguration ungültig; vor der Alexa-Bereinigung korrigieren."}, status=409)
         stored_before = support._read_status()
         if "deployed_entities" in stored_before:
             previously_deployed = set(stored_before.get("deployed_entities") or [])
@@ -192,20 +209,42 @@ def install(ha_control: Any) -> None:
         settings = support._event_settings(config)
         current_entities = support._enabled_entities(config)
         plan = support.deployment_plan(previously_deployed, current_entities, settings["enabled"])
-        removed_entities = plan["removed"]
+        inventory = []
+        inventory_warnings = []
+        if ha_control.server_clean.is_configured():
+            try:
+                inventory, inventory_warnings = await ha_control.server_clean._fetch_devices_from_alexa(
+                    ha_control.server_clean.session_data()
+                )
+            except Exception:
+                inventory_warnings = ["Alexa-Bestand nicht erreichbar; Altgeräteabgleich beim nächsten Ausrollen wiederholen."]
+        removed_entities = support.removal_candidates(
+            config, previously_deployed, set(stored_before.get("pending_delete") or []),
+            inventory, native_config,
+        )
         now = int(time.time())
 
         if settings["enabled"]:
-            cleanup = support._empty_cleanup(removed_entities)
-            cleanup["warnings"].append(
-                "Alexa-Löschungen wurden für den offiziellen DeleteReport nach dem Home-Assistant-Neustart vorgemerkt."
-            )
+            if not config.get("legacy_export_enabled", True):
+                cleanup = await original_cleanup(removed_entities, current_entities)
+            else:
+                cleanup = support._empty_cleanup(removed_entities)
+                cleanup["warnings"].append(
+                    "Alexa-Löschungen wurden für den offiziellen DeleteReport nach dem Home-Assistant-Neustart vorgemerkt."
+                )
             pending_add = sorted(plan["add_or_update"])
-            pending_delete = sorted(plan["delete"])
+            pending_delete = sorted(
+                removed_entities
+                if cleanup.get("warnings") or cleanup.get("failed") or cleanup.get("not_found")
+                else set()
+            )
         else:
             cleanup = await original_cleanup(removed_entities, current_entities)
             pending_add = []
-            pending_delete = []
+            failed = {str(item.get("entity_id") or "") for item in cleanup.get("failed", [])}
+            pending_delete = sorted(removed_entities if cleanup.get("warnings") else failed)
+
+        cleanup["warnings"].extend(inventory_warnings)
 
         event_status = support._write_status({
             "enabled": settings["enabled"],

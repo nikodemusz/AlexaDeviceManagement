@@ -85,12 +85,14 @@ class AlexaYamlGenerator:
         selected = {
             entity_id: settings
             for entity_id, settings in normalized["entities"].items()
-            if settings["enabled"]
+            if normalized["legacy_export_enabled"] and settings["enabled"]
         }
 
         smart_home: dict[str, Any] = {
             "locale": normalized["locale"],
-            "filter": {"include_entities": sorted(selected)},
+            # An empty include list means "no filter" in HA. Explicit entity
+            # includes take precedence over the wildcard exclusion.
+            "filter": {"include_entities": sorted(selected), "exclude_entity_globs": ["*"]},
         }
         entity_config: dict[str, Any] = {}
         for entity_id, settings in sorted(selected.items()):
@@ -243,6 +245,7 @@ class AlexaYamlGenerator:
 
         return {
             "locale": locale,
+            "legacy_export_enabled": bool(data.get("legacy_export_enabled", True)),
             "entities": entities,
             "event_gateway": event_gateway,
         }

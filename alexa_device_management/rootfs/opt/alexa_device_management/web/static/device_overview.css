@@ -60,6 +60,13 @@ pre{margin:0;max-height:70vh;overflow:auto;padding:16px;background:#111827;color
 /* Dense but readable entity lists on narrow screens. Keep form fields at
    16px on iOS to avoid involuntary browser zoom when editing names. */
 @media(max-width:700px){
+  .topbar{position:static}
+  .simple-device-row{grid-template-columns:minmax(0,1fr)}
+  .simple-device-row > .device-actions{grid-column:1/-1;min-width:0}
+  .simple-device-row > .simple-entity-list{grid-column:1/-1;min-width:0;width:100%}
+  .simple-entity-row > .simple-entity-identity{min-width:0}
+  .simple-entity-row .simple-alexa-name > label{grid-column:1/-1}
+  .simple-entity-row .simple-alexa-name .simple-name-suggestion{white-space:nowrap}
   .simple-device-list{gap:4px;margin:5px 0}
   .simple-device-row{gap:5px;padding:7px 8px;border-radius:7px}
   .simple-device-row strong{font-size:12px;line-height:1.25}
@@ -74,7 +81,7 @@ pre{margin:0;max-height:70vh;overflow:auto;padding:16px;background:#111827;color
   .simple-entity-row:last-child{border-bottom:0}
   .simple-entity-row input[type="checkbox"]{width:16px;height:16px}
   .simple-entity-row .simple-alexa-name{
-    grid-column:2;grid-template-columns:auto minmax(0,1fr) auto;
+    grid-column:2;grid-template-columns:minmax(0,1fr) auto;
     gap:5px;font-size:11px;line-height:1.3;
   }
   .simple-entity-row .simple-alexa-name input:not([type="checkbox"]){

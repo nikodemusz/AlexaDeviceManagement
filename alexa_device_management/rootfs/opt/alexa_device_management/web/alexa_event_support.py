@@ -83,6 +83,8 @@ def _event_settings(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def _enabled_entities(config: dict[str, Any]) -> set[str]:
+    if not config.get("legacy_export_enabled", True):
+        return set()
     entities = config.get("entities") if isinstance(config, dict) else {}
     if not isinstance(entities, dict):
         return set()
@@ -142,6 +144,37 @@ def deployment_plan(
         "add_or_update": set(current_entities) if event_enabled else set(),
         "delete": removed if event_enabled else set(),
     }
+
+
+def removal_candidates(
+    config: dict[str, Any], previously_deployed: set[str], pending_delete: set[str],
+    alexa_devices: list[dict[str, Any]], native_config: dict[str, Any],
+) -> set[str]:
+    """Reconcile confirmed HA exports, preserving separately active v6 bindings."""
+    from ha_control import _ha_entity_id_for_device
+
+    selected = _enabled_entities(config)
+    protected = {
+        str(capability["entity_id"])
+        for device in native_config.get("devices", {}).values()
+        if config.get("legacy_export_enabled", True)
+        and native_config.get("enabled") and device.get("enabled", True)
+        for capability in device.get("capabilities", [])
+        if capability.get("entity_id")
+    }
+    known = set(previously_deployed) | set(pending_delete)
+    known.update(config.get("entities", {}))
+    for device in alexa_devices:
+        raw = device.get("raw") if isinstance(device.get("raw"), dict) else {}
+        # Never infer ownership from a friendly name or a generic sensor type.
+        if str(device.get("source") or "") == "echo":
+            continue
+        if not str(raw.get("description") or "").endswith(" via Home Assistant"):
+            continue
+        entity_id = _ha_entity_id_for_device(device)
+        if entity_id:
+            known.add(entity_id)
+    return known - selected - protected
 
 
 def _component_files() -> list[pathlib.Path]:

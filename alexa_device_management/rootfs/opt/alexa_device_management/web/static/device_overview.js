@@ -430,6 +430,9 @@
     }
     document.getElementById("btn-login").classList.toggle("hidden", model.alexa_connected);
     document.getElementById("btn-logout").classList.toggle("hidden", !model.alexa_connected);
+    const retired = config.legacy_export_enabled === false;
+    document.getElementById("v5-disabled").classList.toggle("hidden", !retired);
+    for (const control of document.querySelectorAll(".export-toggle, .export-name, .export-category, .export-group, [data-action='prepare-device'], [data-action='fill-entity'], #btn-enable-useful, #btn-disable-visible")) control.disabled = retired;
   }
 
   async function load(force = false) {
@@ -513,7 +516,7 @@
   async function disableDeviceExport(deviceId) {
     const device = (model.devices || []).find(item => item.device_id === deviceId); if (!device) return;
     for (const entity of device.entities) { entityConfig(entity.entity_id).enabled = false; entity.export.enabled = false; }
-    await saveConfig(); message(`Alexa-Export für „${device.name}“ wurde deaktiviert.`);
+    await saveConfig(); message(`v5-Export für „${device.name}“ abgewählt. Zum Entfernen: ausrollen → HA neu starten → Alexa-Abgleich. Aktive native v6-Geräte werden separat in der Migration verwaltet.`, "warn");
   }
 
   function toggleSimpleDevice(button, deviceId) {
@@ -579,7 +582,9 @@
       await saveConfig();
       const result = await request("/api/ha-export/deploy", {method: "POST", body: JSON.stringify(config)});
       const event = result.alexa_event_sync;
-      message(`Konfiguration geschrieben und geprüft: ${result.selected_count ?? result.selected ?? 0} Entitäten.\nDatei: ${result.path || "/config/packages/alexa.yaml"}` + (event?.pending ? `\nEvent Gateway vorgemerkt: ${(event.pending_add_or_update || []).length} Updates, ${(event.pending_delete || []).length} Löschungen.` : ""));
+      const cleanup = result.alexa_cleanup || {};
+      const warnings = cleanup.warnings || [];
+      message(`Konfiguration geschrieben und geprüft: ${result.selected_count ?? result.selected ?? 0} Entitäten.\nDatei: ${result.path || "/config/packages/alexa.yaml"}\nJetzt HA neu starten.` + (event?.enabled && event?.pending ? `\nDanach Alexa-Abgleich starten: ${(event.pending_add_or_update || []).length} Updates, ${(event.pending_delete || []).length} Löschungen vorgemerkt.` : `\nAus Alexa entfernt: ${(cleanup.deleted_removed || []).length}. Noch ausstehend: ${(event?.pending_delete || []).length}.`) + (warnings.length ? `\n${warnings.join("\n")}` : ""), warnings.length || event?.pending ? "warn" : "ok");
       await load(false);
     } catch (error) {
       const restartHint = error.body?.restart_required ? "\nBitte jetzt „HA neu starten“ und danach erneut ausrollen." : "";
@@ -731,7 +736,7 @@
           if (nameInput && !nameInput.value) nameInput.value = settings.name;
         }
       }
-      await saveConfig(); message(`${entityId} wurde ${target.checked ? "für Alexa aktiviert" : "deaktiviert"}.`);
+      await saveConfig(); message(`${entityId} wurde ${target.checked ? "für den v5-Export ausgewählt" : "für den v5-Export abgewählt"}. Änderung anwenden: ausrollen → HA neu starten → Alexa-Abgleich.`, "warn");
     } else if (target.classList.contains("export-category")) { settings.display_category = target.value; scheduleSave(); }
   });
   document.getElementById("content").addEventListener("input", event => {

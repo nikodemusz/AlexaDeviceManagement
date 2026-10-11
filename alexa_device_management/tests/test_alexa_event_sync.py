@@ -9,9 +9,32 @@ WEB_DIR = pathlib.Path(__file__).resolve().parents[1] / "rootfs/opt/alexa_device
 sys.path.insert(0, str(WEB_DIR))
 
 import alexa_event_sync
+from alexa_event_support import removal_candidates
 
 
 class AlexaEventSyncTests(unittest.TestCase):
+    def test_reconciliation_removes_unselected_history_and_confirmed_ha_exports(self):
+        config = {"entities": {"light.keep": {"enabled": True}, "switch.off": {"enabled": False}}}
+        devices = [
+            {"raw": {"description": "binary_sensor.diagnostic via Home Assistant"}},
+            {"name": "sensor.unrelated", "source": "echo"},
+            {"raw": {"description": "sensor.vendor"}},
+        ]
+        removed = removal_candidates(config, {"light.keep", "switch.old"}, {"switch.retry"}, devices, {})
+        self.assertEqual(removed, {"switch.off", "switch.old", "switch.retry", "binary_sensor.diagnostic"})
+
+    def test_reconciliation_protects_active_native_and_reselected_entities(self):
+        config = {"entities": {"light.keep": {"enabled": True}, "cover.native": {"enabled": False}}}
+        native = {"enabled": True, "devices": {"blind": {"enabled": True, "capabilities": [{"entity_id": "cover.native"}]}}}
+        self.assertEqual(removal_candidates(config, set(), {"light.keep", "cover.native"}, [], native), set())
+        native["enabled"] = False
+        self.assertEqual(removal_candidates(config, set(), {"cover.native"}, [], native), {"cover.native"})
+
+    def test_retiring_v5_removes_legacy_endpoint_replaced_by_native(self):
+        config = {"legacy_export_enabled": False, "entities": {"cover.native": {"enabled": False}}}
+        native = {"enabled": True, "devices": {"blind": {"enabled": True, "capabilities": [{"entity_id": "cover.native"}]}}}
+        self.assertEqual(removal_candidates(config, {"cover.native"}, set(), [], native), {"cover.native"})
+
     def test_deployment_plan_uses_last_deployed_snapshot(self) -> None:
         plan = alexa_event_sync.deployment_plan(
             {"light.keep", "switch.remove"},

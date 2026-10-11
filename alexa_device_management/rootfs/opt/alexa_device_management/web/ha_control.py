@@ -33,7 +33,8 @@ def verify_deployed_configuration(path: pathlib.Path, config: dict[str, Any]) ->
     raw_entities = config.get("entities", {}) if isinstance(config, dict) else {}
     expected_entities = {
         str(entity_id) for entity_id, settings in raw_entities.items()
-        if isinstance(settings, dict) and settings.get("enabled")
+        if config.get("legacy_export_enabled", True)
+        and isinstance(settings, dict) and settings.get("enabled")
     }
     if deployed_entities != expected_entities:
         missing = sorted(expected_entities - deployed_entities)
@@ -106,6 +107,8 @@ def _write_lifecycle_status(data: dict[str, Any]) -> None:
 
 
 def _enabled_entities(config: dict[str, Any]) -> set[str]:
+    if not config.get("legacy_export_enabled", True):
+        return set()
     entities = config.get("entities") if isinstance(config, dict) else {}
     if not isinstance(entities, dict):
         return set()

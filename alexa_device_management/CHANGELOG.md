@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.24.0
+
+- Auswahl strikt begrenzt, auch bei leerer Liste; Abgleich entfernt eindeutig identifizierte, nicht ausgewählte HA-Altgeräte und bewahrt aktive native v6-Geräte.
+- Ausstehende Löschungen bleiben über erneutes Ausrollen erhalten; UI erklärt Anwendung und zeigt Bereinigungsfehler.
+- Mobile Modulansicht ohne zusätzliche schmale Grid-Spalte und übergroßen fixierten Kopf.
+- Abschließbare v5-Migration: alle v5-Freigaben deaktivieren, zugehörige Alexa-Endpunkte bereinigen und zukünftige Freigaben auf v6 begrenzen.
+
 ## 2.23.1
 
 - Kompaktere Entitätslisten in der mobilen Ansicht; v6-Migrationstabelle als schmale Gerätekarten statt horizontaler Tabelle.

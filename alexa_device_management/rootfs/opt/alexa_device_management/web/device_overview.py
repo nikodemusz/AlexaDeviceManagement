@@ -239,7 +239,7 @@ def build_overview(
             settings = entity_config.get(entity_id)
             if not isinstance(settings, dict):
                 settings = {}
-            enabled = bool(settings.get("enabled"))
+            enabled = bool(config.get("legacy_export_enabled", True) and settings.get("enabled"))
             native_ids = native_bindings.get(entity_id, [])
             match_indexes = _entity_matches(entity_id, alexa_devices, native_ids)
             matched_indexes.update(match_indexes)

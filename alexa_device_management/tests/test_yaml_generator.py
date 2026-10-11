@@ -149,10 +149,22 @@ class AlexaYamlGeneratorTests(unittest.TestCase):
             self.assertTrue(target.exists())
             self.assertEqual(result.selected_count, 0)
             parsed = load_yaml_with_secrets(result.yaml_text)
+            self.assertEqual(parsed["alexa"]["smart_home"]["filter"]["exclude_entity_globs"], ["*"])
             self.assertEqual(
                 parsed["alexa"]["smart_home"]["filter"]["include_entities"],
                 [],
             )
+
+    def test_retired_legacy_export_ignores_stale_enabled_entities(self) -> None:
+        generator = AlexaYamlGenerator(pathlib.Path("/tmp/alexa.yaml"))
+        result = generator.generate({
+            "legacy_export_enabled": False,
+            "entities": {"light.old": {"enabled": True}},
+        })
+        self.assertEqual(result.selected_count, 0)
+        self.assertEqual(
+            result.document["alexa"]["smart_home"]["filter"]["include_entities"], []
+        )
 
 
 if __name__ == "__main__":
