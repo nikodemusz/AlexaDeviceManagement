@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.0.0
+
+- v6 ist die Hauptkonfiguration: Auswahl und Alexa-Namen bearbeiten die native YAML; v5-JSON bleibt als Archiv erhalten und wird nie mehr exportiert. Die Migrationsseite entfällt.
+- Native Discovery ist unabhängig vom alten v5-Pfad. AddOrUpdateReport veröffentlicht dieselben v6-Endpunkte wie die Lambda, in größenbegrenzten Batches; fehlgeschlagene Veröffentlichungen werden erneut versucht.
+- Erkannte HA-v5-Geräte werden automatisch und unabhängig von der früheren Auswahl entfernt. Native Endpunkte, Echos und fremde Anbieter bleiben geschützt; frischer Alexa-Bestand bestätigt Löschungen.
+- Zähler zählen logische v6-Endpunkte, einschließlich mehrerer Messwerte pro Gerät. Der v6-Editor schützt vor parallelem Überschreiben und der 300-Endpunkt-Grenze.
+- Upgrade erfordert die neue AWS-Lambda und den aktualisierten HA-Abgleichsdienst (HA-Neustart). Keine automatische Skill-Neuverknüpfung und keine automatische Freigabe archivierter Geräte.
+
 ## 2.24.0
 
 - Auswahl strikt begrenzt, auch bei leerer Liste; Abgleich entfernt eindeutig identifizierte, nicht ausgewählte HA-Altgeräte und bewahrt aktive native v6-Geräte.

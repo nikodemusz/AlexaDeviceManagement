@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 import voluptuous as vol
@@ -10,7 +11,6 @@ import voluptuous as vol
 from homeassistant.components.alexa.auth import Auth
 from homeassistant.components.alexa.config import AbstractConfig
 from homeassistant.components.alexa.state_report import (
-    async_send_add_or_update_message,
     async_send_delete_message,
 )
 from homeassistant.const import CONF_CLIENT_ID, CONF_CLIENT_SECRET
@@ -22,7 +22,9 @@ from homeassistant.core import (
     callback,
 )
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
+from .native_reports import reports
 
 DOMAIN = "alexa_device_management_sync"
 SERVICE_SYNC = "sync"
@@ -31,6 +33,8 @@ CONF_LOCALE = "locale"
 ATTR_ADD_OR_UPDATE = "add_or_update"
 ATTR_DELETE = "delete"
 ATTR_ENTITY_CONFIG = "entity_config"
+ATTR_NATIVE_ENDPOINTS = "native_endpoints"
+ATTR_DELETE_ENDPOINT_IDS = "delete_endpoint_ids"
 VALID_ENDPOINTS = {
     "https://api.amazonalexa.com/v3/events",
     "https://api.eu.amazonalexa.com/v3/events",
@@ -60,6 +64,8 @@ SERVICE_SCHEMA = vol.Schema(
             cv.ensure_list, [cv.entity_id]
         ),
         vol.Optional(ATTR_ENTITY_CONFIG, default={}): dict,
+        vol.Optional(ATTR_NATIVE_ENDPOINTS, default=[]): vol.All(cv.ensure_list, [dict]),
+        vol.Optional(ATTR_DELETE_ENDPOINT_IDS, default=[]): vol.All(cv.ensure_list, [cv.string]),
     }
 )
 
@@ -113,8 +119,8 @@ async def _response_details(response: Any) -> dict[str, Any]:
     result = {
         "status": response.status,
         "accepted": response.status == 202,
-        "body": text[:2000],
     }
+    # Never return private response bodies or tokens through the add-on UI.
     response.release()
     return result
 
@@ -130,6 +136,10 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             add_or_update = list(dict.fromkeys(call.data[ATTR_ADD_OR_UPDATE]))
             delete = list(dict.fromkeys(call.data[ATTR_DELETE]))
             gateway.set_entity_config(dict(call.data[ATTR_ENTITY_CONFIG]))
+            native = call.data.get(ATTR_NATIVE_ENDPOINTS, [])
+            endpoint_deletes = call.data.get(ATTR_DELETE_ENDPOINT_IDS, [])
+            if add_or_update:
+                return {"ok": False, "error": "v5-AddOrUpdateReport ist dauerhaft abgeschaltet."}
 
             try:
                 token = await gateway.async_get_access_token()
@@ -138,7 +148,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                         "ok": False,
                         "error": (
                             "Kein Alexa Event Gateway-Token vorhanden. In der Alexa Developer Console "
-                            "Send Alexa Events aktivieren und den Skill anschließend neu verknüpfen."
+                            "Send Alexa Events und die bestehende Ereignisautorisierung prüfen."
                         ),
                     }
 
@@ -146,13 +156,32 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                     "ok": True,
                     "add_or_update_count": len(add_or_update),
                     "delete_count": len(delete),
+                    "api_version": 6,
                 }
-                if add_or_update:
-                    response = await async_send_add_or_update_message(
-                        hass, gateway, add_or_update
+                native_results = []
+                for report in reports(native, endpoint_deletes, token):
+                    report["event"]["payload"]["scope"]["token"] = token
+                    response = await async_get_clientsession(hass).post(
+                        gateway.endpoint, data=json.dumps(report, ensure_ascii=False, allow_nan=False).encode("utf-8"),
+                        headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"}, timeout=30,
                     )
-                    result["add_or_update"] = await _response_details(response)
-                    result["ok"] = result["ok"] and result["add_or_update"]["accepted"]
+                    details = await _response_details(response)
+                    if details["status"] == 401:
+                        gateway.async_invalidate_access_token()
+                        refreshed = await gateway.async_get_access_token()
+                        if refreshed:
+                            token = refreshed
+                            report["event"]["payload"]["scope"]["token"] = token
+                            response = await async_get_clientsession(hass).post(
+                                gateway.endpoint, data=json.dumps(report, ensure_ascii=False, allow_nan=False).encode("utf-8"),
+                                headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"}, timeout=30,
+                            )
+                            details = await _response_details(response)
+                    native_results.append({"name": report["event"]["header"]["name"], **details})
+                    result["ok"] = result["ok"] and details["accepted"]
+                result["native_reports"] = native_results
+                result["add_or_update_count"] = len(native)
+                result["delete_count"] += len(set(endpoint_deletes))
 
                 if delete:
                     response = await async_send_delete_message(hass, gateway, delete)
@@ -163,7 +192,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                     result["error"] = "Alexa Event Gateway hat mindestens einen Report nicht mit HTTP 202 akzeptiert."
                 return result
             except Exception as exc:
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": f"Alexa-Abgleich fehlgeschlagen ({type(exc).__name__})."}
 
     hass.services.async_register(
         DOMAIN,

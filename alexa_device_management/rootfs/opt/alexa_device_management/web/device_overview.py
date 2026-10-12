@@ -10,6 +10,8 @@ from aiohttp import web
 
 import alexa_group_manager
 import ha_export
+import native_export
+import native_lifecycle
 from native_skill_config import NativeSkillConfigStore
 
 STATIC_DIR = ha_export.STATIC_DIR
@@ -205,9 +207,11 @@ def build_overview(
     hidden_entities = {str(value) for value in ui.get("hidden_entities", [])}
     hidden_alexa = {str(value) for value in ui.get("hidden_alexa", [])}
     entity_config = config.get("entities") if isinstance(config.get("entities"), dict) else {}
+    native_primary = config.get("export_mode") == "native"
     native_bindings = _native_bindings(native_config or {})
 
     public_alexa = [_public_alexa_device(device, groups) for device in alexa_devices]
+    native_inventory_ids = [native_lifecycle.identifiers(device) for device in alexa_devices]
     matched_indexes: set[int] = set()
     devices: list[dict[str, Any]] = []
 
@@ -239,12 +243,17 @@ def build_overview(
             settings = entity_config.get(entity_id)
             if not isinstance(settings, dict):
                 settings = {}
-            enabled = bool(config.get("legacy_export_enabled", True) and settings.get("enabled"))
+            enabled = bool(settings.get("enabled") if native_primary else config.get("legacy_export_enabled", True) and settings.get("enabled"))
             native_ids = native_bindings.get(entity_id, [])
             match_indexes = _entity_matches(entity_id, alexa_devices, native_ids)
             matched_indexes.update(match_indexes)
             matches = [public_alexa[index] for index in match_indexes]
-            status = _entity_status(enabled or bool(native_ids), len(matches))
+            native_matches = [index for index, alexa in enumerate(alexa_devices)
+                              if set(native_ids) & native_inventory_ids[index]]
+            status = (_entity_status(bool(native_ids), int(bool(native_matches))) if native_primary
+                      else _entity_status(enabled or bool(native_ids), len(matches)))
+            if native_primary and not native_ids and matches:
+                status = "only_alexa"
             statuses.append(status)
             hidden = entity_id in hidden_entities or device_id in hidden_devices
 
@@ -308,6 +317,15 @@ def build_overview(
         summary["alexa_only"] += 1
         summary["hidden"] += int(item["hidden"])
 
+    if native_primary:
+        active_ids = {endpoint for values in native_bindings.values() for endpoint in values}
+        present_ids = {endpoint for endpoint in active_ids
+                       if any(endpoint in ids for ids in native_inventory_ids)}
+        # Count logical endpoints once, including ones with missing HA registry rows.
+        summary.update(selected=len(active_ids), native_selected=len(active_ids),
+                       synced=len(present_ids), pending=len(active_ids - present_ids),
+                       duplicates=0, only_alexa=len(native_lifecycle.legacy_targets(alexa_devices)))
+
     return {
         "devices": devices,
         "alexa_only": sorted(alexa_only, key=lambda item: item["name"].casefold()),
@@ -366,7 +384,12 @@ async def overview(request: web.Request) -> web.Response:
             except Exception as exc:
                 warnings.append(f"Alexa-Gruppen: {exc}")
 
-        result = build_overview(ha_inventory, alexa_devices, groups, config, native_config)
+        configuration = native_export.configuration(native_config or {"schema_version": 6, "enabled": False, "locale": "de-DE", "devices": {}}, config)
+        result = build_overview(ha_inventory, alexa_devices, groups, configuration, native_config)
+        lifecycle = native_lifecycle.read_status()
+        for key in ("publish_error", "legacy_error"):
+            if lifecycle.get(key):
+                warnings.append(lifecycle[key])
         result.update({
             "ok": True,
             "alexa_connected": server.is_configured(),
@@ -377,6 +400,7 @@ async def overview(request: web.Request) -> web.Response:
             ),
             "warnings": warnings,
             "generated_at": int(time.time()),
+            "native_lifecycle": lifecycle,
         })
         return web.json_response(result)
     except Exception as exc:

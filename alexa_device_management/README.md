@@ -16,36 +16,19 @@ This is not a Home Assistant integration. It runs as its own app with an ingress
 - Cache Alexa inventory with background refresh
 - Inspect raw responses in the debug console
 
-### Home Assistant → Alexa designer
+### Native v6 main editor
 
-- Read devices, entities, areas and floors from Home Assistant
-- Configure Alexa names, descriptions and display categories
-- Responsive entity cards for desktop, tablet and mobile
-- Autosave and bulk editor
-- Discovery preview with duplicate-name and orphan detection
-- Consistency and permission checks
-- Deterministic YAML generation from persistent `config.json`
-- Atomic deployment to `/config/packages/alexa.yaml`
-- Full Home Assistant configuration validation and automatic rollback
-- Persistent deploy, restart and Alexa-discovery lifecycle status
+- Select HA entities and configure native Alexa names/categories directly.
+- Keep stable logical endpoint IDs and multiple values per device.
+- Validate and atomically save the authoritative native YAML with revision protection.
+- Publish complete v6 AddOrUpdateReport batches; retry errors without claiming success.
+- Automatically retire confirmed HA-v5 devices and verify with fresh inventory.
+- Count native endpoints, with old copies excluded from native synchronization counts.
 
-## Data and migration
-
-The designer stores its source configuration in:
-
-```text
-/data/alexa_device_management/config.json
-```
-
-On first use, it can migrate the previous editor state from:
-
-```text
-/data/ha_alexa_export.json
-```
-
-If neither state file exists, an existing `/config/packages/alexa.yaml` is imported. The Alexa login session and Alexa device cache are not replaced by this migration.
-
-Deployments retain the ten newest backups next to `alexa.yaml`. A failed Home Assistant configuration check restores the previous file automatically.
+The native YAML is `/config/alexa_device_management/native/config.yaml`.
+`/data/alexa_device_management/config.json` retains UI/event settings and archived
+v5 entities, which never export or activate devices. The migration page is retired.
+See [3.0 upgrade steps](docs/dual-skill-deployment.md).
 
 ## Installation
 
@@ -55,15 +38,12 @@ Deployments retain the ten newest backups next to `alexa.yaml`. A failed Home As
 4. Install and start **Alexa Device Management**.
 5. Open **Alexa Devices** from the sidebar.
 
-## Recommended upgrade procedure from 1.x
+## Upgrade from 2.x
 
-1. Update the app and open **HA → Alexa**.
-2. Verify the imported entities.
-3. Run **Discovery-Vorschau**.
-4. Run **Konsistenz prüfen**.
-5. Deploy the configuration.
-6. Restart Home Assistant when the lifecycle status requests it.
-7. Start Alexa device discovery and mark it completed in the app.
+Install the new app, deploy the native-only AWS Lambda separately, install the
+updated HA sync helper and deny-all v5 YAML, restart HA when requested, and verify
+native publication and automatic v5 retirement. Do not disable the shared skill.
+Existing v6 activation is preserved; no legacy devices are auto-imported.
 
 ## Development validation
 

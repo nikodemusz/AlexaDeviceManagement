@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Alexa-Geräteverwaltung</title>
-  <link rel="stylesheet" href="{{INGRESS_PATH}}/static/device_overview.css?v=2.24.0">
+  <link rel="stylesheet" href="{{INGRESS_PATH}}/static/device_overview.css?v=3.0.0">
 </head>
 <body>
   <header class="topbar">
@@ -17,20 +17,19 @@
       <button id="btn-logout" class="button danger hidden">Abmelden</button>
       <button id="btn-refresh" class="button secondary">Aktualisieren</button>
       <button id="btn-settings" class="button secondary">Einstellungen</button>
-      <a class="button secondary" href="{{INGRESS_PATH}}/migration">v5 → v6 Migration</a>
       <a class="button secondary" href="{{INGRESS_PATH}}/debug">Debug</a>
     </div>
   </header>
 
   <main>
     <section class="workflow">
-      <button id="btn-preview" class="button secondary">YAML-Vorschau</button>
-      <button id="btn-deploy" class="button primary">Konfiguration ausrollen</button>
+      <button id="btn-preview" class="button secondary">v6-Konfiguration</button>
+      <button id="btn-deploy" class="button primary">Abgleichsdienst installieren</button>
       <button id="btn-restart" class="button warning">HA neu starten</button>
       <button id="btn-event-sync" class="button primary">Änderungen an Alexa senden</button>
       <button id="btn-group-sync" class="button secondary">Alexa-Gruppen synchronisieren</button>
     </section>
-    <div id="v5-disabled" class="message warn hidden">Der v5-Export ist dauerhaft abgeschaltet. Neue Geräte werden ausschließlich über die v6-Migration freigegeben.</div>
+    <div id="v5-disabled" class="message warn hidden">v6 ist global deaktiviert. In den Einstellungen aktivieren, um ausgewählte Geräte für Alexa freizugeben.</div>
 
     <section class="filters">
       <input id="search" placeholder="Gerät, Entität, Alexa-Name oder Raum suchen">
@@ -56,7 +55,7 @@
     </section>
 
     <section id="summary" class="summary"></section>
-    <p class="muted">Die Zuordnung vergleicht Endpunkt-IDs mit v5- und aktiven v6-Bindungen. Sie bestätigt keinen erfolgreichen Zustands- oder Steuerungsabgleich. Die Exportfelder bearbeiten v5; native Geräte werden unter „v5 → v6 Migration“ verwaltet.</p>
+    <p class="muted">Die Exportfelder bearbeiten v6. Die Zähler vergleichen eindeutige v6-Endpunkt-IDs mit dem Alexa-Bestand. Eine Zuordnung bestätigt keine erfolgreiche Steuerung. Erkannte alte HA-v5-Geräte werden automatisch bereinigt.</p>
     <div id="message" class="message hidden"></div>
     <section id="content" class="content"><div class="loading">Geräte werden geladen…</div></section>
   </main>
@@ -93,7 +92,8 @@
           <label class="check"><input id="group-remove-other" type="checkbox"> Aus anderen Gruppen entfernen</label>
         </fieldset>
         <fieldset>
-          <legend>Export</legend>
+          <legend>v6-Export</legend>
+          <label class="check"><input id="native-enabled" type="checkbox"> v6 global aktivieren</label>
           <label>Locale<input id="locale"></label>
         </fieldset>
       </div>
@@ -106,15 +106,16 @@
   <dialog id="yaml-dialog">
     <div class="dialog-shell wide">
       <header>
-        <h2>YAML-Vorschau</h2>
+        <h2>v6-Konfiguration</h2>
         <button id="btn-close-yaml" class="button secondary">Schließen</button>
       </header>
-      <pre id="yaml-output"></pre>
+      <textarea id="yaml-output" rows="22" style="width:100%;box-sizing:border-box" aria-label="v6-YAML-Konfiguration"></textarea>
+      <button id="btn-save-yaml" class="button primary">YAML speichern</button>
     </div>
   </dialog>
 
   <script>document.documentElement.dataset.ingressPath="{{INGRESS_PATH}}";</script>
-  <script src="{{INGRESS_PATH}}/static/device_overview.js?v=2.24.0"></script>
-  <script src="{{INGRESS_PATH}}/static/device_export_guard.js?v=2.24.0"></script>
+  <script src="{{INGRESS_PATH}}/static/device_overview.js?v=3.0.0"></script>
+  <script src="{{INGRESS_PATH}}/static/device_export_guard.js?v=3.0.0"></script>
 </body>
 </html>

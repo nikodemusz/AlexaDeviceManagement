@@ -16,7 +16,7 @@ from yaml_generator import (
 
 
 class AlexaYamlGeneratorTests(unittest.TestCase):
-    def test_generates_sorted_selected_entities_only(self) -> None:
+    def test_never_exports_legacy_entities_even_when_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             generator = AlexaYamlGenerator(pathlib.Path(directory) / "alexa.yaml")
             result = generator.generate({
@@ -37,16 +37,14 @@ class AlexaYamlGeneratorTests(unittest.TestCase):
                 },
             })
 
-        self.assertEqual(result.selected_count, 2)
+        self.assertEqual(result.selected_count, 0)
         smart_home = result.document["alexa"]["smart_home"]
         self.assertEqual(
             smart_home["filter"]["include_entities"],
-            ["light.erste", "switch.zweite"],
+            [],
         )
-        self.assertEqual(
-            smart_home["entity_config"]["switch.zweite"]["display_categories"],
-            "SWITCH",
-        )
+        self.assertNotIn("entity_config", smart_home)
+        self.assertEqual(smart_home["filter"]["exclude_entity_globs"], ["*"])
         self.assertNotIn("sensor.ignoriert", result.yaml_text)
 
     def test_generates_event_gateway_and_secret_references(self) -> None:
@@ -82,10 +80,10 @@ class AlexaYamlGeneratorTests(unittest.TestCase):
                 "sensor.controller_power": {"enabled": True, "device_id": "device-1"},
             }
         })
-        self.assertEqual(result.selected_count, 2)
+        self.assertEqual(result.selected_count, 0)
         self.assertEqual(
             result.document["alexa"]["smart_home"]["filter"]["include_entities"],
-            ["light.controller", "sensor.controller_power"],
+            [],
         )
 
     def test_allows_entities_from_different_devices(self) -> None:
@@ -96,7 +94,7 @@ class AlexaYamlGeneratorTests(unittest.TestCase):
                 "switch.two": {"enabled": True, "device_id": "device-2"},
             }
         })
-        self.assertEqual(result.selected_count, 2)
+        self.assertEqual(result.selected_count, 0)
 
     def test_rejects_invalid_entity_id(self) -> None:
         generator = AlexaYamlGenerator(pathlib.Path("/tmp/alexa.yaml"))

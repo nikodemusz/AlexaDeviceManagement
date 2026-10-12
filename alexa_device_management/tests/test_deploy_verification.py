@@ -12,7 +12,7 @@ from ha_control import verify_deployed_configuration
 
 def test_autosave_does_not_replace_newer_browser_configuration():
     assert "config = result.configuration || config" not in SCRIPT
-    assert "if (result.configuration?.updated_at) config.updated_at" in SCRIPT
+    assert "if (result.configuration?.native_revision) config.native_revision" in SCRIPT
     assert "savePromise.catch(() => {}).then" in SCRIPT
 
 

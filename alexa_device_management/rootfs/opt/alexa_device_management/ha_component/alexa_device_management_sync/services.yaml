@@ -2,8 +2,17 @@ sync:
   name: Alexa-Endpunkte synchronisieren
   description: Sendet AddOrUpdateReport und DeleteReport an das Alexa Event Gateway.
   fields:
+    native_endpoints:
+      name: Native v6-Endpunkte
+      description: Vollständige Discovery-Endpunkte mit stabiler native:-ID.
+      selector:
+        object:
+    delete_endpoint_ids:
+      name: Endpunkt-IDs löschen
+      selector:
+        object:
     add_or_update:
-      name: Hinzufügen oder aktualisieren
+      name: Historische v5-Updates (gesperrt)
       example:
         - light.wohnzimmer
       selector:

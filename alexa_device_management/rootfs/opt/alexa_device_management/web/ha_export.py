@@ -131,6 +131,9 @@ async def _inventory() -> dict[str, Any]:
             "state": state.get("state"),
             "category_suggestion": CATEGORY_BY_DOMAIN.get(domain, "OTHER"),
             "supported_features": attributes.get("supported_features", 0),
+            "supported_color_modes": attributes.get("supported_color_modes", []),
+            "hvac_modes": attributes.get("hvac_modes", []),
+            "entity_category": entity.get("entity_category"),
         })
 
     device_list = sorted(grouped.values(), key=lambda item: ((item.get("area_name") or ""), item.get("name") or ""))

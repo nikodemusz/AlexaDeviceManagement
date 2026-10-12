@@ -82,11 +82,8 @@ class AlexaYamlGenerator:
 
     def generate(self, data: dict[str, Any]) -> GenerationResult:
         normalized = self._normalize(data)
-        selected = {
-            entity_id: settings
-            for entity_id, settings in normalized["entities"].items()
-            if normalized["legacy_export_enabled"] and settings["enabled"]
-        }
+        # HA YAML retains account linking/event credentials, with no v5 devices.
+        selected = {}
 
         smart_home: dict[str, Any] = {
             "locale": normalized["locale"],
