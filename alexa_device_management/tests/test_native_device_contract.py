@@ -427,10 +427,11 @@ class NativeDeviceContractTests(unittest.TestCase):
         self.assertNotIn("context", result)
 
     def test_console_examples_are_executable_against_offline_fixture(self):
-        examples = json.loads((ROOT / "native_skill/test_events.json").read_text())
-        for label, request in examples.items():
-            with self.subTest(example=label):
-                request = copy.deepcopy(request)
+        examples = sorted((ROOT / "native_skill/test_events").glob("*.json"))
+        self.assertEqual(len(examples), 15)
+        for path in examples:
+            with self.subTest(example=path.stem):
+                request = json.loads(path.read_text())
                 body = request["directive"]
                 scope = body.get("endpoint", {}).get("scope") or body["payload"]["scope"]
                 self.assertEqual(scope["token"], "REPLACE_WITH_HA_OAUTH_ACCESS_TOKEN")

@@ -1,0 +1,21 @@
+{
+  "directive": {
+    "header": {
+      "namespace": "Alexa.BrightnessController",
+      "name": "SetBrightness",
+      "payloadVersion": "3",
+      "messageId": "example-light_brightness",
+      "correlationToken": "offline-correlation"
+    },
+    "payload": {
+      "brightness": 42
+    },
+    "endpoint": {
+      "endpointId": "native:desk",
+      "scope": {
+        "type": "BearerToken",
+        "token": "REPLACE_WITH_HA_OAUTH_ACCESS_TOKEN"
+      }
+    }
+  }
+}

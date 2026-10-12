@@ -50,7 +50,7 @@ def active_config() -> dict:
 async def config_route(request: web.Request) -> web.Response:
     config = NativeSkillConfigStore().load()
     return web.json_response({"schema_version": config["schema_version"],
-                              "export_mode": "native", "runtime_version": "3.0.1",
+                              "export_mode": "native", "runtime_version": "3.0.2",
                               "locale": config["locale"], "enabled": config["enabled"],
                               "devices": config["devices"] if config["enabled"] else {}})
 

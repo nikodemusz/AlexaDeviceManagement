@@ -41,9 +41,11 @@ and `test_native_primary.py`.
 
 ## AWS Lambda console examples
 
-[`native_skill/test_events.json`](../native_skill/test_events.json) contains 15
-named examples. Each **value** is a complete Lambda test event; the entire outer
-mapping is not an Alexa event. The offline suite executes all examples too.
+[`native_skill/test_events/`](../native_skill/test_events/) contains 15 individual
+JSON files, including `discovery.json`, `light_status.json`, `light_turn_on.json`,
+`cover_position.json`, `thermostat_status.json`, and `cistern_status.json`. Each
+file is a complete Lambda test event, ready to copy into the console. The offline
+suite executes every file too.
 
 For a manual AWS test, copy one example into the Lambda console. Replace the
 synthetic `native:desk`, `native:blind`, etc. with an exact endpoint ID from your
@@ -51,6 +53,51 @@ native Discovery result, and set the scope token privately to the existing
 Alexa-linked HA user's current OAuth access token. A Supervisor token or gateway
 machine token does not replace that user token. Do not commit or share populated
 events or logs containing tokens. No token is needed to run the offline suite.
+
+### Set the token once through a local environment variable
+
+The console receives [a literal JSON test event](https://docs.aws.amazon.com/lambda/latest/dg/testing-functions.html).
+The supplied Lambda treats scope tokens as literal strings; `${VARIABLE}` in a
+saved event is not a token reference. Use the local renderer to insert the current
+token into all files, instead of editing each file. It uses only Python's standard
+library and sends no requests.
+
+Make the current linked HA OAuth access token available to your local Python
+process as `HA_ALEXA_OAUTH_TOKEN`, using your existing private environment setup.
+From the repository root:
+
+```sh
+python alexa_device_management/native_skill/render_test_events.py \
+  --output-dir /tmp/alexa-private-test-events
+```
+
+This writes 15 separate JSON files with file mode `0600`; the new output directory
+has mode `0700`. Output reports only the file count, never the token or JSON. The
+source templates keep their placeholders. Choose an output directory outside the
+repository; populated files contain credentials and must remain private.
+
+For one event or a different variable name:
+
+```sh
+python alexa_device_management/native_skill/render_test_events.py \
+  --token-env MY_HA_OAUTH_TOKEN --event discovery \
+  --output-dir /tmp/alexa-private-discovery
+```
+
+Endpoint IDs can also be replaced once for all matching files. For example,
+replace the synthetic desk ID with your actual ID from Discovery:
+
+```sh
+python alexa_device_management/native_skill/render_test_events.py \
+  --endpoint desk=native:living_room \
+  --output-dir /tmp/alexa-private-test-events --overwrite
+```
+
+After the token changes, update only the environment variable and run the renderer
+again with `--overwrite`. Copy the regenerated file into the console before
+testing. Previously saved console events do not update automatically. This tool
+does not refresh an expired OAuth token or read tokens from HA storage. It never
+adds a fallback token to the production Lambda or bypasses linked-user validation.
 
 Start with `discovery` and `*_status`. Control examples execute real HA services
 when run against a deployed Lambda; choose a suitable device and target value.

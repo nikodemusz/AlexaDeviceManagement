@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.0.2
+
+- Die 15 AWS-Testereignisse liegen als einzelne vollständige JSON-Dateien vor und werden weiterhin von der Offline-Testsuite geprüft.
+- Lokales Hilfsskript setzt den HA-OAuth-Token zentral aus einer Umgebungsvariable ein und ersetzt auf Wunsch Endpunkt-IDs in allen passenden Tests. Private Ausgabedateien, explizite Neugenerierung nach Tokenwechsel und Tests für Fehlerfälle; keine Änderung der produktiven Authentifizierung und keine Geräteaktionen.
+
 ## 3.0.1
 
 - Gemeinsame Offline-Tests für Lambda und Gateway prüfen Discovery, Gerätesteuerung und Status-Readback für Lampen, Steckdosen, Rollläden, Thermostate und Sensoren einschließlich Zisterne mit Litern/Prozent.

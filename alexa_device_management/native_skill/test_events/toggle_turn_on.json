@@ -1,0 +1,20 @@
+{
+  "directive": {
+    "header": {
+      "namespace": "Alexa.ToggleController",
+      "name": "TurnOn",
+      "payloadVersion": "3",
+      "messageId": "example-toggle_turn_on",
+      "correlationToken": "offline-correlation",
+      "instance": "permission"
+    },
+    "payload": {},
+    "endpoint": {
+      "endpointId": "native:toggle",
+      "scope": {
+        "type": "BearerToken",
+        "token": "REPLACE_WITH_HA_OAUTH_ACCESS_TOKEN"
+      }
+    }
+  }
+}
