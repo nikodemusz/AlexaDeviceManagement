@@ -1,0 +1,19 @@
+{
+  "directive": {
+    "header": {
+      "namespace": "Alexa.PowerController",
+      "name": "TurnOff",
+      "payloadVersion": "3",
+      "messageId": "example-light_turn_off",
+      "correlationToken": "offline-correlation"
+    },
+    "payload": {},
+    "endpoint": {
+      "endpointId": "native:desk",
+      "scope": {
+        "type": "BearerToken",
+        "token": "REPLACE_WITH_HA_OAUTH_ACCESS_TOKEN"
+      }
+    }
+  }
+}

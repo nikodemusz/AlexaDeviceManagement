@@ -1,0 +1,19 @@
+{
+  "directive": {
+    "header": {
+      "namespace": "Alexa",
+      "name": "ReportState",
+      "payloadVersion": "3",
+      "messageId": "example-light_status",
+      "correlationToken": "offline-correlation"
+    },
+    "payload": {},
+    "endpoint": {
+      "endpointId": "native:desk",
+      "scope": {
+        "type": "BearerToken",
+        "token": "REPLACE_WITH_HA_OAUTH_ACCESS_TOKEN"
+      }
+    }
+  }
+}

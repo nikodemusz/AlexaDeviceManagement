@@ -1,0 +1,19 @@
+{
+  "directive": {
+    "header": {
+      "namespace": "Alexa.PlaybackController",
+      "name": "Stop",
+      "payloadVersion": "3",
+      "messageId": "example-cover_stop",
+      "correlationToken": "offline-correlation"
+    },
+    "payload": {},
+    "endpoint": {
+      "endpointId": "native:blind",
+      "scope": {
+        "type": "BearerToken",
+        "token": "REPLACE_WITH_HA_OAUTH_ACCESS_TOKEN"
+      }
+    }
+  }
+}

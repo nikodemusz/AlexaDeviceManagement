@@ -1,0 +1,23 @@
+{
+  "directive": {
+    "header": {
+      "namespace": "Alexa.ThermostatController",
+      "name": "SetThermostatMode",
+      "payloadVersion": "3",
+      "messageId": "example-thermostat_mode",
+      "correlationToken": "offline-correlation"
+    },
+    "payload": {
+      "thermostatMode": {
+        "value": "OFF"
+      }
+    },
+    "endpoint": {
+      "endpointId": "native:heating",
+      "scope": {
+        "type": "BearerToken",
+        "token": "REPLACE_WITH_HA_OAUTH_ACCESS_TOKEN"
+      }
+    }
+  }
+}

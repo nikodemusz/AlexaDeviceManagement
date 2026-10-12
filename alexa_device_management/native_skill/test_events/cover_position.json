@@ -1,0 +1,22 @@
+{
+  "directive": {
+    "header": {
+      "namespace": "Alexa.RangeController",
+      "name": "SetRangeValue",
+      "payloadVersion": "3",
+      "messageId": "example-cover_position",
+      "correlationToken": "offline-correlation",
+      "instance": "cover.position"
+    },
+    "payload": {
+      "rangeValue": 64
+    },
+    "endpoint": {
+      "endpointId": "native:blind",
+      "scope": {
+        "type": "BearerToken",
+        "token": "REPLACE_WITH_HA_OAUTH_ACCESS_TOKEN"
+      }
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "directive": {
+    "header": {
+      "namespace": "Alexa.ThermostatController",
+      "name": "AdjustTargetTemperature",
+      "payloadVersion": "3",
+      "messageId": "example-thermostat_adjust",
+      "correlationToken": "offline-correlation"
+    },
+    "payload": {
+      "targetSetpointDelta": {
+        "value": 1.5,
+        "scale": "CELSIUS"
+      }
+    },
+    "endpoint": {
+      "endpointId": "native:heating",
+      "scope": {
+        "type": "BearerToken",
+        "token": "REPLACE_WITH_HA_OAUTH_ACCESS_TOKEN"
+      }
+    }
+  }
+}
