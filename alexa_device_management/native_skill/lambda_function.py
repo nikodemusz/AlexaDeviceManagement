@@ -281,7 +281,7 @@ def lambda_handler(event, context):
         if namespace == "Alexa.Discovery" and name == "Discover":
             config = gateway("/v1/config")
             result = discovery(event, config)
-            print(json.dumps({"operation": "Discovery", "version": "3.0.0",
+            print(json.dumps({"operation": "Discovery", "version": "3.0.1",
                               "native_endpoints": len(result["event"]["payload"]["endpoints"])}))
             return result
 

@@ -47,6 +47,9 @@ Existing v6 activation is preserved; no legacy devices are auto-imported.
 
 ## Development validation
 
+See [Discovery, control, and status tests](docs/testing-native-devices.md) for the
+offline Lambda-to-gateway contract suite and ready-to-copy AWS console events.
+
 The CI workflow performs:
 
 - Python compilation
