@@ -6,26 +6,24 @@ from aiohttp import web
 
 import alexa_cache_service
 import alexa_endpoint_inventory
-import alexa_event_sync
 import alexa_group_manager
 import alexa_login_ingress_fix
 import alexa_room_enrichment
-import consistency_check
 import device_overview
-import discovery_preview
 import ha_control
 import ha_export
 import ha_export_overrides
-import native_migration_ui
+import native_export
+import native_lifecycle
 import server_clean
 
-APP_VERSION = "2.24.0"
+APP_VERSION = "3.0.0"
 
 
 @web.middleware
 async def navigation_middleware(request: web.Request, handler):
     """Use the unified overview as the canonical UI while keeping old URLs valid."""
-    if request.path in {"/", "/ha-export"}:
+    if request.path in {"/", "/ha-export", "/migration"}:
         ingress_path = request.headers.get("X-Ingress-Path", "").rstrip("/")
         raise web.HTTPFound(location=f"{ingress_path}/devices")
 
@@ -49,20 +47,19 @@ def create_app() -> web.Application:
     alexa_cache_service.install(server_clean)
     ha_export_overrides.install()
     ha_control.install()
-    alexa_event_sync.install(ha_control)
+    native_export.install()
 
     app = server_clean.create_app()
+    app["native_primary"] = True
     app.middlewares.append(navigation_middleware)
 
     alexa_cache_service.register_routes(app, server_clean)
     alexa_group_manager.register_routes(app, server_clean, ha_export.CONFIG_STORE)
-    alexa_event_sync.register_routes(app)
     device_overview.register_routes(app, server_clean, ha_export.CONFIG_STORE)
     ha_export.register_routes(app)
-    native_migration_ui.register_routes(app, ha_export.CONFIG_STORE)
+    native_lifecycle.install(app, server_clean)
+    native_export.register_routes(app)
     ha_control.register_routes(app)
-    discovery_preview.register_routes(app)
-    consistency_check.register_routes(app)
     return app
 
 

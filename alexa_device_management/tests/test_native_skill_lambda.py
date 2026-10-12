@@ -1,4 +1,4 @@
-"""Regression tests: one Lambda, two separate Alexa backends."""
+"""Regression tests: native-only Lambda with preserved account linking."""
 from __future__ import annotations
 
 import importlib.util
@@ -122,7 +122,7 @@ class CombinedSkillTests(unittest.TestCase):
             self.assertNotIn("private-session-marker", output.getvalue())
             failure.close()
 
-    def test_discovery_combines_one_native_endpoint_with_legacy(self):
+    def test_discovery_returns_native_only_without_calling_legacy(self):
         config = {"devices": {"zisterne": {"name": "Zisterne", "display_category": "OTHER",
                                           "capabilities": [
             {"interface": "Alexa.RangeController", "instance": "litres",
@@ -132,24 +132,24 @@ class CombinedSkillTests(unittest.TestCase):
         ]}}}
         def gateway(path, method="GET", payload=None):
             if path == "/v1/legacy":
-                return legacy_discovery()
+                raise AssertionError("Retired v5 discovery must not be contacted")
             if path == "/v1/config":
                 return config
             raise AssertionError(path)
         with patch.object(mod, "verify_account", return_value="test-oauth"), patch.object(mod, "gateway", side_effect=gateway):
             result = mod.lambda_handler(event(), None)
         endpoints = result["event"]["payload"]["endpoints"]
-        self.assertEqual([e["endpointId"] for e in endpoints], ["legacy-light", "native:zisterne"])
-        self.assertEqual(len(endpoints[1]["capabilities"]), 4)
+        self.assertEqual([e["endpointId"] for e in endpoints], ["native:zisterne"])
+        self.assertEqual(len(endpoints[0]["capabilities"]), 4)
 
-    def test_disabled_native_skill_does_not_interrupt_old_discovery(self):
+    def test_empty_native_discovery_never_falls_back_to_legacy(self):
         with patch.object(mod, "verify_account", return_value="test-oauth"), patch.object(
             mod, "gateway", side_effect=lambda path, method="GET", payload=None:
             legacy_discovery() if path == "/v1/legacy" else {"devices": {}}):
             result = mod.lambda_handler(event(), None)
-        self.assertEqual(len(result["event"]["payload"]["endpoints"]), 1)
+        self.assertEqual(len(result["event"]["payload"]["endpoints"]), 0)
 
-    def test_legacy_device_directives_are_unmodified(self):
+    def test_retired_legacy_device_returns_no_such_endpoint(self):
         request = event("Alexa", "ReportState", "legacy-light")
         result = {"event": {"header": {"name": "StateReport"}, "payload": {}}}
         def gw(path, method="GET", payload=None):
@@ -157,9 +157,9 @@ class CombinedSkillTests(unittest.TestCase):
             self.assertEqual(payload["event"], request)
             return result
         with patch.object(mod, "verify_account", return_value="test-oauth"), patch.object(mod, "gateway", side_effect=gw):
-            self.assertIs(mod.lambda_handler(request, None), result)
+            self.assertEqual(mod.lambda_handler(request, None)["event"]["payload"]["type"], "NO_SUCH_ENDPOINT")
 
-    def test_legacy_discovery_preserves_capabilities_used_by_ha_proactive_reports(self):
+    def test_old_discovery_data_cannot_leak_into_native_response(self):
         import copy
         endpoints = [
             {"endpointId": "cover#blind", "displayCategories": ["INTERIOR_BLIND"],
@@ -183,9 +183,9 @@ class CombinedSkillTests(unittest.TestCase):
             raise AssertionError(path)
         with patch.object(mod, "verify_account", return_value="test-oauth"), patch.object(mod, "gateway", side_effect=gw):
             result = mod.lambda_handler(event(), None)
-        self.assertEqual(result["event"]["payload"]["endpoints"], original)
+        self.assertEqual(result["event"]["payload"]["endpoints"], [])
 
-    def test_legacy_state_report_and_control_properties_are_not_filtered(self):
+    def test_all_legacy_controls_are_retired(self):
         for eid in ("cover#blind", "switch#desk", "binary_sensor#door"):
             for namespace, name in (("Alexa", "ReportState"), ("Alexa.PowerController", "TurnOn")):
                 result = {"context": {"properties": [
@@ -196,7 +196,7 @@ class CombinedSkillTests(unittest.TestCase):
                 original = __import__("copy").deepcopy(result)
                 with patch.object(mod, "verify_account", return_value="test-oauth"), patch.object(mod, "gateway", return_value=result):
                     actual = mod.lambda_handler(event(namespace, name, eid), None)
-                self.assertEqual(actual, original)
+                self.assertEqual(actual["event"]["payload"]["type"], "NO_SUCH_ENDPOINT")
 
     def test_cover_discovery_has_position_and_stop_without_power_switch(self):
         bindings = [

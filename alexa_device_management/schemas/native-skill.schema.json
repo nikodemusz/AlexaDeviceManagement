@@ -205,6 +205,42 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "interface": {
+                "const": "Alexa.ThermostatController"
+              }
+            },
+            "required": [
+              "interface"
+            ]
+          },
+          "then": {
+            "properties": {
+              "supported_modes": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "enum": [
+                    "HEAT",
+                    "COOL",
+                    "AUTO",
+                    "OFF",
+                    "ECO"
+                  ]
+                },
+                "contains": {
+                  "enum": [
+                    "HEAT",
+                    "COOL"
+                  ]
+                }
+              }
+            }
+          }
         }
       ],
       "additionalProperties": true

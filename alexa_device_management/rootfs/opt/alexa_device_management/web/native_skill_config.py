@@ -45,6 +45,11 @@ class NativeSkillConfigStore:
             raise NativeSkillConfigError("Missing devices mapping")
         normalized = deepcopy(value)
         normalized["devices"] = validate_devices(value["devices"])
+        if normalized["enabled"] and sum(
+            bool(device.get("enabled", True) and device.get("capabilities"))
+            for device in normalized["devices"].values()
+        ) > 300:
+            raise NativeSkillConfigError("Alexa erlaubt höchstens 300 aktive Endpunkte.")
         return normalized
 
     def load(self) -> dict[str, Any]:

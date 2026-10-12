@@ -116,6 +116,13 @@ def validate_devices(devices: Any) -> dict[str, dict[str, Any]]:
                 raise DeviceModelError(f"{endpoint_id}: TemperatureSensor requires sensor or climate")
             if interface == "Alexa.ThermostatController" and not entity_id.startswith("climate."):
                 raise DeviceModelError(f"{endpoint_id}: ThermostatController requires climate")
+            if interface == "Alexa.ThermostatController" and "supported_modes" in cap:
+                modes = cap["supported_modes"]
+                if (not isinstance(modes, list) or not modes
+                        or any(not isinstance(mode, str) or mode not in {"HEAT", "COOL", "AUTO", "OFF", "ECO"} for mode in modes)
+                        or len(set(modes)) != len(modes)
+                        or not set(modes) & {"HEAT", "COOL"}):
+                    raise DeviceModelError(f"{endpoint_id}: unsupported thermostat modes")
             if interface == "Alexa.PlaybackController":
                 if not entity_id.startswith("cover.") or cap.get("supported_operations", ["Stop"]) != ["Stop"]:
                     raise DeviceModelError(f"{endpoint_id}: PlaybackController only supports cover Stop")

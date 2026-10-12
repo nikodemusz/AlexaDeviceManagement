@@ -50,6 +50,7 @@ def active_config() -> dict:
 async def config_route(request: web.Request) -> web.Response:
     config = NativeSkillConfigStore().load()
     return web.json_response({"schema_version": config["schema_version"],
+                              "export_mode": "native", "runtime_version": "3.0.0",
                               "locale": config["locale"], "enabled": config["enabled"],
                               "devices": config["devices"] if config["enabled"] else {}})
 
@@ -199,6 +200,9 @@ async def legacy_route(request: web.Request) -> web.Response:
     event, token = data.get("event"), data.get("token")
     if not isinstance(event, dict) or not isinstance(event.get("directive"), dict):
         raise web.HTTPBadRequest(text="Invalid Alexa directive")
+    header = event["directive"].get("header", {})
+    if (header.get("namespace"), header.get("name")) != ("Alexa.Authorization", "AcceptGrant"):
+        raise web.HTTPGone(text="v5 retired; deploy the native-only AWS Lambda adapter")
     response = await linked_token_request(token, "/alexa/smart_home", event)
     return web.json_response(response)
 

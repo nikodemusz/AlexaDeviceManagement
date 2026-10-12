@@ -449,6 +449,10 @@ async def sync_ha_groups(request: web.Request) -> web.Response:
         body = {}
 
     config = body.get("configuration") if isinstance(body.get("configuration"), dict) else store.load()
+    if request.app.get("native_primary", False):
+        from native_export import configuration
+        from native_skill_config import NativeSkillConfigStore
+        config = configuration(NativeSkillConfigStore().load(), store.load())
     settings = config.get("group_sync") if isinstance(config.get("group_sync"), dict) else {}
     create_missing = bool(body.get("create_missing", settings.get("create_missing", True)))
     remove_from_other_groups = bool(
@@ -475,8 +479,14 @@ async def sync_ha_groups(request: web.Request) -> web.Response:
         devices_by_entity: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for device in devices:
             entity_id = _device_entity_id(device)
-            if entity_id:
+            if entity_id and config.get("export_mode") != "native":
                 devices_by_entity[entity_id].append(device)
+            if config.get("export_mode") == "native":
+                identifiers = _device_identifiers(device)
+                for entity_id, settings in config.get("entities", {}).items():
+                    expected = {str(value).lower() for value in settings.get("native_endpoint_ids", [])}
+                    if expected & identifiers:
+                        devices_by_entity[entity_id].append(device)
 
         groups = await _load_groups(server, data)
         for entity_id, group_name in desired.items():

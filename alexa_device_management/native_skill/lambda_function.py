@@ -1,8 +1,8 @@
-"""Alexa Smart Home v3 Lambda adapter. Devices are fetched live from HA YAML.
+"""Native-only Alexa Smart Home v3 Lambda adapter. Devices use the v6 HA YAML.
 
 Required environment: GATEWAY_URL, GATEWAY_TOKEN.
-Account linking stays with Home Assistant OAuth for *both* v5 and v6.
-Legacy v5 delegates to HA /api/alexa/smart_home; native v6 reads YAML via gateway.
+Account linking stays with Home Assistant OAuth. Only AcceptGrant reaches the
+existing HA Alexa integration; v5 discovery and device control are retired.
 """
 from __future__ import annotations
 
@@ -106,7 +106,8 @@ def capability_config(binding):
         return {"type": "AlexaInterface", "interface": name, "version": "3",
                 "properties": {"supported": [{"name": "targetSetpoint"}, {"name": "thermostatMode"}],
                                "proactivelyReported": False, "retrievable": True},
-                "configuration": {"supportsScheduling": False}}
+                "configuration": {"supportsScheduling": False,
+                                  "supportedModes": binding.get("supported_modes", ["HEAT"])}}
     capability = {"type": "AlexaInterface", "interface": name, "version": "3",
                   "properties": {"supported": [], "proactivelyReported": False, "retrievable": True}}
     prop = {"Alexa.PowerController": "powerState", "Alexa.BrightnessController": "brightness",
@@ -144,6 +145,8 @@ def discovery(event, config):
                           "description": device.get("description") or device["name"],
                           "displayCategories": [device.get("display_category", "OTHER")],
                           "capabilities": capabilities})
+    if len(endpoints) > 300:
+        raise ValueError("Alexa supports at most 300 active endpoints")
     return response(event, "Alexa.Discovery", "Discover.Response", {"endpoints": endpoints})
 
 
@@ -274,35 +277,19 @@ def lambda_handler(event, context):
     try:
         token = verify_account(event)
 
-        # A single Alexa skill exposes both backends. The existing endpoint IDs
-        # are never rewritten; only native endpoints receive an explicit prefix.
+        # Native discovery is independent of the retired HA-v5 discovery path.
         if namespace == "Alexa.Discovery" and name == "Discover":
-            legacy = legacy_request(event, token)
-            if legacy.get("event", {}).get("header", {}).get("name") != "Discover.Response":
-                return legacy
             config = gateway("/v1/config")
-            native_result = discovery(event, config)
-            endpoints = legacy["event"]["payload"]["endpoints"]
-            native_endpoints = native_result["event"]["payload"]["endpoints"]
-            known = {e["endpointId"] for e in endpoints}
-            if any(e["endpointId"] in known for e in native_endpoints):
-                raise ValueError("Endpoint ID collision between native and legacy")
-            # A user-enabled migration draft replaces exactly its designated
-            # legacy endpoint in Discovery. Legacy exports remain untouched,
-            # so disabling the draft immediately restores v5 on next Discover.
-            replacement_ids = migrated_legacy_ids(config)
-            if replacement_ids:
-                endpoints[:] = [e for e in endpoints if e["endpointId"] not in replacement_ids]
-            # HA sends ChangeReport/AddOrUpdateReport directly to Amazon with
-            # its original capabilities. Filtering only synchronous messages
-            # would make Discovery and proactive reports contradict each other.
-            endpoints.extend(native_endpoints)
-            return legacy
+            result = discovery(event, config)
+            print(json.dumps({"operation": "Discovery", "version": "3.0.0",
+                              "native_endpoints": len(result["event"]["payload"]["endpoints"])}))
+            return result
 
-        # All non-discovery requests for legacy endpoints, including AcceptGrant,
-        # are forwarded unchanged to the existing HA Alexa integration.
+        # Retain only the shared authorization callback, never old device control.
         if not native:
-            return legacy_request(event, token)
+            if namespace == "Alexa.Authorization" and name == "AcceptGrant":
+                return legacy_request(event, token)
+            return error(event, "NO_SUCH_ENDPOINT", "Legacy v5 endpoint retired", external_id)
 
         config = gateway("/v1/config")
         device = config["devices"].get(endpoint_id)

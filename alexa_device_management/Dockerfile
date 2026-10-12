@@ -11,6 +11,7 @@ RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt
     && rm /tmp/requirements.txt
 
 COPY rootfs /
+COPY native_skill/lambda_function.py /opt/alexa_device_management/web/native_skill_adapter.py
 RUN chmod +x /etc/services.d/native-gateway/run
 
 # Validate the runtime sources at build time.

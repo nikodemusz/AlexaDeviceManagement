@@ -4,6 +4,7 @@
   let config = null;
   let saveTimer = null;
   let savePromise = Promise.resolve();
+  let yamlRevision = null;
   const expandedAreas = new Set();
   const expandedDevices = new Set();
   const visibleAreaCounts = new Map();
@@ -15,17 +16,18 @@
     "btn-logout": "Löscht die gespeicherte Alexa-Web-Sitzung aus der App.",
     "btn-refresh": "Lädt Geräte, Entitäten, Räume und den Alexa-Bestand neu.",
     "btn-settings": "Öffnet Einstellungen für Event Gateway, Alexa-Gruppen und Export.",
-    "btn-preview": "Zeigt die erzeugte alexa.yaml an, ohne eine Datei zu schreiben.",
-    "btn-deploy": "Speichert die Auswahl in /config/packages/alexa.yaml und prüft anschließend die Home-Assistant-Konfiguration.",
+    "btn-preview": "Zeigt die v6-Hauptkonfiguration; sie kann im YAML-Editor geändert werden.",
+    "btn-deploy": "Installiert den v6-Abgleichsdienst, schaltet HA-v5-Exporte ab und prüft die HA-Konfiguration.",
     "btn-restart": "Startet Home Assistant neu, damit die ausgerollte Alexa-YAML aktiv wird.",
-    "btn-event-sync": "Sendet vorgemerkte neue und geänderte Endpunkte per AddOrUpdateReport sowie entfernte Endpunkte per DeleteReport an die offizielle Alexa Event Gateway API. Schreibt keine alexa.yaml.",
+    "btn-event-sync": "Sendet die v6-Endpunkte per AddOrUpdateReport, entfernte native Endpunkte per DeleteReport und bereinigt erkannte HA-v5-Geräte. Schreibt keine alexa.yaml.",
     "btn-group-sync": "Ordnet bereits vorhandene Alexa-Endpunkte den konfigurierten Alexa-Gruppen zu.",
     "btn-enable-useful": "Aktiviert alle aktuell sichtbaren, für Alexa sinnvoll erkannten Entitäten.",
     "btn-disable-visible": "Deaktiviert den Alexa-Export für alle aktuell sichtbaren Entitäten.",
     "btn-hide-technical": "Blendet aktuell sichtbare Diagnose-, Energie- und andere technische Entitäten aus.",
     "btn-unhide-visible": "Blendet die durch den aktuellen Filter gefundenen Einträge wieder ein.",
     "btn-save-settings": "Speichert die Event-Gateway-, Gruppen- und Exporteinstellungen.",
-    "btn-close-yaml": "Schließt die YAML-Vorschau."
+    "btn-close-yaml": "Schließt den YAML-Editor.",
+    "btn-save-yaml": "Validiert und speichert die v6-Hauptkonfiguration ohne AWS-Deployment."
   };
   const ACTION_TOOLTIPS = {
     "toggle-area": "Öffnet oder schließt diesen Raum.",
@@ -144,10 +146,10 @@
     const text = `${entity.entity_id || ""} ${entity.name || ""} ${entity.device_class || ""}`.toLowerCase();
     const technicalDomains = ["button", "update", "number", "select", "event"];
     const words = ["power", "energy", "leistung", "energie", "rssi", "signal", "battery", "batterie", "voltage", "spannung", "current", "strom", "diagnostic", "ping", "uptime", "last seen", "firmware", "linkquality", "illuminance"];
-    return technicalDomains.includes(entity.domain) || words.some(word => text.includes(word));
+    return Boolean(entity.entity_category) || technicalDomains.includes(entity.domain) || words.some(word => text.includes(word));
   }
   function isUseful(entity) {
-    return !isTechnical(entity) && ["light", "switch", "cover", "climate", "lock", "camera", "scene", "script", "fan", "input_boolean", "media_player"].includes(entity.domain);
+    return !isTechnical(entity) && ["light", "switch", "cover", "climate", "fan"].includes(entity.domain);
   }
   function suggestedCategory(entity) {
     if (entity.category_suggestion && entity.category_suggestion !== "OTHER") return entity.category_suggestion;
@@ -181,11 +183,15 @@
     const snapshot = JSON.parse(JSON.stringify(config));
     savePromise = savePromise.catch(() => {}).then(async () => {
       try {
-        const result = await request("/api/ha-export/autosave", {method: "POST", body: JSON.stringify(snapshot)});
-        if (result.configuration?.updated_at) config.updated_at = result.configuration.updated_at;
+        const result = await request("/api/ha-export/autosave", {method: "POST", body: JSON.stringify({...snapshot, native_revision: config.native_revision})});
+        if (result.configuration?.native_revision) config.native_revision = result.configuration.native_revision;
         for (const [entityId, saved] of Object.entries(result.configuration?.entities || {})) {
           const current = config.entities?.[entityId];
-          if (current && saved?.device_id) current.device_id = saved.device_id;
+          if (current) {
+            for (const field of ["enabled", "name", "description", "display_category", "alexa_group"]) {
+              if (current[field] === snapshot.entities?.[entityId]?.[field]) current[field] = saved[field];
+            }
+          }
         }
       } catch (error) {
         message(`Autosave fehlgeschlagen: ${error.message}`, "err");
@@ -245,7 +251,7 @@
 
   function renderSummary() {
     const s = model.summary || {};
-    const cards = [["HA-Geräte", s.ha_devices || 0], ["HA-Entitäten", s.ha_entities || 0], ["Für Alexa", s.selected || 0], ["In Alexa zugeordnet", s.synced || 0], ["Davon nativ v6", s.native_selected || 0], ["Ausstehend", s.pending || 0], ["Noch in Alexa", s.only_alexa || 0], ["Duplikate", s.duplicates || 0], ["Nur Alexa", s.alexa_only || 0], ["Ausgeblendet", s.hidden || 0]];
+    const cards = [["HA-Geräte", s.ha_devices || 0], ["HA-Entitäten", s.ha_entities || 0], ["v6-Endpunkte", s.selected || 0], ["In Alexa zugeordnet", s.synced || 0], ["Ausstehend", s.pending || 0], ["Alte v5-Geräte", s.only_alexa || 0], ["Duplikate", s.duplicates || 0], ["Nur Alexa", s.alexa_only || 0], ["Ausgeblendet", s.hidden || 0]];
     document.getElementById("summary").innerHTML = cards.map(([label, value]) => `<div class="summary-card"><strong>${value}</strong>${esc(label)}</div>`).join("");
   }
 
@@ -430,9 +436,7 @@
     }
     document.getElementById("btn-login").classList.toggle("hidden", model.alexa_connected);
     document.getElementById("btn-logout").classList.toggle("hidden", !model.alexa_connected);
-    const retired = config.legacy_export_enabled === false;
-    document.getElementById("v5-disabled").classList.toggle("hidden", !retired);
-    for (const control of document.querySelectorAll(".export-toggle, .export-name, .export-category, .export-group, [data-action='prepare-device'], [data-action='fill-entity'], #btn-enable-useful, #btn-disable-visible")) control.disabled = retired;
+    document.getElementById("v5-disabled").classList.toggle("hidden", config.native_enabled);
   }
 
   async function load(force = false) {
@@ -510,13 +514,13 @@
     const settings = entityConfig(candidate.entity_id);
     settings.enabled = true; settings.name ||= suggestedName(candidate, device); settings.display_category ||= suggestedCategory(candidate);
     for (const entity of device.entities) entity.export.enabled = entity.entity_id === candidate.entity_id;
-    await saveConfig(); message(`${candidate.entity_id} wurde für Alexa vorbereitet.`);
+    await saveConfig(); await load(false); message(`${candidate.entity_id} wurde für v6 gespeichert.`);
   }
 
   async function disableDeviceExport(deviceId) {
     const device = (model.devices || []).find(item => item.device_id === deviceId); if (!device) return;
     for (const entity of device.entities) { entityConfig(entity.entity_id).enabled = false; entity.export.enabled = false; }
-    await saveConfig(); message(`v5-Export für „${device.name}“ abgewählt. Zum Entfernen: ausrollen → HA neu starten → Alexa-Abgleich. Aktive native v6-Geräte werden separat in der Migration verwaltet.`, "warn");
+    await saveConfig(); await load(false); message(`v6-Export für „${device.name}“ deaktiviert. Der Alexa-Abgleich entfernt bisher veröffentlichte Endpunkte.`, "warn");
   }
 
   function toggleSimpleDevice(button, deviceId) {
@@ -581,10 +585,7 @@
     try {
       await saveConfig();
       const result = await request("/api/ha-export/deploy", {method: "POST", body: JSON.stringify(config)});
-      const event = result.alexa_event_sync;
-      const cleanup = result.alexa_cleanup || {};
-      const warnings = cleanup.warnings || [];
-      message(`Konfiguration geschrieben und geprüft: ${result.selected_count ?? result.selected ?? 0} Entitäten.\nDatei: ${result.path || "/config/packages/alexa.yaml"}\nJetzt HA neu starten.` + (event?.enabled && event?.pending ? `\nDanach Alexa-Abgleich starten: ${(event.pending_add_or_update || []).length} Updates, ${(event.pending_delete || []).length} Löschungen vorgemerkt.` : `\nAus Alexa entfernt: ${(cleanup.deleted_removed || []).length}. Noch ausstehend: ${(event?.pending_delete || []).length}.`) + (warnings.length ? `\n${warnings.join("\n")}` : ""), warnings.length || event?.pending ? "warn" : "ok");
+      message(result.note || "v6-Konfiguration gespeichert. HA bei Bedarf neu starten und Alexa-Abgleich ausführen.", result.restart_required ? "warn" : "ok");
       await load(false);
     } catch (error) {
       const restartHint = error.body?.restart_required ? "\nBitte jetzt „HA neu starten“ und danach erneut ausrollen." : "";
@@ -605,8 +606,9 @@
   async function eventSync() {
     const button = document.getElementById("btn-event-sync"); setBusy(button, true, "Synchronisiere…");
     try {
-      const result = await request("/api/ha-export/event-sync", {method: "POST", body: JSON.stringify({force: true})});
-      message(`Alexa Event Gateway erfolgreich.\nUpdates: ${result.official?.add_or_update_count || 0}\nLöschungen: ${result.official?.delete_count || 0}`); await load(true);
+      const result = await request("/api/native-export/sync", {method: "POST", body: JSON.stringify({force: true})});
+      if (result.queued) { message(result.message, "warn"); return; }
+      message(`Alexa Event Gateway erfolgreich.\nUpdates: ${result.official?.add_or_update_count || 0}\nNative Löschungen: ${result.official?.delete_count || 0}\nAlte v5-Geräte gelöscht: ${result.lifecycle?.legacy_deleted || 0}\nVerbleibende v5-Geräte: ${result.lifecycle?.legacy_remaining ?? "ungeprüft"}`); await load(true);
     } catch (error) {
       const fallback = error.body?.fallback;
       message(`Event-Gateway-Abgleich fehlgeschlagen: ${error.message}` + (fallback ? `\nWeb-Fallback entfernt: ${(fallback.deleted_removed || []).length}` : ""), "err");
@@ -627,11 +629,13 @@
   async function previewYaml() {
     try {
       const result = await request("/api/ha-export/preview", {method: "POST", body: JSON.stringify(config)});
-      document.getElementById("yaml-output").textContent = result.yaml || ""; document.getElementById("yaml-dialog").showModal();
+      yamlRevision = config.native_revision;
+      document.getElementById("yaml-output").value = result.yaml || ""; document.getElementById("yaml-dialog").showModal();
     } catch (error) { message(`YAML-Vorschau fehlgeschlagen: ${error.message}`, "err"); }
   }
 
   function openSettings() {
+    document.getElementById("native-enabled").checked = config.native_enabled;
     const event = config.event_gateway || {}, groups = config.group_sync || {};
     document.getElementById("event-enabled").checked = Boolean(event.enabled);
     document.getElementById("event-endpoint").value = event.endpoint || "https://api.eu.amazonalexa.com/v3/events";
@@ -649,6 +653,7 @@
     event.preventDefault();
     config.event_gateway = {enabled: document.getElementById("event-enabled").checked, endpoint: document.getElementById("event-endpoint").value, client_id_secret: document.getElementById("event-client-id-secret").value.trim(), client_secret_secret: document.getElementById("event-client-secret-secret").value.trim(), fallback_web_cleanup: document.getElementById("event-fallback").checked};
     config.group_sync = {enabled: document.getElementById("group-enabled").checked, create_missing: document.getElementById("group-create").checked, remove_from_other_groups: document.getElementById("group-remove-other").checked};
+    config.native_enabled = document.getElementById("native-enabled").checked;
     config.locale = document.getElementById("locale").value.trim() || "de-DE";
     await saveConfig(); document.getElementById("settings-dialog").close(); message("Einstellungen gespeichert.");
   }
@@ -736,7 +741,7 @@
           if (nameInput && !nameInput.value) nameInput.value = settings.name;
         }
       }
-      await saveConfig(); message(`${entityId} wurde ${target.checked ? "für den v5-Export ausgewählt" : "für den v5-Export abgewählt"}. Änderung anwenden: ausrollen → HA neu starten → Alexa-Abgleich.`, "warn");
+      await saveConfig(); await load(false); message(`${entityId} wurde ${target.checked ? "für v6 aktiviert" : "für v6 deaktiviert"}. Änderung anwenden: ausrollen → HA neu starten → Alexa-Abgleich.`, "warn");
     } else if (target.classList.contains("export-category")) { settings.display_category = target.value; scheduleSave(); }
   });
   document.getElementById("content").addEventListener("input", event => {
@@ -756,6 +761,12 @@
   document.getElementById("btn-preview").addEventListener("click", previewYaml);
   document.getElementById("btn-settings").addEventListener("click", openSettings);
   document.getElementById("btn-save-settings").addEventListener("click", saveSettings);
+  document.getElementById("btn-save-yaml").addEventListener("click", async () => {
+    try {
+      await request("/api/native-export/yaml", {method: "POST", body: JSON.stringify({native_revision: yamlRevision, yaml: document.getElementById("yaml-output").value})});
+      document.getElementById("yaml-dialog").close(); await load(false); message("v6-Konfiguration gespeichert.");
+    } catch (error) { message(error.message, "err"); }
+  });
   document.getElementById("btn-close-yaml").addEventListener("click", () => document.getElementById("yaml-dialog").close());
   document.getElementById("btn-logout").addEventListener("click", () => logout().catch(error => message(error.message, "err")));
 
@@ -789,5 +800,20 @@
     if (alexaIds.length) await changeVisibility("alexa", alexaIds, false);
   });
 
+  let reconciliationRunning = false;
+  setInterval(async () => {
+    if (document.hidden) return;
+    try {
+      const status = await request("/api/native-export/lifecycle");
+      if (status.running) reconciliationRunning = true;
+      else if (reconciliationRunning) {
+        if (document.activeElement?.matches("input, select, textarea") || document.getElementById("settings-dialog").open || document.getElementById("yaml-dialog").open) return;
+        reconciliationRunning = false;
+        const errors = [status.publish_error, status.legacy_error, status.background_error].filter(Boolean);
+        message(errors.length ? errors.join("\n") : "Alexa-Abgleich abgeschlossen; Bestand wird neu geladen.", errors.length ? "err" : "ok");
+        await load(false);
+      }
+    } catch (_) {}
+  }, 5000);
   load(false);
 })();
