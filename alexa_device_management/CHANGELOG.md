@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.0.1
+
+- Gemeinsame Offline-Tests für Lambda und Gateway prüfen Discovery, Gerätesteuerung und Status-Readback für Lampen, Steckdosen, Rollläden, Thermostate und Sensoren einschließlich Zisterne mit Litern/Prozent.
+- Tests prüfen OAuth/Gateway-Authentifizierung, v5-Sperre, Fehlerzustände, EndpointHealth und die Übereinstimmung angekündigter und gelieferter Eigenschaften. 15 AWS-Testereignisse mit Platzhaltern und eine Anleitung ergänzen die automatischen Tests; keine echten Geräte werden in der Testsuite geschaltet.
+
 ## 3.0.0
 
 - v6 ist die Hauptkonfiguration: Auswahl und Alexa-Namen bearbeiten die native YAML; v5-JSON bleibt als Archiv erhalten und wird nie mehr exportiert. Die Migrationsseite entfällt.
