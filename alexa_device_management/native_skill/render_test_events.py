@@ -50,7 +50,10 @@ def render_events(templates, token, endpoint_map=None):
 
 def write_events(events, output_dir, overwrite=False):
     output_dir = pathlib.Path(output_dir).resolve()
-    repository = pathlib.Path(__file__).resolve().parents[2]
+    source = pathlib.Path(__file__).resolve()
+    repository = (source.parents[2]
+                  if source.parent.name == "native_skill" and source.parent.parent.name == "alexa_device_management"
+                  else source.parent)
     if output_dir.is_relative_to(repository):
         raise ValueError("Choose an output directory outside the source repository.")
     if any(not re.fullmatch(r"[a-z][a-z0-9_]*", name) for name in events):

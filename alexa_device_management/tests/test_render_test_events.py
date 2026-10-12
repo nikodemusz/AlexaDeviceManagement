@@ -96,6 +96,15 @@ class RenderEventTests(unittest.TestCase):
         self.assertEqual(self.call(["--output-dir", str(output)], {renderer.DEFAULT_TOKEN_ENV: TOKEN})[0], 2)
         self.assertFalse(output.exists())
 
+    def test_standalone_download_can_write_outside_its_source_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            source = root / "download" / "render_test_events.py"
+            with patch.object(renderer, "__file__", str(source)):
+                paths = renderer.write_events(renderer.render_events(renderer.load_templates(), TOKEN), root / "output")
+            self.assertEqual(len(paths), 15)
+            self.assertTrue(all(path.exists() for path in paths))
+
     def test_symlink_target_is_rejected_without_changing_destination(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
