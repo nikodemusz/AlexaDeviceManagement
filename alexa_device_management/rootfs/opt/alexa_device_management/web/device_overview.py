@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+import pathlib
 import time
 from copy import deepcopy
 from typing import Any, Iterable
@@ -21,6 +24,223 @@ _UI_LISTS = {
     "entity": "hidden_entities",
     "alexa": "hidden_alexa",
 }
+
+# The overview combines two slow inventories (HA and Alexa groups). Keep those
+# source snapshots on the add-on's persistent /data volume so opening the UI
+# never has to wait for upstream API calls when a previous snapshot exists.
+_OVERVIEW_CACHE_PATH = pathlib.Path("/data/device_overview_cache.json")
+_OVERVIEW_CACHE_TTL = 60
+_OVERVIEW_REFRESH_INTERVAL = 900
+_OVERVIEW_RETRY_INTERVAL = 30
+_OVERVIEW_SOURCE_CACHE: dict[str, Any] = {
+    "ha_inventory": None,
+    "ha_updated_at": 0,
+    "groups": None,
+    "groups_updated_at": 0,
+    "alexa_configured": None,
+    "warnings": [],
+    "last_attempt_at": 0,
+}
+_OVERVIEW_CACHE_LOADED = False
+_OVERVIEW_REFRESH_LOCK = asyncio.Lock()
+
+
+def _load_overview_cache(server: Any) -> None:
+    """Load the persisted source snapshots once, without reading credentials."""
+    global _OVERVIEW_CACHE_LOADED
+    if _OVERVIEW_CACHE_LOADED:
+        return
+    _OVERVIEW_CACHE_LOADED = True
+    try:
+        stored = json.loads(_OVERVIEW_CACHE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        stored = {}
+    if isinstance(stored.get("ha_inventory"), dict):
+        _OVERVIEW_SOURCE_CACHE["ha_inventory"] = stored["ha_inventory"]
+        _OVERVIEW_SOURCE_CACHE["ha_updated_at"] = stored.get("ha_updated_at", 0)
+    if isinstance(stored.get("groups"), list):
+        _OVERVIEW_SOURCE_CACHE["groups"] = stored["groups"]
+        _OVERVIEW_SOURCE_CACHE["groups_updated_at"] = stored.get("groups_updated_at", 0)
+    _OVERVIEW_SOURCE_CACHE["alexa_configured"] = stored.get("alexa_configured")
+    warnings = stored.get("warnings")
+    if isinstance(warnings, list):
+        _OVERVIEW_SOURCE_CACHE["warnings"] = [str(item) for item in warnings]
+    _OVERVIEW_SOURCE_CACHE["last_attempt_at"] = stored.get("last_attempt_at", 0)
+
+    # A cached group list belongs to the previous Alexa session state. Do not
+    # show it after logout or assume it is valid after connecting a new account.
+    if _OVERVIEW_SOURCE_CACHE["alexa_configured"] != bool(server.is_configured()):
+        _OVERVIEW_SOURCE_CACHE["groups"] = None if server.is_configured() else []
+        _OVERVIEW_SOURCE_CACHE["groups_updated_at"] = 0
+
+
+def _persist_overview_cache() -> None:
+    """Persist only inventory snapshots, never Alexa session or token data."""
+    try:
+        _OVERVIEW_CACHE_PATH.write_text(
+            json.dumps({
+                "ha_inventory": _OVERVIEW_SOURCE_CACHE["ha_inventory"],
+                "ha_updated_at": _OVERVIEW_SOURCE_CACHE["ha_updated_at"],
+                "groups": _OVERVIEW_SOURCE_CACHE["groups"],
+                "groups_updated_at": _OVERVIEW_SOURCE_CACHE["groups_updated_at"],
+                "alexa_configured": _OVERVIEW_SOURCE_CACHE["alexa_configured"],
+                "warnings": _OVERVIEW_SOURCE_CACHE["warnings"],
+                "last_attempt_at": _OVERVIEW_SOURCE_CACHE["last_attempt_at"],
+            }),
+            encoding="utf-8",
+        )
+    except OSError:
+        # The in-memory cache still works for this process if persistence fails.
+        pass
+
+
+def _overview_sources_ready(server: Any) -> bool:
+    return (
+        isinstance(_OVERVIEW_SOURCE_CACHE.get("ha_inventory"), dict)
+        and (
+            not server.is_configured()
+            or (
+                isinstance(_OVERVIEW_SOURCE_CACHE.get("groups"), list)
+                and _OVERVIEW_SOURCE_CACHE.get("alexa_configured") is True
+            )
+        )
+    )
+
+
+def _overview_sources_stale(server: Any, now: float | None = None) -> bool:
+    now = time.time() if now is None else now
+    if not _overview_sources_ready(server):
+        return True
+    if now - float(_OVERVIEW_SOURCE_CACHE.get("ha_updated_at") or 0) > _OVERVIEW_CACHE_TTL:
+        return True
+    return bool(
+        server.is_configured()
+        and now - float(_OVERVIEW_SOURCE_CACHE.get("groups_updated_at") or 0) > _OVERVIEW_CACHE_TTL
+    )
+
+
+async def _refresh_overview_sources(server: Any) -> None:
+    """Refresh HA inventory and Alexa groups concurrently, retaining stale data on errors."""
+    async with _OVERVIEW_REFRESH_LOCK:
+        now = time.time()
+        _OVERVIEW_SOURCE_CACHE["last_attempt_at"] = now
+        configured = bool(server.is_configured())
+        _OVERVIEW_SOURCE_CACHE["alexa_configured"] = configured
+        warnings: list[str] = []
+
+        async def refresh_ha_inventory() -> None:
+            try:
+                inventory = await ha_export._inventory()
+                if not isinstance(inventory, dict):
+                    raise ValueError("invalid inventory")
+            except Exception as exc:
+                warnings.append(f"Home-Assistant-Inventar: {type(exc).__name__}")
+                return
+            _OVERVIEW_SOURCE_CACHE["ha_inventory"] = inventory
+            _OVERVIEW_SOURCE_CACHE["ha_updated_at"] = time.time()
+
+        async def refresh_groups() -> None:
+            if not configured:
+                _OVERVIEW_SOURCE_CACHE["groups"] = []
+                _OVERVIEW_SOURCE_CACHE["groups_updated_at"] = time.time()
+                return
+            try:
+                groups = await alexa_group_manager._load_groups(server, server.session_data())
+                if not isinstance(groups, list):
+                    raise ValueError("invalid groups")
+            except Exception as exc:
+                # AlexaGroupError contains only sanitized HTTP/error details;
+                # other exception strings may contain request data.
+                detail = str(exc) if isinstance(exc, alexa_group_manager.AlexaGroupError) else type(exc).__name__
+                warnings.append(f"Alexa-Gruppen: {detail}")
+                return
+            _OVERVIEW_SOURCE_CACHE["groups"] = groups
+            _OVERVIEW_SOURCE_CACHE["groups_updated_at"] = time.time()
+
+        await asyncio.gather(refresh_ha_inventory(), refresh_groups())
+        _OVERVIEW_SOURCE_CACHE["warnings"] = warnings
+        _persist_overview_cache()
+
+
+def _schedule_overview_refresh(app: web.Application, server: Any) -> None:
+    """Start a stale-while-revalidate refresh without delaying the UI response."""
+    task = app.get("overview_refresh_task")
+    if task and not task.done():
+        return
+    now = time.time()
+    # Failed refreshes leave the last good snapshot intact and stale. Back off
+    # even in that case so each view poll does not launch another HTTP 299 call.
+    if now - float(_OVERVIEW_SOURCE_CACHE.get("last_attempt_at") or 0) < _OVERVIEW_RETRY_INTERVAL:
+        return
+    if _OVERVIEW_REFRESH_LOCK.locked():
+        return
+    task = asyncio.create_task(_refresh_overview_sources(server))
+    app["overview_refresh_task"] = task
+
+
+async def _periodic_overview_refresh(app: web.Application) -> None:
+    """Warm the overview cache at startup and refresh it in the background."""
+    server = app["device_overview_server"]
+    _load_overview_cache(server)
+    while True:
+        try:
+            await _refresh_overview_sources(server)
+            delay = (
+                _OVERVIEW_REFRESH_INTERVAL
+                if _overview_sources_ready(server)
+                else _OVERVIEW_RETRY_INTERVAL
+            )
+            await asyncio.sleep(delay)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            await asyncio.sleep(_OVERVIEW_RETRY_INTERVAL)
+
+
+async def _start_overview_refresh(app: web.Application) -> None:
+    app["overview_periodic_task"] = asyncio.create_task(_periodic_overview_refresh(app))
+
+
+async def _stop_overview_refresh(app: web.Application) -> None:
+    for key in ("overview_periodic_task", "overview_refresh_task", "overview_device_refresh_task"):
+        task = app.get(key)
+        if task:
+            task.cancel()
+
+
+def _schedule_alexa_device_refresh(app: web.Application, server: Any) -> None:
+    """Refresh Alexa inventory without blocking a request that can use cache."""
+    task = app.get("overview_device_refresh_task")
+    if task and not task.done():
+        return
+    now = time.time()
+    if now - float(app.get("overview_device_refresh_last_attempt") or 0) < _OVERVIEW_RETRY_INTERVAL:
+        return
+    lock = getattr(server, "_DEVICES_REFRESH_LOCK", None)
+    if lock is not None and lock.locked():
+        return
+
+    async def refresh() -> None:
+        app["overview_device_refresh_last_attempt"] = time.time()
+        try:
+            await server.refresh_devices_cache()
+        except Exception:
+            # Keep serving the last known device snapshot; the periodic retry
+            # and explicit refresh button remain available.
+            return
+
+    task = asyncio.create_task(refresh())
+    app["overview_device_refresh_task"] = task
+
+
+def _overview_refresh_in_progress(app: web.Application) -> bool:
+    return _OVERVIEW_REFRESH_LOCK.locked() or any(
+        task is not None and not task.done()
+        for task in (
+            app.get("overview_refresh_task"),
+            app.get("overview_device_refresh_task"),
+        )
+    )
 
 
 def _canonical(value: Any) -> set[str]:
@@ -356,7 +576,24 @@ async def overview(request: web.Request) -> web.Response:
     warnings: list[str] = []
 
     try:
-        ha_inventory = await ha_export._inventory()
+        _load_overview_cache(server)
+        if force:
+            if server.is_configured():
+                await server.refresh_devices_cache()
+            await _refresh_overview_sources(server)
+        else:
+            if _overview_sources_stale(server):
+                _schedule_overview_refresh(request.app, server)
+            if server.is_configured():
+                server._load_devices_cache()
+                device_cache = getattr(server, "_DEVICES_CACHE", {})
+                cache_age = time.time() - float(device_cache.get("updated_at") or 0)
+                if cache_age > _OVERVIEW_CACHE_TTL:
+                    _schedule_alexa_device_refresh(request.app, server)
+
+        ha_inventory = _OVERVIEW_SOURCE_CACHE.get("ha_inventory") or {
+            "devices": [], "areas": [], "display_categories": []
+        }
         config = store.load()
         native_config = {}
         try:
@@ -366,23 +603,12 @@ async def overview(request: web.Request) -> web.Response:
             warnings.append("Native v6-Konfiguration konnte nicht validiert werden.")
 
         alexa_devices: list[dict[str, Any]] = []
-        groups: list[dict[str, Any]] = []
+        groups: list[dict[str, Any]] = _OVERVIEW_SOURCE_CACHE.get("groups") or []
         if server.is_configured():
-            if force:
-                cache = await server.refresh_devices_cache()
-            else:
-                server._load_devices_cache()
-                cache = server._DEVICES_CACHE
-                if not cache.get("updated_at"):
-                    cache = await server.refresh_devices_cache()
+            cache = getattr(server, "_DEVICES_CACHE", {})
             alexa_devices = list(cache.get("devices", []))
             warnings.extend(str(item) for item in cache.get("warnings", []) if item)
-            try:
-                groups = await alexa_group_manager._load_groups(
-                    server, server.session_data()
-                )
-            except Exception as exc:
-                warnings.append(f"Alexa-Gruppen: {exc}")
+        warnings.extend(str(item) for item in _OVERVIEW_SOURCE_CACHE.get("warnings", []) if item)
 
         configuration = native_export.configuration(native_config or {"schema_version": 6, "enabled": False, "locale": "de-DE", "devices": {}}, config)
         result = build_overview(ha_inventory, alexa_devices, groups, configuration, native_config)
@@ -394,10 +620,24 @@ async def overview(request: web.Request) -> web.Response:
             "ok": True,
             "alexa_connected": server.is_configured(),
             "alexa_updated_at": (
-                server._DEVICES_CACHE.get("updated_at")
-                if hasattr(server, "_DEVICES_CACHE")
+                getattr(server, "_DEVICES_CACHE", {}).get("updated_at")
+                if isinstance(getattr(server, "_DEVICES_CACHE", {}), dict)
                 else None
             ),
+            "source_cache_loading": not (
+                _overview_sources_ready(server)
+                and (
+                    not server.is_configured()
+                    or bool(getattr(server, "_DEVICES_CACHE", {}).get("updated_at"))
+                )
+            ),
+            "source_cache_refreshing": _overview_refresh_in_progress(request.app),
+            "source_cache_updated_at": min(
+                value for value in (
+                    _OVERVIEW_SOURCE_CACHE.get("ha_updated_at"),
+                    _OVERVIEW_SOURCE_CACHE.get("groups_updated_at") if server.is_configured() else None,
+                ) if value
+            ) if _OVERVIEW_SOURCE_CACHE.get("ha_updated_at") else None,
             "warnings": warnings,
             "generated_at": int(time.time()),
             "native_lifecycle": lifecycle,
@@ -449,6 +689,8 @@ async def visibility(request: web.Request) -> web.Response:
 def register_routes(app: web.Application, server: Any, store: Any) -> None:
     app["device_overview_server"] = server
     app["device_overview_store"] = store
+    app.on_startup.append(_start_overview_refresh)
+    app.on_cleanup.append(_stop_overview_refresh)
     app.router.add_get("/devices", page)
     app.router.add_get("/api/device-overview", overview)
     app.router.add_post("/api/device-overview/visibility", visibility)

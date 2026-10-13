@@ -5,6 +5,8 @@
   let saveTimer = null;
   let savePromise = Promise.resolve();
   let yamlRevision = null;
+  let overviewPollTimer = null;
+  let overviewPollCount = 0;
   const expandedAreas = new Set();
   const expandedDevices = new Set();
   const visibleAreaCounts = new Map();
@@ -440,15 +442,40 @@
 
   async function load(force = false) {
     const button = document.getElementById("btn-refresh");
-    setBusy(button, true, "Lade…"); clearMessage();
+    if (force) {
+      clearTimeout(overviewPollTimer);
+      overviewPollCount = 0;
+      setBusy(button, true, "Lade…");
+    }
+    clearMessage();
     try {
       model = await request(`/api/device-overview${force ? "?refresh=1" : ""}`);
       config = model.configuration; render();
-      if (model.warnings?.length) message(model.warnings.join("\n"), "warn");
+      if (model.source_cache_loading || model.source_cache_refreshing) {
+        if (overviewPollCount < 40) {
+          overviewPollCount += 1;
+          message(
+            model.source_cache_loading
+              ? "Geräteliste wird im Hintergrund geladen. Diese Ansicht aktualisiert sich automatisch."
+              : "Der Cache wird im Hintergrund aktualisiert. Diese Ansicht übernimmt die neuen Daten automatisch.",
+            "warn"
+          );
+          overviewPollTimer = setTimeout(() => load(false), 2000);
+        } else {
+          message("Der Hintergrundabruf dauert ungewöhnlich lange. Prüfe die Alexa-Verbindung oder nutze „Aktualisieren“.", "warn");
+        }
+      } else {
+        clearTimeout(overviewPollTimer);
+        overviewPollCount = 0;
+        if (model.warnings?.length) message(model.warnings.join("\n"), "warn");
+      }
     } catch (error) {
+      clearTimeout(overviewPollTimer);
       document.getElementById("content").innerHTML = `<div class="empty">${esc(error.message)}</div>`;
       message(`Geräteübersicht konnte nicht geladen werden: ${error.message}`, "err");
-    } finally { setBusy(button, false); }
+    } finally {
+      if (force) setBusy(button, false);
+    }
   }
 
   function applyVisibilityLocally(kind, ids, hidden) {
