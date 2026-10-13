@@ -118,10 +118,16 @@ def test_graphql_delete_is_verified_against_endpoint_registry():
     async def graphql_find_endpoint(_serial, _data):
         return target_endpoint, {"full": {"status": 200}}
 
-    async def gql_find_mutations(_pattern, _data):
-        return [{"name": "deleteSmartHomeEndpoint"}]
+    mutation_patterns = []
 
-    async def gql_execute_mutation(_field, _values, _require, _data):
+    async def gql_find_mutations(pattern, _data):
+        mutation_patterns.append(pattern)
+        assert pattern == r"^forgetEndpoint$"
+        return [{"name": "forgetEndpoint"}, {"name": "deleteDeviceGroup"}]
+
+    async def gql_execute_mutation(field, values, _require, _data):
+        assert field["name"] == "forgetEndpoint"
+        assert values == {"id": "amzn1.alexa.endpoint.orphan-uuid"}
         state["deleted"] = True
         return True, {"status": 200}
 
@@ -134,6 +140,7 @@ def test_graphql_delete_is_verified_against_endpoint_registry():
     asyncio.run(server._delete_target({"source": "graphql", "serial": "orphan-uuid"}, {}))
 
     assert state["deleted"] is True
+    assert mutation_patterns == [r"^forgetEndpoint$"]
 
 
 def test_graphql_delete_rejects_unverified_noop():
@@ -143,8 +150,9 @@ def test_graphql_delete_rejects_unverified_noop():
     async def graphql_find_endpoint(_serial, _data):
         return target_endpoint, {}
 
-    async def gql_find_mutations(_pattern, _data):
-        return [{"name": "deleteSmartHomeEndpoint"}]
+    async def gql_find_mutations(pattern, _data):
+        assert pattern == r"^forgetEndpoint$"
+        return [{"name": "forgetEndpoint"}]
 
     async def gql_execute_mutation(_field, _values, _require, _data):
         return True, {"status": 200, "body": "accepted but unchanged"}

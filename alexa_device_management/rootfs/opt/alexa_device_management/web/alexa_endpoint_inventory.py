@@ -185,38 +185,36 @@ async def _delete_graphql_endpoint(server: Any, serial: str, data: dict[str, Any
             f"GraphQL-Endpunkt {serial!r} konnte nicht aufgelöst werden: {lookup_debug}"
         )
 
-    endpoint_id = str(endpoint.get("endpointId") or serial)
-    delete_fields = await server.gql_find_mutations(
-        r"(delete|forget|remove|unlink|deregister)", data
-    )
-    delete_fields = [
-        field
-        for field in delete_fields
-        if re.search(
-            r"endpoint|appliance|device|entity|smarthome",
-            str(field.get("name") or ""),
-            re.IGNORECASE,
+    endpoint_id = str(endpoint.get("endpointId") or "").strip()
+    if not endpoint_id:
+        raise RuntimeError(
+            "Alexa hat den Endpunkt gefunden, aber keine gültige endpointId geliefert. "
+            "Es wurde keine Löschmutation ausgeführt."
         )
-    ][:8]
+
+    # Forget is the Alexa UI's endpoint-removal operation. Other schema fields
+    # such as deregisterEndpoint or deleteDeviceGroup have different semantics
+    # and must never be guessed from a broad "delete-like" name match.
+    delete_fields = await server.gql_find_mutations(r"^forgetEndpoint$", data)
 
     attempts: list[str] = []
     for field in delete_fields:
         field_name = str(field.get("name") or "unknown")
-        for identifier in dict.fromkeys((endpoint_id, serial)):
-            accepted, info = await server.gql_execute_mutation(
-                field, {"id": identifier}, ("id",), data
-            )
-            attempts.append(f"{field_name}[{identifier[:48]}]: {str(info)[:220]}")
-            if not accepted:
-                continue
+        accepted, info = await server.gql_execute_mutation(
+            field, {"id": endpoint_id}, ("id",), data
+        )
+        attempts.append(f"{field_name}[{endpoint_id[:48]}]: {str(info)[:220]}")
+        if not accepted:
+            continue
 
-            exists = await _endpoint_exists(server, serial, data)
-            if exists is False:
-                return
-            if exists is None:
-                raise RuntimeError(
-                    "GraphQL-Löschung wurde angenommen, konnte aber nicht verifiziert werden."
-                )
+        exists = await _endpoint_exists(server, serial, data)
+        if exists is False:
+            return
+        if exists is None:
+            raise RuntimeError(
+                "Alexa hat das Vergessen bestätigt, aber der aktuelle Gerätestand "
+                "konnte nicht geprüft werden."
+            )
 
     if not delete_fields:
         raise RuntimeError("Keine passende GraphQL-Löschmutation im Alexa-Schema gefunden.")
