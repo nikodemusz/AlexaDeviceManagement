@@ -810,7 +810,8 @@
         if (document.activeElement?.matches("input, select, textarea") || document.getElementById("settings-dialog").open || document.getElementById("yaml-dialog").open) return;
         reconciliationRunning = false;
         const errors = [status.publish_error, status.legacy_error, status.background_error].filter(Boolean);
-        message(errors.length ? errors.join("\n") : "Alexa-Abgleich abgeschlossen; Bestand wird neu geladen.", errors.length ? "err" : "ok");
+        const completed = `Alexa-Abgleich abgeschlossen. Alte v5-Geräte gelöscht: ${status.legacy_deleted || 0}. Abgewählte v6-Geräte gelöscht: ${status.unselected_native_deleted || 0}. Noch unerwünscht: ${status.selection_remaining ?? "ungeprüft"}. Bestand wird neu geladen.`;
+        message(errors.length ? errors.join("\n") : completed, errors.length ? "err" : "ok");
         await load(false);
       }
     } catch (_) {}

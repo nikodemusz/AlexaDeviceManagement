@@ -20,7 +20,8 @@ Historical JSON is retained as an archive plus UI/connection preferences.
 
 Native lifecycle reports publish the same endpoints as Lambda Discovery.
 Positively identified old HA-v5 devices are automatically removed from Alexa;
-all native endpoints and unrelated devices are protected. The migration page
+selected native endpoints, Echos and unrelated devices are protected. Unselected
+managed native endpoints are removed even without prior publication records. The migration page
 is retired. See [deployment/upgrade steps](alexa_device_management/docs/dual-skill-deployment.md).
 
 ## Installation

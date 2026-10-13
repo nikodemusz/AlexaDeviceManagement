@@ -9,7 +9,7 @@
 - Capability support in Sprint 1 is a *model/validation contract*, not deployed Alexa discovery. Do not imply tested voice support without an actual device test.
 - Never store credentials, OAuth tokens, access keys or personal endpoints in source-controlled metadata.
 - Before saving native skill metadata, validate against `schemas/native-skill.schema.json` and `native_skill_config.NativeSkillConfigStore.validate`; the shared device model is checked by the store. Never store credential material.
-- Keep `schema_version`, examples, and tests aligned. Do not silently discard unknown existing legacy data. Positively identified HA-v5 endpoints are automatically retired; protect every `native:` ID (including disabled ones) and unrelated vendors/Echos. Confirm deletions with fresh Alexa inventory; errors remain pending for retry.
+- Keep `schema_version`, examples, and tests aligned. Do not silently discard unknown existing legacy data. Positively identified HA-v5 endpoints and unselected managed native endpoints are automatically retired. Protect every currently selected native ID, Echos and unrelated vendors; never infer ownership from friendly names. Missing or invalid selection blocks deletion. Confirm deletions with fresh Alexa inventory; errors remain pending for retry.
 - Run `python -m unittest discover -s alexa_device_management/tests` and syntax checks before requesting merge.
 - Follow semantic versioning: +0.0.1 fixes, +0.1.0 features, +1.0.0 milestones; update the short changelog for grouped commits.
 - Do not merge pull requests without explicit user approval.
