@@ -517,29 +517,6 @@ async def delete_v3_entity_cookie(uuid: str, data: dict[str, Any]) -> dict[str, 
     arn = quote(arn_raw, safe="")
     results: dict[str, Any] = {}
 
-    # Fast path: replay the mutation that worked last time (cached in /data)
-    # instead of walking the whole candidate ladder again.
-    hint = read_hint("delete_winner")
-    if isinstance(hint, dict) and hint.get("mutation"):
-        fields = await gql_find_mutations(rf"^{re.escape(str(hint['mutation']))}$", data)
-        if fields:
-            if hint.get("id_kind") == "uuid":
-                id_value = uuid
-            elif hint.get("id_kind") == "endpoint":
-                gql_hit, _ = await graphql_find_endpoint(uuid, data)
-                id_value = str((gql_hit or {}).get("endpointId") or arn_raw)
-            else:
-                id_value = arn_raw
-            accepted, info = await gql_execute_mutation(fields[0], {"id": id_value}, ("id",), data)
-            key = f"GQL {hint['mutation']} [cached winner]"
-            results[key] = info
-            if accepted:
-                gone = await _v3_entity_gone(uuid, data)
-                info["verified_deleted"] = gone
-                if gone:
-                    results["_winner"] = key
-                    return results
-
     candidates: list[tuple[str, str, bytes]] = []
 
     # Resolve the exact endpointId via the GraphQL nexus API.
@@ -554,33 +531,34 @@ async def delete_v3_entity_cookie(uuid: str, data: dict[str, Any]) -> dict[str, 
             "legacyIdentifiers": gql_endpoint.get("legacyIdentifiers"),
         }
 
-    # Schema-driven GraphQL mutations: introspect Mutation, pick delete-ish
-    # fields, build the call from the introspected argument types. Only
-    # executed when the endpoint id is actually bound into the variables.
-    delete_fields = await gql_find_mutations(
-        r"(delete|forget|remove|unlink|deregister)", data
-    )
-    delete_fields = [
-        f for f in delete_fields
-        if re.search(r"endpoint|appliance|device|entity|smarthome", str(f.get("name") or ""), re.IGNORECASE)
-    ][:6]
-    results["_graphql_delete_mutations_found"] = [str(f.get("name")) for f in delete_fields]
-    for field in delete_fields:
-        for id_value in dict.fromkeys([endpoint_id, uuid]):
+    # Use only the operation that means "forget this Alexa endpoint". The
+    # former schema-wide probe also called deregisterEndpoint and
+    # deleteDeviceGroup with guessed IDs; those are not interchangeable and
+    # produce misleading failures (or could affect unrelated resources).
+    if gql_endpoint and str(gql_endpoint.get("endpointId") or "").strip():
+        delete_fields = await gql_find_mutations(r"^forgetEndpoint$", data)
+        results["_graphql_forget_available"] = bool(delete_fields)
+        if delete_fields:
+            exact_endpoint_id = str(gql_endpoint["endpointId"]).strip()
             accepted, info = await gql_execute_mutation(
-                field, {"id": id_value}, ("id",), data
+                delete_fields[0], {"id": exact_endpoint_id}, ("id",), data
             )
-            results[f"GQL {field['name']} [{id_value[:40]}]"] = info
+            results[f"GQL forgetEndpoint [{exact_endpoint_id[:40]}]"] = info
             if accepted:
                 gone = await _v3_entity_gone(uuid, data)
                 info["verified_deleted"] = gone
                 if gone:
-                    results["_winner"] = f"GQL {field['name']}"
-                    write_hint("delete_winner", {
-                        "mutation": str(field["name"]),
-                        "id_kind": "uuid" if id_value == uuid else "endpoint",
-                    })
+                    results["_winner"] = "GQL forgetEndpoint"
                     return results
+    else:
+        results["_graphql_endpoint_resolved"] = False
+        results["_delete_guidance"] = (
+            "Alexa lists this v3 entity, but the GraphQL endpoint registry did not "
+            "return its endpointId. No guessed GraphQL deletion was attempted. "
+            "The source skill may still be reporting this device, or Alexa may "
+            "have a stale entry; remove it at the reporting skill and send its "
+            "DeleteReport before retrying."
+        )
 
     # Legacy path: GET /api/phoenix networkDetail (answers 400 on accounts
     # already migrated off phoenix v2 — kept for accounts where it still works).
@@ -1078,7 +1056,18 @@ async def _delete_target(target: dict[str, Any], data: dict[str, Any]) -> None:
     # Pure v3 entity (e.g. openHAB3/Home Assistant skill) — no legacy id.
     probe = await delete_v3_entity_cookie(serial, data)
     if "_winner" not in probe:
-        raise RuntimeError(f"No delete candidate succeeded for v3 entity {serial!r}. Probe: {probe}")
+        if probe.get("_graphql_endpoint_resolved") is False:
+            raise RuntimeError(str(probe.get("_delete_guidance")))
+        failed = [
+            f"{key}: HTTP {value.get('status')}"
+            for key, value in probe.items()
+            if isinstance(value, dict) and "status" in value
+        ]
+        detail = "; ".join(failed[:4]) or "Alexa hat keine bestätigte Löschmethode angeboten"
+        raise RuntimeError(
+            "Alexa hat die v3-Entfernung nicht bestätigt. "
+            "Es wurde kein erfolgreicher Löschstatus erkannt. " + detail
+        )
 
 
 async def delete_devices(request: web.Request) -> web.Response:

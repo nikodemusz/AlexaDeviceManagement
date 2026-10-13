@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.1.1
+
+- Die Bereinigung alter Alexa-v3-Endpunkte verwendet ausschließlich `forgetEndpoint` mit der tatsächlich aus Alexa gelesenen Endpunkt-ID. Unpassende Mutationen wie `deregisterEndpoint` und `deleteDeviceGroup` werden nicht mehr mit geratenen IDs aufgerufen.
+- Wenn Alexa einen Eintrag in der alten Geräteliste zeigt, ihn aber nicht in der Endpunktregistrierung findet, erklärt die Fehlermeldung, dass die Quell-Skill-Konfiguration beziehungsweise ein `DeleteReport` geprüft werden muss. Zugangsdaten werden dadurch nicht verändert.
+
 ## 3.1.0
 
 - „Abgleichsdienst installieren“ entfällt in der Hauptansicht. Die beschriebene Option „Alexa-Abgleich aktivieren“ richtet den Dienst beim Speichern der Einstellungen ein und zeigt einen nötigen HA-Neustart an.
