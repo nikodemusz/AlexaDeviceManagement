@@ -17,7 +17,7 @@ import native_export
 import native_lifecycle
 import server_clean
 
-APP_VERSION = "3.1.1"
+APP_VERSION = "3.2.0"
 
 
 @web.middleware

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import pathlib
 import sys
+import tempfile
+import time
 import unittest
 from copy import deepcopy
 from unittest.mock import AsyncMock, Mock, patch
@@ -181,19 +184,32 @@ class DeviceOverviewTests(unittest.TestCase):
 
 
 class DeviceOverviewRouteTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        device_overview._OVERVIEW_CACHE_LOADED = True
+        device_overview._OVERVIEW_SOURCE_CACHE.update({
+            "ha_inventory": None,
+            "ha_updated_at": 0,
+            "groups": None,
+            "groups_updated_at": 0,
+            "alexa_configured": None,
+            "warnings": [],
+            "last_attempt_at": 0,
+        })
+
     async def test_route_reads_native_yaml_and_survives_invalid_optional_native_config(self):
         server = Mock()
         server.is_configured.return_value = True
+        server.session_data.return_value = {}
+        server.refresh_devices_cache = AsyncMock()
         server._DEVICES_CACHE = {"updated_at": 1, "devices": [
             {"serial": "native:living", "source": "smart_home", "raw": {}}]}
         store = Mock()
         store.load.return_value = {"entities": {}}
         request = Mock()
         request.app = {"device_overview_server": server, "device_overview_store": store}
-        request.rel_url.query = {}
+        request.rel_url.query = {"refresh": "1"}
         native = {"enabled": True, "devices": {"living": {"capabilities": [
             {"entity_id": "light.wohnzimmer"}]}}}
-        import json
         with patch.object(device_overview.ha_export, "_inventory", new=AsyncMock(return_value=ha_inventory())), \
              patch.object(device_overview.alexa_group_manager, "_load_groups", new=AsyncMock(return_value=[])), \
              patch.object(device_overview, "NativeSkillConfigStore") as native_store:
@@ -206,6 +222,111 @@ class DeviceOverviewRouteTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(body["warnings"])
             store.save.assert_not_called()
             native_store.return_value.save.assert_not_called()
+
+    async def test_cached_overview_does_not_wait_for_live_inventory_or_groups(self):
+        now = time.time()
+        device_overview._OVERVIEW_SOURCE_CACHE.update({
+            "ha_inventory": ha_inventory(),
+            "ha_updated_at": now,
+            "groups": [],
+            "groups_updated_at": now,
+            "alexa_configured": True,
+            "warnings": [],
+            "last_attempt_at": now,
+        })
+        server = Mock()
+        server.is_configured.return_value = True
+        server._DEVICES_CACHE = {"updated_at": now, "devices": []}
+        store = Mock()
+        store.load.return_value = {"entities": {}}
+        request = Mock()
+        request.app = {"device_overview_server": server, "device_overview_store": store}
+        request.rel_url.query = {}
+        with patch.object(device_overview.ha_export, "_inventory", new=AsyncMock()) as inventory, \
+             patch.object(device_overview.alexa_group_manager, "_load_groups", new=AsyncMock()) as groups, \
+             patch.object(device_overview, "NativeSkillConfigStore") as native_store:
+            native_store.return_value.load.return_value = {"enabled": False, "devices": {}}
+            response = await device_overview.overview(request)
+            body = json.loads(response.text)
+
+        inventory.assert_not_awaited()
+        groups.assert_not_awaited()
+        self.assertFalse(body["source_cache_loading"])
+        self.assertEqual(body["summary"]["ha_entities"], 2)
+
+    async def test_cold_overview_returns_immediately_and_schedules_refresh(self):
+        server = Mock()
+        server.is_configured.return_value = True
+        server._DEVICES_CACHE = {"devices": []}
+        store = Mock()
+        store.load.return_value = {"entities": {}}
+        request = Mock()
+        request.app = {"device_overview_server": server, "device_overview_store": store}
+        request.rel_url.query = {}
+        with patch.object(device_overview, "_schedule_overview_refresh") as schedule_sources, \
+             patch.object(device_overview, "_schedule_alexa_device_refresh") as schedule_devices, \
+             patch.object(device_overview.ha_export, "_inventory", new=AsyncMock()) as inventory, \
+             patch.object(device_overview.alexa_group_manager, "_load_groups", new=AsyncMock()) as groups, \
+             patch.object(device_overview, "NativeSkillConfigStore") as native_store:
+            native_store.return_value.load.return_value = {"enabled": False, "devices": {}}
+            response = await device_overview.overview(request)
+            body = json.loads(response.text)
+
+        schedule_sources.assert_called_once()
+        schedule_devices.assert_called_once()
+        inventory.assert_not_awaited()
+        groups.assert_not_awaited()
+        self.assertTrue(body["source_cache_loading"])
+        self.assertEqual(body["devices"], [])
+
+    async def test_background_refresh_updates_and_persists_source_snapshots(self):
+        server = Mock()
+        server.is_configured.return_value = True
+        server.session_data.return_value = {"cookie": "must-not-be-persisted"}
+        inventory = ha_inventory()
+        groups = [{"id": "group-1", "name": "Wohnzimmer", "type": "room"}]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache_path = pathlib.Path(temp_dir) / "overview-cache.json"
+            with patch.object(device_overview, "_OVERVIEW_CACHE_PATH", cache_path), \
+                 patch.object(device_overview.ha_export, "_inventory", new=AsyncMock(return_value=inventory)), \
+                 patch.object(device_overview.alexa_group_manager, "_load_groups", new=AsyncMock(return_value=groups)):
+                await device_overview._refresh_overview_sources(server)
+            persisted = cache_path.read_text(encoding="utf-8")
+
+        self.assertEqual(device_overview._OVERVIEW_SOURCE_CACHE["ha_inventory"], inventory)
+        self.assertEqual(device_overview._OVERVIEW_SOURCE_CACHE["groups"], groups)
+        self.assertTrue(device_overview._OVERVIEW_SOURCE_CACHE["ha_updated_at"])
+        self.assertTrue(device_overview._OVERVIEW_SOURCE_CACHE["groups_updated_at"])
+        self.assertNotIn("must-not-be-persisted", persisted)
+        self.assertNotIn("cookie", persisted)
+
+    async def test_failed_group_refresh_keeps_snapshot_and_exposes_safe_http_error(self):
+        previous = [{"id": "cached-group", "name": "Wohnzimmer"}]
+        device_overview._OVERVIEW_SOURCE_CACHE.update({
+            "ha_inventory": ha_inventory(),
+            "groups": previous,
+            "alexa_configured": True,
+        })
+        server = Mock()
+        server.is_configured.return_value = True
+        server.session_data.return_value = {}
+        error = device_overview.alexa_group_manager.AlexaGroupError(
+            "Alexa-Gruppen konnten nicht geladen werden (HTTP 299)."
+        )
+        with patch.object(device_overview.ha_export, "_inventory", new=AsyncMock(return_value=ha_inventory())), \
+             patch.object(device_overview.alexa_group_manager, "_load_groups", new=AsyncMock(side_effect=error)):
+            await device_overview._refresh_overview_sources(server)
+
+        self.assertEqual(device_overview._OVERVIEW_SOURCE_CACHE["groups"], previous)
+        self.assertIn("HTTP 299", device_overview._OVERVIEW_SOURCE_CACHE["warnings"][0])
+
+    def test_recent_failed_attempt_suppresses_repeated_background_refresh(self):
+        device_overview._OVERVIEW_SOURCE_CACHE["last_attempt_at"] = time.time()
+        server = Mock()
+        app = {}
+        with patch.object(device_overview.asyncio, "create_task") as create_task:
+            device_overview._schedule_overview_refresh(app, server)
+        create_task.assert_not_called()
 
 
 if __name__ == "__main__":

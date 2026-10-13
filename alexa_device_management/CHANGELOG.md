@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.2.0
+
+- Die Geräteübersicht verwendet einen persistenten HA- und Alexa-Gruppen-Cache. Sie zeigt vorhandene Daten sofort und aktualisiert veraltete Bestände im Hintergrund.
+- Beim ersten Start ohne Cache erscheint die Oberfläche sofort mit einem Ladehinweis und aktualisiert sich automatisch, sobald die Hintergrundabfrage fertig ist. „Aktualisieren“ bleibt ein erzwungener Live-Abruf.
+
 ## 3.1.1
 
 - Die Bereinigung alter Alexa-v3-Endpunkte verwendet ausschließlich `forgetEndpoint` mit der tatsächlich aus Alexa gelesenen Endpunkt-ID. Unpassende Mutationen wie `deregisterEndpoint` und `deleteDeviceGroup` werden nicht mehr mit geratenen IDs aufgerufen.
