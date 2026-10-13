@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Alexa-Geräteverwaltung</title>
-  <link rel="stylesheet" href="{{INGRESS_PATH}}/static/device_overview.css?v=3.0.0">
+  <link rel="stylesheet" href="{{INGRESS_PATH}}/static/device_overview.css?v=3.1.0">
 </head>
 <body>
   <header class="topbar">
@@ -24,7 +24,6 @@
   <main>
     <section class="workflow">
       <button id="btn-preview" class="button secondary">v6-Konfiguration</button>
-      <button id="btn-deploy" class="button primary">Abgleichsdienst installieren</button>
       <button id="btn-restart" class="button warning">HA neu starten</button>
       <button id="btn-event-sync" class="button primary">Änderungen an Alexa senden</button>
       <button id="btn-group-sync" class="button secondary">Alexa-Gruppen synchronisieren</button>
@@ -72,9 +71,10 @@
       </header>
       <div class="dialog-content">
         <fieldset>
-          <legend>Alexa Event Gateway</legend>
-          <label class="check"><input id="event-enabled" type="checkbox"> Offiziellen Add-/Update-/Delete-Abgleich aktivieren</label>
-          <label>Event-Endpunkt
+          <legend>Geräte mit Alexa abgleichen</legend>
+          <label class="check"><input id="event-enabled" type="checkbox" aria-describedby="event-enabled-help"> Alexa-Abgleich aktivieren</label>
+          <p id="event-enabled-help" class="muted">Meldet neue, geänderte und abgewählte Geräte an Alexa. Beim Speichern richtet die App den dafür benötigten Dienst in Home Assistant ein und prüft die Konfiguration. Nach der ersten Einrichtung oder einer Aktualisierung kann ein HA-Neustart nötig sein; die App zeigt dir das an.</p>
+          <label>Amazon-Region
             <select id="event-endpoint">
               <option value="https://api.eu.amazonalexa.com/v3/events">Europa</option>
               <option value="https://api.amazonalexa.com/v3/events">Nordamerika</option>
@@ -83,6 +83,7 @@
           </label>
           <label>Secret-Name Client-ID<input id="event-client-id-secret"></label>
           <label>Secret-Name Client-Secret<input id="event-client-secret-secret"></label>
+          <p class="muted">Hier gehören die Namen der vorhandenen Einträge in secrets.yaml hinein. Die Zugangsdaten selbst bleiben in Home Assistant.</p>
           <label class="check"><input id="event-fallback" type="checkbox"> Private Alexa-Web-Löschung als Fallback verwenden</label>
         </fieldset>
         <fieldset>
@@ -115,7 +116,7 @@
   </dialog>
 
   <script>document.documentElement.dataset.ingressPath="{{INGRESS_PATH}}";</script>
-  <script src="{{INGRESS_PATH}}/static/device_overview.js?v=3.0.0"></script>
-  <script src="{{INGRESS_PATH}}/static/device_export_guard.js?v=3.0.0"></script>
+  <script src="{{INGRESS_PATH}}/static/device_overview.js?v=3.1.0"></script>
+  <script src="{{INGRESS_PATH}}/static/device_export_guard.js?v=3.1.0"></script>
 </body>
 </html>

@@ -234,7 +234,7 @@ async def publish_native(force=False):
             return write_status(publish_error="v6-Abgleichsdienst aktualisiert. HA neu starten, dann erneut abgleichen.",
                                 restart_required=True)
         if not await support._service_available():
-            return write_status(publish_error="HA-Abgleichsdienst fehlt. Konfiguration ausrollen und HA neu starten.")
+            return write_status(publish_error="HA-Abgleichsdienst fehlt. In den Einstellungen Alexa-Abgleich aktivieren und speichern; danach HA neu starten.")
         try:
             http, body = await support._call_sync_service({
                 "native_endpoints": current,

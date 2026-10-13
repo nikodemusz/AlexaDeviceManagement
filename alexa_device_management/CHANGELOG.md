@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.1.0
+
+- „Abgleichsdienst installieren“ entfällt in der Hauptansicht. Die beschriebene Option „Alexa-Abgleich aktivieren“ richtet den Dienst beim Speichern der Einstellungen ein und zeigt einen nötigen HA-Neustart an.
+- Wiederholtes Speichern schreibt eine unveränderte, bereits geladene Einrichtung nicht erneut. Fehler der HA-Konfigurationsprüfung bleiben sichtbar; bei fehlgeschlagener Einrichtung wird die vorherige YAML wiederhergestellt. Die Einrichtung startet weder HA neu noch eine zusätzliche Alexa-Synchronisation.
+
 ## 3.0.3
 
 - Der automatische Abgleich entfernt auch abgewählte native Geräte ohne bisherigen Veröffentlichungsverlauf sowie alte v5-Duplikate. Nur aktuell ausgewählte Endpunkt-IDs bleiben erhalten; fremde Anbieter und Echos werden nicht anhand ihres Namens gelöscht.

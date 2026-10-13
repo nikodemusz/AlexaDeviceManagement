@@ -15,17 +15,16 @@
     "btn-login": "Verbindet die App mit deinem Amazon-Alexa-Konto.",
     "btn-logout": "Löscht die gespeicherte Alexa-Web-Sitzung aus der App.",
     "btn-refresh": "Lädt Geräte, Entitäten, Räume und den Alexa-Bestand neu.",
-    "btn-settings": "Öffnet Einstellungen für Event Gateway, Alexa-Gruppen und Export.",
+    "btn-settings": "Öffnet Einstellungen für Alexa-Abgleich, Alexa-Gruppen und Export.",
     "btn-preview": "Zeigt die v6-Hauptkonfiguration; sie kann im YAML-Editor geändert werden.",
-    "btn-deploy": "Installiert den v6-Abgleichsdienst, schaltet HA-v5-Exporte ab und prüft die HA-Konfiguration.",
-    "btn-restart": "Startet Home Assistant neu, damit die ausgerollte Alexa-YAML aktiv wird.",
+    "btn-restart": "Startet Home Assistant neu, um einen neu eingerichteten oder aktualisierten Alexa-Abgleichsdienst zu laden.",
     "btn-event-sync": "Sendet die v6-Endpunkte per AddOrUpdateReport, entfernte native Endpunkte per DeleteReport und bereinigt erkannte HA-v5-Geräte. Schreibt keine alexa.yaml.",
     "btn-group-sync": "Ordnet bereits vorhandene Alexa-Endpunkte den konfigurierten Alexa-Gruppen zu.",
     "btn-enable-useful": "Aktiviert alle aktuell sichtbaren, für Alexa sinnvoll erkannten Entitäten.",
     "btn-disable-visible": "Deaktiviert den Alexa-Export für alle aktuell sichtbaren Entitäten.",
     "btn-hide-technical": "Blendet aktuell sichtbare Diagnose-, Energie- und andere technische Entitäten aus.",
     "btn-unhide-visible": "Blendet die durch den aktuellen Filter gefundenen Einträge wieder ein.",
-    "btn-save-settings": "Speichert die Event-Gateway-, Gruppen- und Exporteinstellungen.",
+    "btn-save-settings": "Speichert die Einstellungen und richtet bei aktiviertem Alexa-Abgleich den benötigten HA-Dienst ein.",
     "btn-close-yaml": "Schließt den YAML-Editor.",
     "btn-save-yaml": "Validiert und speichert die v6-Hauptkonfiguration ohne AWS-Deployment."
   };
@@ -580,22 +579,6 @@
     }
   }
 
-  async function deploy() {
-    const button = document.getElementById("btn-deploy"); setBusy(button, true, "Rolle aus…");
-    try {
-      await saveConfig();
-      const result = await request("/api/ha-export/deploy", {method: "POST", body: JSON.stringify(config)});
-      message(result.note || "v6-Konfiguration gespeichert. HA bei Bedarf neu starten und Alexa-Abgleich ausführen.", result.restart_required ? "warn" : "ok");
-      await load(false);
-    } catch (error) {
-      const restartHint = error.body?.restart_required ? "\nBitte jetzt „HA neu starten“ und danach erneut ausrollen." : "";
-      const checkDetail = error.body?.check?.message && !error.message.includes(error.body.check.message)
-        ? `\nHome Assistant: ${error.body.check.message}` : "";
-      message(`Deployment fehlgeschlagen: ${error.message}${checkDetail}${restartHint}`, "err");
-    }
-    finally { setBusy(button, false); }
-  }
-
   async function restart() {
     const button = document.getElementById("btn-restart"); setBusy(button, true, "Starte…");
     try { const result = await request("/api/ha-export/restart", {method: "POST", body: "{}"}); message(result.note || "Home Assistant Core wird neu gestartet."); }
@@ -651,11 +634,24 @@
 
   async function saveSettings(event) {
     event.preventDefault();
-    config.event_gateway = {enabled: document.getElementById("event-enabled").checked, endpoint: document.getElementById("event-endpoint").value, client_id_secret: document.getElementById("event-client-id-secret").value.trim(), client_secret_secret: document.getElementById("event-client-secret-secret").value.trim(), fallback_web_cleanup: document.getElementById("event-fallback").checked};
-    config.group_sync = {enabled: document.getElementById("group-enabled").checked, create_missing: document.getElementById("group-create").checked, remove_from_other_groups: document.getElementById("group-remove-other").checked};
-    config.native_enabled = document.getElementById("native-enabled").checked;
-    config.locale = document.getElementById("locale").value.trim() || "de-DE";
-    await saveConfig(); document.getElementById("settings-dialog").close(); message("Einstellungen gespeichert.");
+    const button = document.getElementById("btn-save-settings");
+    setBusy(button, true, "Speichere…");
+    let saved = false;
+    try {
+      config.event_gateway = {enabled: document.getElementById("event-enabled").checked, endpoint: document.getElementById("event-endpoint").value, client_id_secret: document.getElementById("event-client-id-secret").value.trim(), client_secret_secret: document.getElementById("event-client-secret-secret").value.trim(), fallback_web_cleanup: document.getElementById("event-fallback").checked};
+      config.group_sync = {enabled: document.getElementById("group-enabled").checked, create_missing: document.getElementById("group-create").checked, remove_from_other_groups: document.getElementById("group-remove-other").checked};
+      config.native_enabled = document.getElementById("native-enabled").checked;
+      config.locale = document.getElementById("locale").value.trim() || "de-DE";
+      await saveConfig();
+      saved = true;
+      document.getElementById("settings-dialog").close();
+      const result = await request("/api/native-export/setup", {method: "POST", body: "{}"});
+      message(result.note || "Einstellungen gespeichert.", result.restart_required ? "warn" : "ok");
+    } catch (error) {
+      const checkDetail = error.body?.check?.message && !error.message.includes(error.body.check.message)
+        ? `\nHome Assistant: ${error.body.check.message}` : "";
+      message(`${saved ? "Einstellungen gespeichert, aber der Alexa-Abgleich konnte nicht eingerichtet werden" : "Einstellungen konnten nicht gespeichert werden"}: ${error.message}${checkDetail}`, "err");
+    } finally { setBusy(button, false); }
   }
 
   async function logout() {
@@ -741,7 +737,7 @@
           if (nameInput && !nameInput.value) nameInput.value = settings.name;
         }
       }
-      await saveConfig(); await load(false); message(`${entityId} wurde ${target.checked ? "für v6 aktiviert" : "für v6 deaktiviert"}. Änderung anwenden: ausrollen → HA neu starten → Alexa-Abgleich.`, "warn");
+      await saveConfig(); await load(false); message(`${entityId} wurde ${target.checked ? "für v6 aktiviert" : "für v6 deaktiviert"}. Der Alexa-Abgleich übernimmt die gespeicherte Auswahl.`, "warn");
     } else if (target.classList.contains("export-category")) { settings.display_category = target.value; scheduleSave(); }
   });
   document.getElementById("content").addEventListener("input", event => {
@@ -754,7 +750,6 @@
 
   for (const id of ["search", "status-filter", "area-filter", "domain-filter"]) document.getElementById(id).addEventListener(id === "search" ? "input" : "change", render);
   document.getElementById("btn-refresh").addEventListener("click", () => load(true));
-  document.getElementById("btn-deploy").addEventListener("click", deploy);
   document.getElementById("btn-restart").addEventListener("click", restart);
   document.getElementById("btn-event-sync").addEventListener("click", eventSync);
   document.getElementById("btn-group-sync").addEventListener("click", groupSync);

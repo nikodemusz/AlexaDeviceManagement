@@ -173,30 +173,51 @@ async def save_yaml(request):
 def register_routes(app):
     app.router.add_get("/api/native-export/config", read_config)
     app.router.add_post("/api/native-export/yaml", save_yaml)
+    app.router.add_post("/api/native-export/setup", setup_sync_service)
 
 
-async def deploy(request):
+async def setup_sync_service(request):
+    """Apply the saved sync setting without publishing or restarting HA."""
+    return await deploy(request, only_if_changed=True)
+
+
+async def deploy(request, *, only_if_changed=False):
     # v6 YAML is already atomic/live. HA YAML only retains OAuth/event plumbing,
     # with an unconditional deny-all v5 filter.
     preferences = ha_export.CONFIG_STORE.load()
+    enabled = support._event_settings(preferences)["enabled"]
+    if only_if_changed and not enabled:
+        return web.json_response({"ok": True, "configured": False, "restart_required": False,
+                                  "note": "Einstellungen gespeichert. Alexa-Abgleich ist deaktiviert."})
     target = ha_export.ALEXA_YAML_PATH
     previous = target.read_bytes() if target.exists() else None
-    component = support.deploy_component() if support._event_settings(preferences)["enabled"] else {}
-    generated = ha_export.YAML_GENERATOR.deploy(preferences)
-    check = await ha_control.check_config()
+    try:
+        rendered = ha_export.YAML_GENERATOR.generate(preferences)
+    except ValueError:
+        return web.json_response({"error": "Alexa-Abgleich ist ungültig konfiguriert. Amazon-Region und Secret-Namen prüfen."}, status=400)
+    yaml_changed = previous != rendered.yaml_text.encode("utf-8")
+    component = support.deploy_component() if enabled else {}
+    available = await support._service_available() if only_if_changed else False
+    restart_required = not only_if_changed or yaml_changed or bool(component.get("restart_required")) or not available
+    written = not only_if_changed or yaml_changed
+    if written:
+        ha_export.YAML_GENERATOR.deploy(preferences)
+    check = await ha_control.check_config() if restart_required else {"valid": True}
     if not check.get("valid"):
-        if previous is None:
-            target.unlink(missing_ok=True)
-        else:
-            support._atomic_write_bytes(target, previous)
+        if written:
+            if previous is None:
+                target.unlink(missing_ok=True)
+            else:
+                support._atomic_write_bytes(target, previous)
         return web.json_response({"error": check.get("message") or "HA-Konfiguration ungültig.", "check": check}, status=400)
     native = STORE.load()
     return web.json_response({"ok": True, "selected_count": sum(
         bool(device.get("enabled", True) and device.get("capabilities")) for device in native["devices"].values()
     ) if native["enabled"] else 0,
-                              "path": str(STORE.path), "restart_required": True,
+                              "path": str(STORE.path), "configured": True, "restart_required": restart_required,
                               "component": component, "check": check,
-                              "note": "v6 gespeichert; HA-Neustart lädt den aktualisierten Abgleichsdienst und schaltet alte HA-Exporte ab."})
+                              "note": ("Einstellungen gespeichert. Alexa-Abgleich ist eingerichtet. Bitte HA neu starten, um den Dienst und seine Konfiguration zu laden."
+                                       if restart_required else "Einstellungen gespeichert. Alexa-Abgleich ist bereits eingerichtet und in Home Assistant verfügbar.")})
 
 
 def install():
