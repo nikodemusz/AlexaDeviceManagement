@@ -30,6 +30,12 @@ The native YAML is `/config/alexa_device_management/native/config.yaml`.
 v5 entities, which never export or activate devices. The migration page is retired.
 See [3.0 upgrade steps](docs/dual-skill-deployment.md).
 
+In **Einstellungen → Geräte mit Alexa abgleichen**, enable **Alexa-Abgleich
+aktivieren** and save. The app prepares its Home Assistant sync helper and checks
+HA configuration. It displays whether an HA restart is needed. This setup step
+does not restart HA or start an additional device sync; existing background
+reconciliation continues independently. The former install button is removed.
+
 ## Installation
 
 1. Open **Settings → Add-ons → Add-on Store** in Home Assistant OS.
