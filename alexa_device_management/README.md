@@ -22,7 +22,7 @@ This is not a Home Assistant integration. It runs as its own app with an ingress
 - Keep stable logical endpoint IDs and multiple values per device.
 - Validate and atomically save the authoritative native YAML with revision protection.
 - Publish complete v6 AddOrUpdateReport batches; retry errors without claiming success.
-- Automatically retire confirmed HA-v5 devices and verify with fresh inventory.
+- Automatically retire confirmed HA-v5 copies and unselected managed native devices, then verify with fresh inventory. Current selections, Echos, and unrelated vendors remain protected.
 - Count native endpoints, with old copies excluded from native synchronization counts.
 
 The native YAML is `/config/alexa_device_management/native/config.yaml`.

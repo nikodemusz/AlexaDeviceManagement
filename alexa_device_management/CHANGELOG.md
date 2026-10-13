@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.0.3
+
+- Der automatische Abgleich entfernt auch abgewählte native Geräte ohne bisherigen Veröffentlichungsverlauf sowie alte v5-Duplikate. Nur aktuell ausgewählte Endpunkt-IDs bleiben erhalten; fremde Anbieter und Echos werden nicht anhand ihres Namens gelöscht.
+- v5-Erkennung berücksichtigt normalisierte und verschachtelte Anbieterfelder. Fehlende/ungültige Auswahl blockiert Löschungen; erneute Auswahl wird direkt vor jeder Löschung geprüft und tatsächliche Entfernung mit frischem Alexa-Bestand bestätigt. UI zeigt verbliebene unerwünschte Geräte und fehlgeschlagene Bereinigung.
+
 ## 3.0.2
 
 - Die 15 AWS-Testereignisse liegen als einzelne vollständige JSON-Dateien vor und werden weiterhin von der Offline-Testsuite geprüft.
