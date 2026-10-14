@@ -49,6 +49,10 @@ class SelectionTargetTests(unittest.TestCase):
         old = device("old", legacyAppliance={"description": "switch.fritz via Home Assistant"})
         self.assertEqual(lifecycle.legacy_targets([old])[0]["endpoint_id"], "switch#fritz")
 
+    def test_explicit_home_assistant_provider_uses_entity_id_for_delete_report(self):
+        old = device("switch.fritz", manufacturerName="Home Assistant")
+        self.assertEqual(lifecycle.legacy_targets([old])[0]["entity_id"], "switch.fritz")
+
     def test_untracked_disabled_native_and_all_v5_copies_are_targets(self):
         kept = device("native:desk", manufacturerName="Alexa Device Management")
         disabled = device("native:fritz", manufacturerName="Alexa Device Management")

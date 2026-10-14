@@ -128,13 +128,12 @@ def legacy_targets(devices):
                     break
         # DeleteReport needs the Home Assistant entity ID. Only derive it from
         # the source metadata that already positively identified this as v5.
-        entity_id = entity.lower() if _ENTITY.fullmatch(entity) else None
-        if entity_id is None and "home assistant" in manufacturers:
-            for field in ("entityId", "entity_id"):
-                value = raw.get(field)
-                if isinstance(value, str) and _ENTITY.fullmatch(value.strip()):
-                    entity_id = value.strip().lower()
-                    break
+        entity_id = None
+        candidates = [entity, raw.get("entityId"), raw.get("entity_id"), raw.get("id"),
+                      device.get("serial")]
+        if "home assistant" in manufacturers or via_ha:
+            entity_id = next((value.strip().lower() for value in candidates
+                              if isinstance(value, str) and _ENTITY.fullmatch(value.strip())), None)
         targets.append({"device": device, "endpoint_id": endpoint_id,
                         "entity_id": entity_id, "kind": "legacy"})
     return targets
