@@ -3,6 +3,8 @@
 ## 3.3.0
 
 - In der Alexa-Geräteliste können mehrere verwaiste oder nicht zugeordnete Geräte markiert und gemeinsam gelöscht werden. Der Löschauftrag zeigt den Fortschritt; fehlgeschlagene Geräte bleiben markiert.
+- Bestätigte alte Home-Assistant-v5-Geräte senden im Hintergrund jetzt zuerst den offiziellen DeleteReport. Die App meldet sie erst nach einem vollständigen, frischen Alexa-Bestand als entfernt; angenommene, aber noch sichtbare Einträge bleiben zur Wiederholung vorgemerkt.
+- Die Debug-Seite zeigt getrennte Status-Endpunkte für v5-Deployment/DeleteReport und v6-Veröffentlichung/Bereinigung. Der experimentelle GET-Delete-Probe wurde schreibgeschützt, destruktive Aufrufe liefern HTTP 410.
 
 ## 3.2.0
 

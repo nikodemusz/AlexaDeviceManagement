@@ -6,6 +6,7 @@ from aiohttp import web
 
 import alexa_cache_service
 import alexa_endpoint_inventory
+import alexa_event_sync
 import alexa_group_manager
 import alexa_login_ingress_fix
 import alexa_room_enrichment
@@ -47,6 +48,10 @@ def create_app() -> web.Application:
     alexa_cache_service.install(server_clean)
     ha_export_overrides.install()
     ha_control.install()
+    # Keep the official Home Assistant DeleteReport flow connected to deploy
+    # and status routes. Without this wrapper removed legacy v5 entities can
+    # remain registered after their YAML selection disappears.
+    alexa_event_sync.install(ha_control)
     native_export.install()
 
     app = server_clean.create_app()
@@ -60,6 +65,7 @@ def create_app() -> web.Application:
     native_lifecycle.install(app, server_clean)
     native_export.register_routes(app)
     ha_control.register_routes(app)
+    alexa_event_sync.register_routes(app)
     return app
 
 

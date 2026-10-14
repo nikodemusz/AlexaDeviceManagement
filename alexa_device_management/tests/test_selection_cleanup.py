@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -13,7 +14,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "rootfs/opt/alexa_device_management/web"))
 import native_lifecycle as lifecycle
 from native_skill_config import NativeSkillConfigStore
+import server_clean
 from server_clean import _normalize_smart_home_device
+import server_extended
 
 
 def selection():
@@ -132,6 +135,34 @@ class SelectionCleanupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["unselected_native_remaining"], 1)
         self.assertEqual(result["unselected_native_ids"], ["native:fritz"])
 
+    async def test_confirmed_v5_entity_uses_official_delete_report_and_stays_pending_until_fresh_inventory(self):
+        preferences = Mock()
+        preferences.load.return_value = {"event_gateway": {"enabled": True}}
+        with patch.object(lifecycle.ha_export, "CONFIG_STORE", preferences), \
+             patch.object(lifecycle.support, "_service_available", AsyncMock(return_value=True)), \
+             patch.object(lifecycle.support, "_call_sync_service", AsyncMock(
+                 return_value=(200, {"service_response": {"ok": True}})
+             )) as report:
+            result = await lifecycle.cleanup_legacy(self.server, self.native)
+        self.assertEqual(report.call_args.args[0]["delete"], ["light.desk"])
+        self.assertEqual(result["legacy_delete_report_accepted"], ["light.desk"])
+        # An accepted DeleteReport is not itself proof Alexa removed the row.
+        self.assertEqual(result["legacy_remaining"], 1)
+        self.assertFalse(result["selection_verified"])
+        self.assertNotIn("old-desk", {call.args[0]["serial"] for call in self.server._delete_target.await_args_list})
+
+    async def test_unavailable_or_disabled_event_gateway_does_not_claim_report(self):
+        preferences = Mock()
+        preferences.load.return_value = {"event_gateway": {"enabled": False}}
+        with patch.object(lifecycle.ha_export, "CONFIG_STORE", preferences), \
+             patch.object(lifecycle.support, "_service_available", AsyncMock(return_value=False)), \
+             patch.object(lifecycle.support, "_call_sync_service", AsyncMock()) as report:
+            result = await lifecycle.cleanup_legacy(self.server, self.native)
+        report.assert_not_awaited()
+        self.assertEqual(result["legacy_delete_report_accepted"], [])
+        self.assertEqual(result["selection_remaining"], 0)
+
+
     async def test_failed_deletion_is_retained_for_retry_and_private_error_is_hidden(self):
         self.server._delete_target = AsyncMock(side_effect=RuntimeError("private-session-marker"))
         result = await lifecycle.cleanup_legacy(self.server, self.native)
@@ -173,6 +204,26 @@ class SelectionCleanupTests(unittest.IsolatedAsyncioTestCase):
             await lifecycle.publish_native()
             self.assertEqual(report.await_count, 1)
 
+
+class DebugPageTests(unittest.IsolatedAsyncioTestCase):
+    async def test_page_shows_current_v5_and_v6_status_routes_without_delete_button(self):
+        response = await server_clean.debug_ui(SimpleNamespace(headers={}))
+        self.assertIn("/api/native-export/lifecycle", response.text)
+        self.assertIn("/api/ha-export/event-sync/status", response.text)
+        self.assertIn("Alexa-Bestand", response.text)
+        self.assertNotIn("Delete-Probe (DELETE!)", response.text)
+
+    async def test_extended_app_registers_official_event_sync_status_and_action(self):
+        app = server_extended.create_app()
+        paths = {route.resource.canonical for route in app.router.routes()}
+        self.assertIn("/api/ha-export/event-sync/status", paths)
+        self.assertIn("/api/ha-export/event-sync", paths)
+
+    async def test_destructive_delete_probe_is_disabled(self):
+        request = SimpleNamespace(rel_url=SimpleNamespace(query={"delete": "1"}))
+        response = await server_clean.delete_probe(request)
+        self.assertEqual(response.status, 410)
+        self.assertIn("deaktiviert", response.text)
 
 if __name__ == "__main__":
     unittest.main()
