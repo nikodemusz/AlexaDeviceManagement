@@ -1427,7 +1427,7 @@ async def debug_ui(request: web.Request) -> web.Response:
   <style>
     * {{ box-sizing: border-box; margin: 0; padding: 0; }}
     body {{ font-family: system-ui, sans-serif; background: #f5f6fa; color: #2d3436;
-           display: flex; flex-direction: column; height: 100vh; overflow: hidden; }}
+           display: flex; flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden; }}
 
     /* Top bar */
     .top-bar {{ background: #fff; border-bottom: 1px solid #e0e0e0;
@@ -1462,10 +1462,31 @@ async def debug_ui(request: web.Request) -> web.Response:
     #btn-reload {{ background: #dfe6e9; color: #2d3436; }}
     #btn-copy   {{ background: #00caff; color: #fff; }}
     #btn-copy.copied {{ background: #27ae60; }}
+    #btn-expand {{ background: #dfe6e9; color: #2d3436; }}
+
+    /* A one-tap full-screen mode gives long JSON enough room on phones. */
+    #result-panel {{ display: flex; flex: 1; flex-direction: column; min-height: 0; }}
+    #result-panel.expanded {{
+      position: fixed; inset: 0; z-index: 1000; width: 100%; height: 100vh; height: 100dvh;
+      box-sizing: border-box; padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom); background: #fff;
+    }}
+    #result-panel.expanded .action-bar {{ position: sticky; top: 0; z-index: 1; }}
 
     /* Output */
-    #output {{ flex: 1; overflow: auto; padding: 14px; -webkit-overflow-scrolling: touch; }}
-    pre {{ font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; }}
+    #output {{ flex: 1; min-height: 0; overflow: auto; padding: 14px;
+               -webkit-overflow-scrolling: touch; touch-action: pan-x pan-y pinch-zoom; }}
+    pre {{ margin: 0; font-size: 12px; line-height: 1.6; white-space: pre-wrap;
+           overflow-wrap: anywhere; word-break: normal; user-select: text;
+           -webkit-user-select: text; -webkit-touch-callout: default; }}
+    #result-panel.expanded pre {{ white-space: pre; overflow-wrap: normal; }}
+    @media (max-width: 600px) {{
+      .action-bar {{ gap: 6px; padding: 8px; }}
+      .action-bar button {{ min-height: 42px; padding: 8px 10px; }}
+      .action-bar code {{ flex-basis: 100%; order: -1; }}
+      #output {{ padding: 10px; }}
+      pre {{ font-size: 13px; }}
+    }}
     .loading {{ color: #636e72; font-style: italic; }}
     .error   {{ color: #c0392b; }}
     .key  {{ color: #2980b9; }}
@@ -1491,13 +1512,15 @@ async def debug_ui(request: web.Request) -> web.Response:
     und die Felder „pending/remaining“ in den Status-Endpunkten. Diese Seite führt keine Löschaktion aus.
   </div>
 
-  <div class="action-bar">
-    <code id="current-url">Endpunkt auswählen…</code>
-    <button id="btn-reload" onclick="reload()">↻ Laden</button>
-    <button id="btn-copy"   onclick="copyOutput()">📋 Kopieren</button>
+  <div id="result-panel">
+    <div class="action-bar">
+      <code id="current-url">Endpunkt auswählen…</code>
+      <button id="btn-reload" onclick="reload()">↻ Laden</button>
+      <button id="btn-copy" onclick="copyOutput()">📋 Kopieren</button>
+      <button id="btn-expand" onclick="toggleExpanded()" aria-expanded="false">⛶ Vergrößern</button>
+    </div>
+    <div id="output"><pre class="loading">Endpunkt oben auswählen…</pre></div>
   </div>
-
-  <div id="output"><pre class="loading">Endpunkt oben auswählen…</pre></div>
 
   <script>
     let currentUrl = null;
@@ -1543,17 +1566,45 @@ async def debug_ui(request: web.Request) -> web.Response:
       if (currentUrl) load(currentUrl, active);
     }}
 
+    function toggleExpanded() {{
+      const panel = document.getElementById('result-panel');
+      const button = document.getElementById('btn-expand');
+      const expanded = panel.classList.toggle('expanded');
+      button.setAttribute('aria-expanded', String(expanded));
+      button.textContent = expanded ? '↙ Verkleinern' : '⛶ Vergrößern';
+    }}
+
     async function copyOutput() {{
       if (!rawJson) return;
+      const btn = document.getElementById('btn-copy');
       try {{
+        if (!navigator.clipboard || !window.isSecureContext) throw new Error('Clipboard API nicht verfügbar');
         await navigator.clipboard.writeText(rawJson);
-        const btn = document.getElementById('btn-copy');
-        btn.textContent = '✓ Kopiert';
-        btn.classList.add('copied');
-        setTimeout(() => {{ btn.textContent = '📋 Kopieren'; btn.classList.remove('copied'); }}, 2000);
+        showCopied(btn);
       }} catch(e) {{
-        alert('Kopieren fehlgeschlagen: ' + e.message);
+        // iOS webviews may deny the Clipboard API; fall back to a selectable text field.
+        const fallback = document.createElement('textarea');
+        fallback.value = rawJson;
+        fallback.setAttribute('readonly', '');
+        fallback.style.cssText = 'position:fixed;left:0;top:0;width:100vw;height:1px;opacity:0.01';
+        document.body.appendChild(fallback);
+        fallback.focus();
+        fallback.select();
+        fallback.setSelectionRange(0, fallback.value.length);
+        const copied = document.execCommand('copy');
+        fallback.remove();
+        if (!copied) {{
+          alert('Kopieren fehlgeschlagen. Bitte den Text markieren und kopieren.');
+          return;
+        }}
+        showCopied(btn);
       }}
+    }}
+
+    function showCopied(btn) {{
+      btn.textContent = '✓ Kopiert';
+      btn.classList.add('copied');
+      setTimeout(() => {{ btn.textContent = '📋 Kopieren'; btn.classList.remove('copied'); }}, 2000);
     }}
   </script>
 </body>
