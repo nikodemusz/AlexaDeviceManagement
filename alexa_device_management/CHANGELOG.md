@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.3.2
+
+- Debug-Antworten werden in schreibgeschützten Textfeldern angezeigt, damit sie auch in iOS-WebViews per langem Tippen markiert und kopiert werden können.
+
 ## 3.3.1
 
 - Die Debug-Ausgabe lässt sich auf Mobilgeräten in eine Vollbildansicht vergrößern. JSON kann per langem Tippen markiert oder über eine iOS-kompatible Kopierfunktion übernommen werden.
