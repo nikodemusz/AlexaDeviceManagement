@@ -1476,24 +1476,25 @@ async def debug_ui(request: web.Request) -> web.Response:
     /* Output */
     #output {{ flex: 1; min-height: 0; overflow: auto; padding: 14px;
                -webkit-overflow-scrolling: touch; touch-action: pan-x pan-y pinch-zoom; }}
-    pre {{ margin: 0; font-size: 12px; line-height: 1.6; white-space: pre-wrap;
-           overflow-wrap: anywhere; word-break: normal; user-select: text;
-           -webkit-user-select: text; -webkit-touch-callout: default; }}
-    #result-panel.expanded pre {{ white-space: pre; overflow-wrap: normal; }}
+    #output pre {{ margin: 0; font-size: 13px; line-height: 1.6; white-space: pre-wrap;
+                   overflow-wrap: anywhere; user-select: text; -webkit-user-select: text;
+                   -webkit-touch-callout: default; }}
+    #output textarea.json-view {{ display: block; width: 100%; height: 100%; min-height: 100%;
+      margin: 0; padding: 0; border: 0; border-radius: 0; outline: none; resize: none;
+      background: transparent; color: #2d3436; font: 13px/1.6 ui-monospace, SFMono-Regular,
+      Menlo, Consolas, monospace; white-space: pre; overflow: auto; tab-size: 2;
+      user-select: text; -webkit-user-select: text; -webkit-touch-callout: default;
+      -webkit-appearance: none; touch-action: pan-x pan-y pinch-zoom; }}
+    #output textarea.json-view.error {{ color: #c0392b; }}
     @media (max-width: 600px) {{
       .action-bar {{ gap: 6px; padding: 8px; }}
       .action-bar button {{ min-height: 42px; padding: 8px 10px; }}
       .action-bar code {{ flex-basis: 100%; order: -1; }}
       #output {{ padding: 10px; }}
-      pre {{ font-size: 13px; }}
+      #output pre, #output textarea.json-view {{ font-size: 14px; }}
     }}
     .loading {{ color: #636e72; font-style: italic; }}
     .error   {{ color: #c0392b; }}
-    .key  {{ color: #2980b9; }}
-    .str  {{ color: #27ae60; }}
-    .num  {{ color: #e67e22; }}
-    .bool {{ color: #8e44ad; }}
-    .null {{ color: #95a5a6; }}
   </style>
 </head>
 <body>
@@ -1526,17 +1527,6 @@ async def debug_ui(request: web.Request) -> web.Response:
     let currentUrl = null;
     let rawJson = null;
 
-    function syntaxHL(json) {{
-      return JSON.stringify(json, null, 2)
-        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        .replace(/("(\\u[a-fA-F0-9]{{4}}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, m => {{
-          if (/^"/.test(m)) return /:$/.test(m) ? `<span class="key">${{m}}</span>` : `<span class="str">${{m}}</span>`;
-          if (/true|false/.test(m)) return `<span class="bool">${{m}}</span>`;
-          if (/null/.test(m)) return `<span class="null">${{m}}</span>`;
-          return `<span class="num">${{m}}</span>`;
-        }});
-    }}
-
     async function load(url, btn) {{
       currentUrl = url;
       rawJson = null;
@@ -1549,16 +1539,26 @@ async def debug_ui(request: web.Request) -> web.Response:
         const resp = await fetch(url);
         const text = await resp.text();
         let json;
-        try {{ json = JSON.parse(text); rawJson = text; }} catch {{ json = null; }}
+        try {{ json = JSON.parse(text); rawJson = JSON.stringify(json, null, 2); }} catch {{ json = null; }}
         if (json !== null) {{
-          out.innerHTML = '<pre>' + syntaxHL(json) + '</pre>';
+          showTextOutput(out, rawJson, false);
         }} else {{
           rawJson = text;
-          out.innerHTML = '<pre class="error">Kein JSON:\\n' + text.replace(/</g,'&lt;') + '</pre>';
+          showTextOutput(out, 'Kein JSON:\\n' + text, true);
         }}
       }} catch(e) {{
         out.innerHTML = '<pre class="error">Fehler: ' + e.message + '</pre>';
       }}
+    }}
+
+    function showTextOutput(container, value, isError) {{
+      const textarea = document.createElement('textarea');
+      textarea.className = isError ? 'json-view error' : 'json-view';
+      textarea.readOnly = true;
+      textarea.spellcheck = false;
+      textarea.setAttribute('aria-label', 'Auswählbare Debug-Ausgabe');
+      textarea.value = value;
+      container.replaceChildren(textarea);
     }}
 
     function reload() {{
