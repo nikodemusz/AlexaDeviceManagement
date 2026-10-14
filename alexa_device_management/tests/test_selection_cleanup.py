@@ -222,6 +222,10 @@ class DebugPageTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('id="btn-expand"', response.text)
         self.assertIn("toggleExpanded()", response.text)
         self.assertIn("-webkit-user-select: text", response.text)
+        self.assertIn("document.createElement('textarea')", response.text)
+        self.assertIn("textarea.readOnly = true", response.text)
+        self.assertIn("textarea.value = value", response.text)
+        self.assertNotIn("syntaxHL(json)", response.text)
         self.assertIn("navigator.clipboard.writeText(rawJson)", response.text)
         self.assertIn("document.execCommand('copy')", response.text)
 
