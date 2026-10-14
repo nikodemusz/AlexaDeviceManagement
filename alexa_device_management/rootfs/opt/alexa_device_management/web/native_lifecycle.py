@@ -20,7 +20,7 @@ from native_endpoints import endpoints
 from native_skill_config import NativeSkillConfigStore
 
 STATUS_PATH = Path("/data/alexa_device_management/native_lifecycle.json")
-_ENTITY = re.compile(r"^[a-z_]+\.[A-Za-z0-9_]+$")
+_ENTITY = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$", re.IGNORECASE)
 _REPORT_LOCK = asyncio.Lock()
 _CLEANUP_LOCK = asyncio.Lock()
 
@@ -126,7 +126,16 @@ def legacy_targets(devices):
                 if isinstance(value, str) and value and len(value) <= 256:
                     endpoint_id = value.removeprefix("amzn1.alexa.endpoint.")
                     break
-        targets.append({"device": device, "endpoint_id": endpoint_id, "kind": "legacy"})
+        # DeleteReport needs the Home Assistant entity ID. Only derive it from
+        # the source metadata that already positively identified this as v5.
+        entity_id = None
+        candidates = [entity, raw.get("entityId"), raw.get("entity_id"), raw.get("id"),
+                      device.get("serial")]
+        if "home assistant" in manufacturers or via_ha:
+            entity_id = next((value.strip().lower() for value in candidates
+                              if isinstance(value, str) and _ENTITY.fullmatch(value.strip())), None)
+        targets.append({"device": device, "endpoint_id": endpoint_id,
+                        "entity_id": entity_id, "kind": "legacy"})
     return targets
 
 
@@ -174,9 +183,42 @@ async def cleanup_legacy(server, native=None):
         targets = legacy_targets(inventory) if native is None else selection_targets(inventory, native)
         failures = []
         removed = {"legacy": 0, "unselected_native": 0}
+        # Retire old HA Smart Home skill endpoints through HA's supported
+        # DeleteReport path. Alexa's private endpoint mutations often return
+        # 404 for these legacy records, while an accepted report is still only
+        # a request: a fresh Alexa inventory must confirm actual removal.
+        report_accepted = set()
+        report_error = None
+        legacy_entities = sorted({item["entity_id"] for item in targets
+                                  if item["kind"] == "legacy" and item.get("entity_id")})
+        if legacy_entities:
+            try:
+                # The configured Home Assistant service is the authorization
+                # boundary. The add-on's discovery toggle must not strand old
+                # v5 records when the official service is already available.
+                if await support._service_available():
+                    current_config = selection_config() if native is not None else None
+                    report_entities = [
+                        target["entity_id"] for target in targets
+                        if target["kind"] == "legacy" and target.get("entity_id")
+                        and (current_config is None or selection_targets([target["device"]], current_config))
+                    ]
+                    if report_entities:
+                        http, body = await support._call_sync_service({"delete": sorted(set(report_entities))})
+                        response = support._service_response(body)
+                        if 200 <= http < 300 and response.get("ok"):
+                            report_accepted = set(report_entities)
+                        else:
+                            report_error = "Offizieller Alexa-DeleteReport wurde nicht angenommen."
+                else:
+                    report_error = "Home-Assistant-Alexa-Abgleichsdienst ist nicht verfügbar."
+            except Exception:
+                report_error = "Offizieller Alexa-DeleteReport konnte nicht gesendet werden."
         semaphore = asyncio.Semaphore(4)
         async def delete_one(target):
             item = target["device"]
+            if target.get("kind") == "legacy" and target.get("entity_id") in report_accepted:
+                return
             try:
                 async with semaphore:
                     # A user may reselect an endpoint while inventory is loading.
@@ -200,6 +242,8 @@ async def cleanup_legacy(server, native=None):
         legacy = [item for item in remaining if item["kind"] == "legacy"]
         inactive = [item for item in remaining if item["kind"] == "unselected_native"]
         return write_status(legacy_deleted=removed["legacy"], legacy_remaining=len(legacy),
+                            legacy_delete_report_accepted=sorted(report_accepted),
+                            legacy_delete_report_error=report_error,
                             unselected_native_deleted=removed["unselected_native"],
                             unselected_native_remaining=len(inactive),
                             unselected_native_ids=sorted({value for item in inactive for value in item["native_ids"]}),

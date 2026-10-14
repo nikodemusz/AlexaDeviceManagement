@@ -1276,7 +1276,12 @@ async def devices_debug(request: web.Request) -> web.Response:
 
 
 async def delete_probe(request: web.Request) -> web.Response:
-    """Diagnostic: find the right delete endpoint by probing multiple API formats."""
+    """Read-only diagnostic; mutations must use the managed lifecycle report."""
+    if request.rel_url.query.get("delete") == "1":
+        return web.json_response({
+            "ok": False,
+            "error": "Destruktive Delete-Probes sind deaktiviert. Geräte über den Abgleich oder die Geräteverwaltung entfernen.",
+        }, status=410)
     if not is_configured():
         raise web.HTTPUnauthorized(text="Not configured")
     data = session_data()
@@ -1388,22 +1393,6 @@ async def delete_probe(request: web.Request) -> web.Response:
         status, body = await alexa_raw_get(path, data)
         result["v3_get_probes"][path] = {"status": status, "body": body[:200]}
 
-    # 5. DELETE probes (only when ?delete=1 is passed)
-    if request.rel_url.query.get("delete") == "1":
-        # Cookie-authenticated multi-candidate delete (works for v3 entities like openHAB3)
-        cookie_variants = await delete_v3_entity_cookie(device_id, data)
-        result["cookie_delete_variants"] = cookie_variants
-        result["delete_ok"] = "_winner" in cookie_variants
-
-        # Check whether device still exists in behaviors/entities after all attempts
-        try:
-            payload2 = await alexa_get_json("/api/behaviors/entities?skillId=amzn1.ask.1p.smarthome", data)
-            items2 = _extract_smart_home_items(payload2)
-            result["device_still_exists_after_delete"] = any(item.get("id") == device_id for item in items2)
-            result["total_devices_after_delete"] = len(items2)
-        except Exception as exc:
-            result["post_delete_check_error"] = str(exc)
-
     return web.json_response(result)
 
 
@@ -1416,6 +1405,11 @@ async def debug_ui(request: web.Request) -> web.Response:
         ("/api/token-refresh-status", "Token-Refresh"),
         ("/api/devices",              "Geräteliste"),
         ("/api/devices-debug",        "Geräte Rohdaten"),
+        ("/api/ha-export/deploy-status", "v5-Deployment"),
+        ("/api/ha-export/lifecycle-status", "v5 DeleteReport-Lifecycle"),
+        ("/api/ha-export/discovery-guide", "v5-Gerätesuche-Hinweis"),
+        ("/api/ha-export/event-sync/status", "v5 Event-Sync-Status"),
+        ("/api/native-export/lifecycle", "v6 Auswahl/Abgleich/Bereinigung"),
     ]
     buttons = "\n".join(
         f'<button onclick="load(\'{ingress_path}{ep}\', this)">'
@@ -1424,15 +1418,6 @@ async def debug_ui(request: web.Request) -> web.Response:
         f'</button>'
         for ep, label in endpoints
     )
-    buttons += f"""
-<button onclick="probeDelete('{ingress_path}', false)" style="background:#fff5f5;border-color:#e17055;">
-  <span class="btn-label">🔬 Delete-Probe (GET)</span>
-  <span class="btn-ep">/api/delete-probe?id=...</span>
-</button>
-<button onclick="probeDelete('{ingress_path}', true)" style="background:#ffe0e0;border-color:#c0392b;color:#7b241c;">
-  <span class="btn-label">💥 Delete-Probe (DELETE!)</span>
-  <span class="btn-ep">/api/delete-probe?id=...&amp;delete=1</span>
-</button>"""
     html = f"""<!DOCTYPE html>
 <html lang="de">
 <head>
@@ -1500,6 +1485,12 @@ async def debug_ui(request: web.Request) -> web.Response:
     {buttons}
   </div>
 
+  <div style="padding:10px 14px;background:#fff8e1;border-bottom:1px solid #e0e0e0;font-size:12px;line-height:1.5;color:#5d4037;">
+    v5 (Home Assistant) und v6 (Alexa Device Management) haben getrennte Auswahl- und Löschpfade.
+    Ein angenommener DeleteReport ist noch keine Löschbestätigung; maßgeblich sind der frische Alexa-Bestand
+    und die Felder „pending/remaining“ in den Status-Endpunkten. Diese Seite führt keine Löschaktion aus.
+  </div>
+
   <div class="action-bar">
     <code id="current-url">Endpunkt auswählen…</code>
     <button id="btn-reload" onclick="reload()">↻ Laden</button>
@@ -1550,14 +1541,6 @@ async def debug_ui(request: web.Request) -> web.Response:
     function reload() {{
       const active = document.querySelector('.ep-grid button.active');
       if (currentUrl) load(currentUrl, active);
-    }}
-
-    async function probeDelete(ingressPath, withDelete) {{
-      const id = prompt('Geräte-UUID aus der Geräteliste (data-serial) eingeben:');
-      if (!id) return;
-      const trimmed = id.trim();
-      const url = ingressPath + '/api/delete-probe?id=' + encodeURIComponent(trimmed) + (withDelete ? '&delete=1' : '');
-      load(url, null);
     }}
 
     async function copyOutput() {{

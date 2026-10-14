@@ -9,9 +9,11 @@
   let overviewPollCount = 0;
   const expandedAreas = new Set();
   const expandedDevices = new Set();
+  const selectedAlexaKeys = new Set();
   const visibleAreaCounts = new Map();
   const renderedAreaItems = new Map();
   const AREA_PAGE_SIZE = 25;
+  let alexaDeletePollTimer = null;
 
   const BUTTON_TOOLTIPS = {
     "btn-login": "Verbindet die App mit deinem Amazon-Alexa-Konto.",
@@ -45,6 +47,7 @@
     "show-alexa": "Blendet diesen Alexa-Endpunkt in der Verwaltung wieder ein.",
     "rename-alexa": "Ändert den Namen des bereits bei Alexa vorhandenen Endpunkts.",
     "delete-alexa": "Löscht den bereits bei Alexa vorhandenen Endpunkt.",
+    "delete-selected-alexa": "Löscht die ausgewählten Alexa-Geräte nach einer Sicherheitsabfrage nacheinander.",
     "assign-group": "Ordnet diesen Alexa-Endpunkt der angegebenen Alexa-Gruppe zu.",
     "fill-entity": "Übernimmt den automatisch ermittelten Alexa-Namen und die passende Kategorie.",
     "suggest-simple-name": "Übernimmt den vorgeschlagenen Alexa-Namen in das weiterhin editierbare Namensfeld."
@@ -398,7 +401,74 @@
   }
 
   function alexaOnlyHtml(item) {
-    return `<article class="alexa-card ${item.status === "orphaned" ? "orphaned" : ""} ${item.hidden ? "hidden-item" : ""}"><div class="alexa-name">${esc(item.name)}</div><div class="badges">${statusBadge(item.status)}${item.hidden ? '<span class="badge hidden-badge">ausgeblendet</span>' : ""}</div><div class="alexa-meta">${esc(item.source)}${item.family ? ` • ${esc(item.family)}` : ""}${item.skill ? ` • ${esc(item.skill)}` : ""}<br>${esc(item.serial)}${item.groups?.length ? `<br>Gruppen: ${esc(item.groups.join(", "))}` : ""}</div><div class="alexa-actions"><button class="button secondary small" data-action="${item.hidden ? "show-alexa" : "hide-alexa"}" data-key="${attr(item.key)}">${item.hidden ? "Einblenden" : "Ausblenden"}</button><button class="button secondary small" data-action="rename-alexa" data-key="${attr(item.key)}">Umbenennen</button><button class="button danger small" data-action="delete-alexa" data-key="${attr(item.key)}">Löschen</button></div></article>`;
+    const key = attr(item.key);
+    return `<article class="alexa-card ${item.status === "orphaned" ? "orphaned" : ""} ${item.hidden ? "hidden-item" : ""}"><label class="alexa-select"><input type="checkbox" data-alexa-select="${key}" aria-label="${attr(item.name)} zur Lösch-Auswahl hinzufügen" ${selectedAlexaKeys.has(item.key) ? "checked" : ""}> Auswählen</label><div class="alexa-name">${esc(item.name)}</div><div class="badges">${statusBadge(item.status)}${item.hidden ? '<span class="badge hidden-badge">ausgeblendet</span>' : ""}</div><div class="alexa-meta">${esc(item.source)}${item.family ? ` • ${esc(item.family)}` : ""}${item.skill ? ` • ${esc(item.skill)}` : ""}<br>${esc(item.serial)}${item.groups?.length ? `<br>Gruppen: ${esc(item.groups.join(", "))}` : ""}</div><div class="alexa-actions"><button class="button secondary small" data-action="${item.hidden ? "show-alexa" : "hide-alexa"}" data-key="${key}">${item.hidden ? "Einblenden" : "Ausblenden"}</button><button class="button secondary small" data-action="rename-alexa" data-key="${key}">Umbenennen</button><button class="button danger small" data-action="delete-alexa" data-key="${key}">Löschen</button></div></article>`;
+  }
+
+  function updateAlexaSelectionUi(visibleItems) {
+    const label = document.getElementById("alexa-selection-count");
+    const deleteButton = document.getElementById("btn-delete-selected-alexa");
+    const selectVisible = document.getElementById("select-visible-alexa");
+    if (!label || !deleteButton || !selectVisible) return;
+    label.textContent = `${selectedAlexaKeys.size} ausgewählt`;
+    deleteButton.disabled = selectedAlexaKeys.size === 0;
+    selectVisible.checked = visibleItems.length > 0 && visibleItems.every(item => selectedAlexaKeys.has(item.key));
+    selectVisible.indeterminate = visibleItems.some(item => selectedAlexaKeys.has(item.key)) && !selectVisible.checked;
+  }
+
+  async function pollAlexaDeleteJob() {
+    try {
+      const job = await request("/api/devices/delete-job");
+      if (job.running) {
+        message(`Löschvorgang läuft: ${job.done || 0}/${job.total || 0}${job.current ? ` — ${job.current}` : ""}`, "warn");
+        alexaDeletePollTimer = setTimeout(pollAlexaDeleteJob, 1500);
+        return;
+      }
+      clearTimeout(alexaDeletePollTimer);
+      alexaDeletePollTimer = null;
+      const deletedSerials = new Set((job.deleted || []).map(item => item.serial));
+      for (const item of model?.alexa_only || []) if (deletedSerials.has(item.serial)) selectedAlexaKeys.delete(item.key);
+      const failures = job.failed || [];
+      await load(false);
+      message(
+        failures.length
+          ? `${job.ok || 0} Gerät(e) gelöscht; ${failures.length} konnten nicht gelöscht werden. Fehlgeschlagene Geräte bleiben in der Auswahl.`
+          : `${job.ok || 0} Gerät(e) aus Alexa gelöscht${job.aborted ? " (abgebrochen)" : ""}.`,
+        failures.length ? "err" : "ok"
+      );
+      render();
+    } catch (error) {
+      clearTimeout(alexaDeletePollTimer);
+      alexaDeletePollTimer = null;
+      message(`Fortschritt des Löschvorgangs konnte nicht gelesen werden: ${error.message}`, "err");
+    }
+  }
+
+  async function deleteSelectedAlexa() {
+    const targets = (model?.alexa_only || []).filter(item => selectedAlexaKeys.has(item.key));
+    if (!targets.length) return message("Bitte zuerst Alexa-Geräte auswählen.", "warn");
+    const names = targets.slice(0, 12).map(item => `• ${item.name}`).join("\n");
+    const more = targets.length > 12 ? `\n• … und ${targets.length - 12} weitere` : "";
+    if (!confirm(`${targets.length} ausgewählte Gerät(e) dauerhaft aus Alexa löschen?\n\n${names}${more}\n\nDiese Aktion kann nicht rückgängig gemacht werden.`)) return;
+    const button = document.getElementById("btn-delete-selected-alexa");
+    setBusy(button, true, "Löschauftrag…");
+    try {
+      await request("/api/devices/delete-job", {
+        method: "POST",
+        body: JSON.stringify({devices: targets.map(item => ({
+          serial: item.serial,
+          source: item.source,
+          appliance_id: item.appliance_id || "",
+          name: item.name
+        }))})
+      });
+      message(`Löschauftrag für ${targets.length} Gerät(e) gestartet.`, "warn");
+      await pollAlexaDeleteJob();
+    } catch (error) {
+      message(`Löschauftrag konnte nicht gestartet werden: ${error.message}`, "err");
+    } finally {
+      setBusy(button, false);
+    }
   }
 
   function render() {
@@ -427,7 +497,9 @@
     }
     const alexaOnly = (model.alexa_only || []).filter(item => alexaOnlyMatchesFilter(item, filter));
     if (alexaOnly.length) {
-      html.push('<h2 class="alexa-only-title">Alexa-Geräte ohne Home-Assistant-Zuordnung</h2><div class="alexa-only-grid">');
+      html.push('<h2 class="alexa-only-title">Alexa-Geräte ohne Home-Assistant-Zuordnung</h2>');
+      html.push('<div class="alexa-selection-toolbar"><label><input id="select-visible-alexa" type="checkbox"> Alle sichtbaren auswählen</label><span id="alexa-selection-count">0 ausgewählt</span><button id="btn-delete-selected-alexa" class="button danger" data-action="delete-selected-alexa" disabled>Ausgewählte löschen</button></div>');
+      html.push('<div class="alexa-only-grid">');
       html.push(...alexaOnly.map(alexaOnlyHtml)); html.push("</div>");
     }
     document.getElementById("content").innerHTML = html.length ? html.join("") : '<div class="empty">Keine Geräte entsprechen dem aktuellen Filter.</div>';
@@ -438,6 +510,7 @@
     document.getElementById("btn-login").classList.toggle("hidden", model.alexa_connected);
     document.getElementById("btn-logout").classList.toggle("hidden", !model.alexa_connected);
     document.getElementById("v5-disabled").classList.toggle("hidden", config.native_enabled);
+    updateAlexaSelectionUi(alexaOnly);
   }
 
   async function load(force = false) {
@@ -450,7 +523,10 @@
     clearMessage();
     try {
       model = await request(`/api/device-overview${force ? "?refresh=1" : ""}`);
-      config = model.configuration; render();
+      config = model.configuration;
+      const availableAlexaKeys = new Set((model.alexa_only || []).map(item => item.key));
+      for (const key of selectedAlexaKeys) if (!availableAlexaKeys.has(key)) selectedAlexaKeys.delete(key);
+      render();
       if (model.source_cache_loading || model.source_cache_refreshing) {
         if (overviewPollCount < 40) {
           overviewPollCount += 1;
@@ -710,6 +786,7 @@
       else if (action === "show-alexa") await changeVisibility("alexa", button.dataset.key, false);
       else if (action === "rename-alexa") await renameAlexa(button.dataset.key);
       else if (action === "delete-alexa") await deleteAlexa(button.dataset.key);
+      else if (action === "delete-selected-alexa") await deleteSelectedAlexa();
       else if (action === "assign-group") await assignGroup(button.dataset.entity, button.dataset.key);
       else if (action === "prepare-device") await prepareDevice(button.dataset.device);
       else if (action === "disable-device-export") await disableDeviceExport(button.dataset.device);
@@ -728,6 +805,21 @@
 
   document.getElementById("content").addEventListener("click", event => {
     const button = event.target.closest("button[data-action]"); if (button) handleAction(button);
+  });
+  document.getElementById("content").addEventListener("change", event => {
+    const target = event.target;
+    if (target.matches("input[data-alexa-select]")) {
+      if (target.checked) selectedAlexaKeys.add(target.dataset.alexaSelect);
+      else selectedAlexaKeys.delete(target.dataset.alexaSelect);
+      const visible = (model?.alexa_only || []).filter(item => alexaOnlyMatchesFilter(item, filters()));
+      updateAlexaSelectionUi(visible);
+      return;
+    }
+    if (target.id === "select-visible-alexa") {
+      const visible = (model?.alexa_only || []).filter(item => alexaOnlyMatchesFilter(item, filters()));
+      for (const item of visible) target.checked ? selectedAlexaKeys.add(item.key) : selectedAlexaKeys.delete(item.key);
+      render();
+    }
   });
   document.addEventListener("pointerover", event => {
     const element = event.target.closest("button, a.button");
