@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.3.0
+
+- In der Alexa-Geräteliste können mehrere verwaiste oder nicht zugeordnete Geräte markiert und gemeinsam gelöscht werden. Der Löschauftrag zeigt den Fortschritt; fehlgeschlagene Geräte bleiben markiert.
+
 ## 3.2.0
 
 - Die Geräteübersicht verwendet einen persistenten HA- und Alexa-Gruppen-Cache. Sie zeigt vorhandene Daten sofort und aktualisiert veraltete Bestände im Hintergrund.
