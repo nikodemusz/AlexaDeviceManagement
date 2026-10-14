@@ -217,6 +217,14 @@ class DebugPageTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Alexa-Bestand", response.text)
         self.assertNotIn("Delete-Probe (DELETE!)", response.text)
 
+    async def test_debug_json_is_expandable_selectable_and_copyable_on_mobile(self):
+        response = await server_clean.debug_ui(SimpleNamespace(headers={}))
+        self.assertIn('id="btn-expand"', response.text)
+        self.assertIn("toggleExpanded()", response.text)
+        self.assertIn("-webkit-user-select: text", response.text)
+        self.assertIn("navigator.clipboard.writeText(rawJson)", response.text)
+        self.assertIn("document.execCommand('copy')", response.text)
+
     async def test_extended_app_registers_official_event_sync_status_and_action(self):
         app = server_extended.create_app()
         paths = {route.resource.canonical for route in app.router.routes()}
