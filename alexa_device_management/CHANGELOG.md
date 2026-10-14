@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.3.1
+
+- Die Debug-Ausgabe lässt sich auf Mobilgeräten in eine Vollbildansicht vergrößern. JSON kann per langem Tippen markiert oder über eine iOS-kompatible Kopierfunktion übernommen werden.
+
 ## 3.3.0
 
 - In der Alexa-Geräteliste können mehrere verwaiste oder nicht zugeordnete Geräte markiert und gemeinsam gelöscht werden. Der Löschauftrag zeigt den Fortschritt; fehlgeschlagene Geräte bleiben markiert.
