@@ -45,6 +45,7 @@
     "show-entity": "Blendet diese Entität in der Verwaltung wieder ein.",
     "hide-alexa": "Blendet diesen Alexa-Endpunkt nur in der Verwaltung aus.",
     "show-alexa": "Blendet diesen Alexa-Endpunkt in der Verwaltung wieder ein.",
+    "details-alexa": "Zeigt die von Alexa gelieferten Rohdaten dieses Geräts aus dem letzten Bestandsabruf.",
     "rename-alexa": "Ändert den Namen des bereits bei Alexa vorhandenen Endpunkts.",
     "delete-alexa": "Löscht den bereits bei Alexa vorhandenen Endpunkt.",
     "delete-selected-alexa": "Löscht die ausgewählten Alexa-Geräte nach einer Sicherheitsabfrage nacheinander.",
@@ -276,7 +277,7 @@
   function alexaMatchHtml(match, entity) {
     const groupText = (match.groups || []).length ? ` • Gruppen: ${(match.groups || []).join(", ")}` : "";
     const online = match.online ? "erreichbar" : "nicht erreichbar";
-    return `<div class="alexa-match"><div class="alexa-line"><div><div class="alexa-name">${esc(match.name)}</div><div class="alexa-meta">${esc(match.source)} • ${esc(online)}${esc(groupText)}<br>${esc(match.serial)}</div></div><div class="alexa-actions"><button class="button secondary small" data-action="rename-alexa" data-key="${attr(match.key)}">Umbenennen</button><button class="button danger small" data-action="delete-alexa" data-key="${attr(match.key)}">Löschen</button></div></div>${entity.export.alexa_group ? `<button class="button secondary small" data-action="assign-group" data-entity="${attr(entity.entity_id)}" data-key="${attr(match.key)}">Gruppe „${esc(entity.export.alexa_group)}“ zuweisen</button>` : ""}</div>`;
+    return `<div class="alexa-match"><div class="alexa-line"><div><div class="alexa-name">${esc(match.name)}</div><div class="alexa-meta">${esc(match.source)} • ${esc(online)}${esc(groupText)}<br>${esc(match.serial)}</div></div><div class="alexa-actions"><button class="button secondary small" data-action="details-alexa" data-key="${attr(match.key)}">Weitere Infos</button><button class="button secondary small" data-action="rename-alexa" data-key="${attr(match.key)}">Umbenennen</button><button class="button danger small" data-action="delete-alexa" data-key="${attr(match.key)}">Löschen</button></div></div>${entity.export.alexa_group ? `<button class="button secondary small" data-action="assign-group" data-entity="${attr(entity.entity_id)}" data-key="${attr(match.key)}">Gruppe „${esc(entity.export.alexa_group)}“ zuweisen</button>` : ""}</div>`;
   }
 
   function entityHtml(entity, device) {
@@ -402,7 +403,7 @@
 
   function alexaOnlyHtml(item) {
     const key = attr(item.key);
-    return `<article class="alexa-card ${item.status === "orphaned" ? "orphaned" : ""} ${item.hidden ? "hidden-item" : ""}"><label class="alexa-select"><input type="checkbox" data-alexa-select="${key}" aria-label="${attr(item.name)} zur Lösch-Auswahl hinzufügen" ${selectedAlexaKeys.has(item.key) ? "checked" : ""}> Auswählen</label><div class="alexa-name">${esc(item.name)}</div><div class="badges">${statusBadge(item.status)}${item.hidden ? '<span class="badge hidden-badge">ausgeblendet</span>' : ""}</div><div class="alexa-meta">${esc(item.source)}${item.family ? ` • ${esc(item.family)}` : ""}${item.skill ? ` • ${esc(item.skill)}` : ""}<br>${esc(item.serial)}${item.groups?.length ? `<br>Gruppen: ${esc(item.groups.join(", "))}` : ""}</div><div class="alexa-actions"><button class="button secondary small" data-action="${item.hidden ? "show-alexa" : "hide-alexa"}" data-key="${key}">${item.hidden ? "Einblenden" : "Ausblenden"}</button><button class="button secondary small" data-action="rename-alexa" data-key="${key}">Umbenennen</button><button class="button danger small" data-action="delete-alexa" data-key="${key}">Löschen</button></div></article>`;
+    return `<article class="alexa-card ${item.status === "orphaned" ? "orphaned" : ""} ${item.hidden ? "hidden-item" : ""}"><label class="alexa-select"><input type="checkbox" data-alexa-select="${key}" aria-label="${attr(item.name)} zur Lösch-Auswahl hinzufügen" ${selectedAlexaKeys.has(item.key) ? "checked" : ""}> Auswählen</label><div class="alexa-name">${esc(item.name)}</div><div class="badges">${statusBadge(item.status)}${item.hidden ? '<span class="badge hidden-badge">ausgeblendet</span>' : ""}</div><div class="alexa-meta">${esc(item.source)}${item.family ? ` • ${esc(item.family)}` : ""}${item.skill ? ` • ${esc(item.skill)}` : ""}<br>${esc(item.serial)}${item.groups?.length ? `<br>Gruppen: ${esc(item.groups.join(", "))}` : ""}</div><div class="alexa-actions"><button class="button secondary small" data-action="details-alexa" data-key="${key}">Weitere Infos</button><button class="button secondary small" data-action="${item.hidden ? "show-alexa" : "hide-alexa"}" data-key="${key}">${item.hidden ? "Einblenden" : "Ausblenden"}</button><button class="button secondary small" data-action="rename-alexa" data-key="${key}">Umbenennen</button><button class="button danger small" data-action="delete-alexa" data-key="${key}">Löschen</button></div></article>`;
   }
 
   function updateAlexaSelectionUi(visibleItems) {
@@ -588,6 +589,31 @@
     const failed = (result.results || []).find(entry => !entry.ok);
     if (failed) throw new Error(failed.error || "Umbenennen fehlgeschlagen");
     message(`„${item.name}“ wurde in „${newName.trim()}“ umbenannt.`); await load(true);
+  }
+
+  async function showAlexaDetails(key) {
+    const item = findAlexa(key);
+    if (!item) throw new Error("Alexa-Gerät nicht mehr in der aktuellen Übersicht.");
+    const dialog = document.getElementById("alexa-details-dialog");
+    const output = document.getElementById("alexa-details-json");
+    const status = document.getElementById("alexa-details-status");
+    document.getElementById("alexa-details-title").textContent = `Weitere Infos: ${item.name}`;
+    status.textContent = "Lade Rohdaten dieses Geräts aus dem letzten Alexa-Bestandsabruf…";
+    output.value = "";
+    if (!dialog.open) dialog.showModal();
+    try {
+      const details = await request("/api/device-overview/alexa-details", {
+        method: "POST", body: JSON.stringify({key})
+      });
+      output.value = JSON.stringify(details.device, null, 2);
+      const timestamp = details.cache_updated_at
+        ? new Date(details.cache_updated_at * 1000).toLocaleString()
+        : "Zeitpunkt unbekannt";
+      status.textContent = `Alexa-Bestandsabruf: ${timestamp}${details.warning_sources?.length ? ` • Quelle mit Warnung: ${details.warning_sources.join(", ")}` : ""}`;
+    } catch (error) {
+      status.textContent = `Gerätedetails konnten nicht geladen werden: ${error.message}`;
+      output.value = "";
+    }
   }
 
   async function deleteAlexa(key) {
@@ -785,6 +811,7 @@
       else if (action === "hide-alexa") await changeVisibility("alexa", button.dataset.key, true);
       else if (action === "show-alexa") await changeVisibility("alexa", button.dataset.key, false);
       else if (action === "rename-alexa") await renameAlexa(button.dataset.key);
+      else if (action === "details-alexa") await showAlexaDetails(button.dataset.key);
       else if (action === "delete-alexa") await deleteAlexa(button.dataset.key);
       else if (action === "delete-selected-alexa") await deleteSelectedAlexa();
       else if (action === "assign-group") await assignGroup(button.dataset.entity, button.dataset.key);
@@ -882,6 +909,7 @@
     } catch (error) { message(error.message, "err"); }
   });
   document.getElementById("btn-close-yaml").addEventListener("click", () => document.getElementById("yaml-dialog").close());
+  document.getElementById("btn-close-alexa-details").addEventListener("click", () => document.getElementById("alexa-details-dialog").close());
   document.getElementById("btn-logout").addEventListener("click", () => logout().catch(error => message(error.message, "err")));
 
   document.getElementById("btn-enable-useful").addEventListener("click", async () => {

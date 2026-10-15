@@ -24,6 +24,7 @@ _UI_LISTS = {
     "entity": "hidden_entities",
     "alexa": "hidden_alexa",
 }
+_SENSITIVE_DETAIL_KEYS = {"authorization", "cookie", "setcookie", "csrf", "password", "apikey", "xapikey"}
 
 # The overview combines two slow inventories (HA and Alexa groups). Keep those
 # source snapshots on the add-on's persistent /data volume so opening the UI
@@ -354,6 +355,25 @@ def _public_alexa_device(
     }
 
 
+def _safe_device_details(value: Any) -> Any:
+    """Copy one device's raw Alexa record while omitting credential fields."""
+    if isinstance(value, dict):
+        safe: dict[str, Any] = {}
+        for key, child in value.items():
+            normalized = "".join(char for char in str(key).lower() if char.isalnum())
+            if (normalized in _SENSITIVE_DETAIL_KEYS or "token" in normalized
+                    or "secret" in normalized or "credential" in normalized):
+                safe[str(key)] = "[redigiert]"
+            else:
+                safe[str(key)] = _safe_device_details(child)
+        return safe
+    if isinstance(value, list):
+        return [_safe_device_details(child) for child in value]
+    if isinstance(value, str):
+        return value[:2000]
+    return value
+
+
 def _entity_matches(
     entity_id: str,
     devices: list[dict[str, Any]],
@@ -647,6 +667,52 @@ async def overview(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": str(exc)}, status=500)
 
 
+async def alexa_device_details(request: web.Request) -> web.Response:
+    """Return raw fields for one Alexa device from the most recent inventory fetch."""
+    server = request.app["device_overview_server"]
+    if not server.is_configured():
+        raise web.HTTPUnauthorized(text="Alexa ist nicht verbunden.")
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise web.HTTPBadRequest(text="Ungültige JSON-Daten.") from exc
+    if not isinstance(body, dict):
+        raise web.HTTPBadRequest(text="Gerätekennung fehlt.")
+    key = str(body.get("key") or "").strip()
+    if not key or len(key) > 512:
+        raise web.HTTPBadRequest(text="Gültige Gerätekennung fehlt.")
+
+    server._load_devices_cache()
+    cache = server._DEVICES_CACHE
+    device = next((item for item in cache.get("devices", [])
+                   if _alexa_key(item) == key), None)
+    if device is None:
+        raise web.HTTPNotFound(text="Gerät ist nicht mehr im Alexa-Cache. Bitte zuerst aktualisieren.")
+
+    return web.json_response({
+        "ok": True,
+        "cache_updated_at": cache.get("updated_at") or None,
+        # Error text can contain upstream response fragments; reveal only the
+        # affected source labels here and leave full diagnostics to the logs.
+        "warning_sources": sorted({str(item).split(":", 1)[0][:50]
+                                    for item in cache.get("warnings", []) if str(item)}),
+        "device": _safe_device_details({
+            "name": device.get("name"),
+            "serial": device.get("serial"),
+            "appliance_id": device.get("appliance_id"),
+            "type": device.get("type"),
+            "family": device.get("family"),
+            "skill": device.get("skill"),
+            "online": device.get("online"),
+            "firmware": device.get("firmware"),
+            "capabilities": device.get("capabilities"),
+            "room": device.get("room"),
+            "source": device.get("source"),
+            "raw": device.get("raw"),
+        }),
+    })
+
+
 async def visibility(request: web.Request) -> web.Response:
     store = request.app["device_overview_store"]
     try:
@@ -693,4 +759,5 @@ def register_routes(app: web.Application, server: Any, store: Any) -> None:
     app.on_cleanup.append(_stop_overview_refresh)
     app.router.add_get("/devices", page)
     app.router.add_get("/api/device-overview", overview)
+    app.router.add_post("/api/device-overview/alexa-details", alexa_device_details)
     app.router.add_post("/api/device-overview/visibility", visibility)

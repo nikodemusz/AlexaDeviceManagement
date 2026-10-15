@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import pathlib
 import re
 import time
+import traceback
 from typing import Any
 from urllib.parse import quote
 
 from aiohttp import web
 
 import oh_style_login
+
+_LOGGER = logging.getLogger("alexa_device_management.web")
 
 APP_VERSION = "2.16.15"
 BASE_DIR = pathlib.Path(__file__).resolve().parent
@@ -26,6 +30,41 @@ DEVICES_CACHE_PATH = pathlib.Path("/data/devices_cache.json")
 # Devices cache: served instantly, refreshed in the background
 DEVICES_CACHE_TTL = 60          # seconds before a background refresh is triggered
 DEVICES_REFRESH_INTERVAL = 900  # periodic refresh while the add-on runs
+
+
+def _redact_log_message(message: str) -> str:
+    """Remove common credentials and query strings from exception messages."""
+    message = re.sub(r"(?i)\bBearer\s+[^\s,;]+", "Bearer [redacted]", message)
+    message = re.sub(
+        r"(?i)\b(cookie|csrf|authorization|access[_ -]?token|refresh[_ -]?token|password|secret)\b[\"']?\s*[:=]\s*[\"']?[^\"',;\s]+",
+        r"\1=[redacted]",
+        message,
+    )
+    return re.sub(r"(?i)(https?://[^\s?]+)\?[^\s]+", r"\1?[redacted]", message)[:500]
+
+
+@web.middleware
+async def request_error_logging_middleware(request: web.Request, handler):
+    """Log actionable context for unexpected route failures without request data."""
+    try:
+        return await handler(request)
+    except (asyncio.CancelledError, web.HTTPException):
+        raise
+    except Exception as err:
+        # Do not log query parameters, headers, or bodies: ingress and API
+        # requests can contain credentials. Traceback frames plus a redacted
+        # exception message are enough to locate the failing handler.
+        stack = "".join(traceback.format_tb(err.__traceback__))
+        _LOGGER.error(
+            "Unhandled HTTP request %s %s from %s (%s): %s\n%s",
+            request.method,
+            request.path,
+            request.remote or "unknown",
+            type(err).__name__,
+            _redact_log_message(str(err)),
+            stack,
+        )
+        raise
 
 
 def read_json(path: pathlib.Path) -> dict[str, Any]:
@@ -1643,7 +1682,7 @@ async def _on_cleanup(app: web.Application) -> None:
 
 
 def create_app() -> web.Application:
-    app = web.Application()
+    app = web.Application(middlewares=[request_error_logging_middleware])
     app.on_startup.append(_on_startup)
     app.on_cleanup.append(_on_cleanup)
     app.router.add_get("/", index)

@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.4.0
+
+- Unerwartete Fehler bei Webanfragen protokollieren Route, interne Client-IP und Traceback; Query-Parameter, Header und Request-Inhalte bleiben außen vor, häufige Zugangsdaten im Fehlertext werden redigiert.
+- Alexa-Gerätekacheln bieten „Weitere Infos“ mit den Rohdaten des letzten Alexa-Bestandsabrufs, dessen Zeitpunkt und betroffenen Fehlerquellen. Zugangsdatenfelder werden ausgeblendet.
+
 ## 3.3.2
 
 - Debug-Antworten werden in schreibgeschützten Textfeldern angezeigt, damit sie auch in iOS-WebViews per langem Tippen markiert und kopiert werden können.
