@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.3.3
+
+- Unerwartete Fehler bei Anfragen protokollieren jetzt Route, interne Client-IP und Traceback; Query-Parameter, Header und Request-Inhalte werden nicht protokolliert, häufige Zugangsdaten im Fehlertext redigiert.
+
 ## 3.3.2
 
 - Debug-Antworten werden in schreibgeschützten Textfeldern angezeigt, damit sie auch in iOS-WebViews per langem Tippen markiert und kopiert werden können.
