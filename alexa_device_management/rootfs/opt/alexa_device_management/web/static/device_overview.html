@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Alexa-Geräteverwaltung</title>
-  <link rel="stylesheet" href="{{INGRESS_PATH}}/static/device_overview.css?v=3.3.0">
+  <link rel="stylesheet" href="{{INGRESS_PATH}}/static/device_overview.css?v=3.4.0">
 </head>
 <body>
   <header class="topbar">
@@ -115,8 +115,21 @@
     </div>
   </dialog>
 
+  <dialog id="alexa-details-dialog">
+    <div class="dialog-shell wide">
+      <header>
+        <h2 id="alexa-details-title">Alexa-Gerätedetails</h2>
+        <button id="btn-close-alexa-details" class="button secondary">Schließen</button>
+      </header>
+      <div class="dialog-content">
+        <p id="alexa-details-status" class="muted"></p>
+        <textarea id="alexa-details-json" rows="24" readonly spellcheck="false" aria-label="Alexa-Gerätedetails als auswählbares JSON"></textarea>
+      </div>
+    </div>
+  </dialog>
+
   <script>document.documentElement.dataset.ingressPath="{{INGRESS_PATH}}";</script>
-  <script src="{{INGRESS_PATH}}/static/device_overview.js?v=3.3.0"></script>
-  <script src="{{INGRESS_PATH}}/static/device_export_guard.js?v=3.3.0"></script>
+  <script src="{{INGRESS_PATH}}/static/device_overview.js?v=3.4.0"></script>
+  <script src="{{INGRESS_PATH}}/static/device_export_guard.js?v=3.4.0"></script>
 </body>
 </html>
