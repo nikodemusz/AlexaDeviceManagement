@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.5.0
+
+- „Weitere Infos“ fragt die aktuelle Alexa-Geräteregistrierung beim Öffnen erneut ab. Für den ausgewählten Eintrag werden `connectedVia`, Anbieterbeschreibung, Hersteller, Modell, Typen, Aliase und unterstützte Fähigkeiten angezeigt; der letzte Bestandsabruf bleibt separat gekennzeichnet.
+- Wenn Alexa keine Zuordnung liefert oder die Live-Abfrage fehlschlägt, wird das ausdrücklich angezeigt statt alte Snapshot-Daten als aktuelle Alexa-Details auszugeben.
+
 ## 3.4.0
 
 - Unerwartete Fehler bei Webanfragen protokollieren Route, interne Client-IP und Traceback; Query-Parameter, Header und Request-Inhalte bleiben außen vor, häufige Zugangsdaten im Fehlertext werden redigiert.
