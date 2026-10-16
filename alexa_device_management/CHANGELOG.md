@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.5.3
+
+- Fragt Amazons `legacyAppliance.entityId` gezielt im Gerätebestand ab. Diese stabile Herstellerkennung fehlte im bisherigen Überblick, obwohl sie in den Gerätedetails vorhanden ist; v6-Zuordnungen werden damit auch dann erkannt, wenn Amazons interne UUID nicht mit der nativen Endpunkt-ID übereinstimmt.
+
 ## 3.5.2
 
 - Verknüpft aktive Alexa-Geräte mit opaken Amazon-IDs über die exakte GraphQL-`endpointId`. Dadurch stimmen v6-Zähler und Gerätezuordnung; nach Abwahl kann der Lifecycle-Abgleich dieselbe native ID gezielt aus Alexa entfernen. Hersteller- oder Namensähnlichkeit allein wird nicht als Gerätezuordnung verwendet.
