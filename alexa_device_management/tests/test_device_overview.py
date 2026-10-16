@@ -184,6 +184,16 @@ class DeviceOverviewTests(unittest.TestCase):
         self.assertTrue(device["entities"][1]["hidden_directly"])
 
 
+    def test_connected_via_falls_back_to_amazon_skill_description(self):
+        self.assertEqual(
+            device_overview._connected_via({
+                "connectedVia": "",
+                "friendlyDescription": "Schalter via Alexa Device Management",
+            }),
+            ("Alexa Device Management", "friendlyDescription"),
+        )
+
+
 class DeviceOverviewRouteTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         device_overview._OVERVIEW_CACHE_LOADED = True
