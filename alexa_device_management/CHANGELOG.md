@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.5.2
+
+- Verknüpft aktive Alexa-Geräte mit opaken Amazon-IDs über die exakte GraphQL-`endpointId`. Dadurch stimmen v6-Zähler und Gerätezuordnung; nach Abwahl kann der Lifecycle-Abgleich dieselbe native ID gezielt aus Alexa entfernen. Hersteller- oder Namensähnlichkeit allein wird nicht als Gerätezuordnung verwendet.
+
+
 ## 3.5.1
 
 - Fehlende Alexa-Erreichbarkeitsdaten werden als „unbekannt“ statt als „nicht erreichbar“ angezeigt; nur ausdrücklich als offline gemeldete Duplikate kommen für die automatische Bereinigung infrage.
