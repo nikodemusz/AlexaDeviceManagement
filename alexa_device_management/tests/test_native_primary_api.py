@@ -67,6 +67,20 @@ class PrimaryAPITests(unittest.IsolatedAsyncioTestCase):
         # The same revision cannot overwrite the update.
         self.assertEqual((await self.client.post("/api/ha-export/autosave", json=body)).status, 409)
 
+    async def test_native_selection_autosave_queues_immediate_lifecycle_reconciliation(self):
+        body = (await (await self.client.get("/api/ha-export/config")).json())["configuration"]
+        body["entities"]["light.desk"]["enabled"] = False
+        trigger = Mock()
+        self.client.server.app["native_reconcile_trigger"] = trigger
+
+        response = await self.client.post("/api/ha-export/autosave", json=body)
+        result = await response.json()
+
+        self.assertEqual(response.status, 200)
+        self.assertTrue(result["reconciliation_queued"])
+        self.assertFalse(self.store.load()["devices"]["desk"].get("enabled", True))
+        trigger.assert_called_once_with(force=True)
+
     async def test_old_browser_cannot_enable_v5_and_migration_page_is_retired(self):
         response = await self.client.post("/api/ha-export/autosave", json={"entities": {"light.bad": {"enabled": True}}})
         self.assertEqual(response.status, 409)
