@@ -26,6 +26,24 @@ _UI_LISTS = {
 }
 _SENSITIVE_DETAIL_KEYS = {"authorization", "cookie", "setcookie", "csrf", "password", "apikey", "xapikey"}
 
+# Mirrors the established Alexa GraphQL selection used by alexapy. Unlike the
+# behaviors/entities response, legacyAppliance includes connectedVia and the
+# provider description. This query is only executed when the user opens one
+# device's detail dialog, and the result is filtered to that device below.
+_ALEXA_DEVICE_DETAILS_QUERY = """query CustomerSmartHome {
+  endpoints(endpointsQueryParams: { paginationParams: { disablePagination: true } }) {
+    items {
+      endpointId
+      legacyIdentifiers { chrsIdentifier { entityId } }
+      legacyAppliance {
+        applianceId applianceTypes friendlyName friendlyDescription
+        manufacturerName connectedVia modelName entityId aliases capabilities
+        customerDefinedDeviceType alexaDeviceIdentifierList driverIdentity
+      }
+    }
+  }
+}"""
+
 # The overview combines two slow inventories (HA and Alexa groups). Keep those
 # source snapshots on the add-on's persistent /data volume so opening the UI
 # never has to wait for upstream API calls when a previous snapshot exists.
@@ -374,6 +392,51 @@ def _safe_device_details(value: Any) -> Any:
     return value
 
 
+def _connected_via(details: dict[str, Any]) -> tuple[str | None, str | None]:
+    """Use Alexa's connectedVia field, falling back to skill description text."""
+    value = str(details.get("connectedVia") or "").strip()
+    if value:
+        return value, "connectedVia"
+    description = str(details.get("friendlyDescription") or "").strip()
+    match = re.search(r"\s+via\s+(.+)$", description, flags=re.IGNORECASE)
+    if match:
+        return match.group(1).strip(), "friendlyDescription"
+    return None, None
+
+
+def _matching_alexa_detail(
+    device: dict[str, Any], endpoints: list[Any]
+) -> dict[str, Any] | None:
+    """Match a fresh GraphQL endpoint to a cached list item by stable IDs."""
+    expected = _device_identifiers(device)
+    for endpoint in endpoints:
+        if not isinstance(endpoint, dict):
+            continue
+        legacy = endpoint.get("legacyAppliance")
+        if not isinstance(legacy, dict):
+            continue
+        identifiers = _collect_identifiers(endpoint)
+        if expected & identifiers:
+            connected_via, via_source = _connected_via(legacy)
+            return {
+                "endpoint_id": endpoint.get("endpointId"),
+                "connected_via": connected_via,
+                "connected_via_source": via_source,
+                "friendly_name": legacy.get("friendlyName"),
+                "description": legacy.get("friendlyDescription"),
+                "manufacturer": legacy.get("manufacturerName"),
+                "model": legacy.get("modelName"),
+                "device_types": legacy.get("applianceTypes"),
+                "custom_device_type": legacy.get("customerDefinedDeviceType"),
+                "aliases": legacy.get("aliases"),
+                "capabilities": legacy.get("capabilities"),
+                "driver": legacy.get("driverIdentity"),
+                "identifiers": legacy.get("alexaDeviceIdentifierList"),
+                "raw": legacy,
+            }
+    return None
+
+
 def _entity_matches(
     entity_id: str,
     devices: list[dict[str, Any]],
@@ -668,7 +731,7 @@ async def overview(request: web.Request) -> web.Response:
 
 
 async def alexa_device_details(request: web.Request) -> web.Response:
-    """Return raw fields for one Alexa device from the most recent inventory fetch."""
+    """Return cached details plus a fresh Alexa GraphQL record for one device."""
     server = request.app["device_overview_server"]
     if not server.is_configured():
         raise web.HTTPUnauthorized(text="Alexa ist nicht verbunden.")
@@ -689,11 +752,9 @@ async def alexa_device_details(request: web.Request) -> web.Response:
     if device is None:
         raise web.HTTPNotFound(text="Gerät ist nicht mehr im Alexa-Cache. Bitte zuerst aktualisieren.")
 
-    return web.json_response({
+    result = {
         "ok": True,
         "cache_updated_at": cache.get("updated_at") or None,
-        # Error text can contain upstream response fragments; reveal only the
-        # affected source labels here and leave full diagnostics to the logs.
         "warning_sources": sorted({str(item).split(":", 1)[0][:50]
                                     for item in cache.get("warnings", []) if str(item)}),
         "device": _safe_device_details({
@@ -710,7 +771,39 @@ async def alexa_device_details(request: web.Request) -> web.Response:
             "source": device.get("source"),
             "raw": device.get("raw"),
         }),
-    })
+        "alexa_api": {"status": "not_loaded"},
+    }
+
+    # The supported customer query returns an inventory list. Fetch on demand,
+    # match stable IDs locally, and return only the selected device.
+    try:
+        status, payload = await server.alexa_graphql(
+            _ALEXA_DEVICE_DETAILS_QUERY, None, server.session_data()
+        )
+        errors = payload.get("errors") if isinstance(payload, dict) else None
+        endpoints = (
+            (((payload.get("data") or {}).get("endpoints") or {}).get("items"))
+            if isinstance(payload, dict) else None
+        )
+        if status == 200 and not errors and isinstance(endpoints, list):
+            api_details = _matching_alexa_detail(device, endpoints)
+            result["alexa_api"] = {
+                "status": "matched" if api_details else "not_found",
+                "fetched_at": int(time.time()),
+                "device": _safe_device_details(api_details) if api_details else None,
+            }
+        else:
+            result["alexa_api"] = {
+                "status": "error",
+                "http_status": status,
+                "error": "Alexa hat keine gültigen erweiterten Gerätedetails geliefert.",
+            }
+    except Exception as exc:
+        result["alexa_api"] = {
+            "status": "error",
+            "error": f"Alexa-Detailabfrage fehlgeschlagen ({type(exc).__name__}).",
+        }
+    return web.json_response(result)
 
 
 async def visibility(request: web.Request) -> web.Response:
