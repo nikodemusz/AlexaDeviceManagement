@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.5.1
+
+- Fehlende Alexa-Erreichbarkeitsdaten werden als „unbekannt“ statt als „nicht erreichbar“ angezeigt; nur ausdrücklich als offline gemeldete Duplikate kommen für die automatische Bereinigung infrage.
+- Die Geräteübersicht meldet eine fehlende v6-Konfiguration als API-/Versionskonflikt, statt mit einem JavaScript-Fehler auf leere Zähler zu fallen.
+
 ## 3.5.0
 
 - „Weitere Infos“ fragt die aktuelle Alexa-Geräteregistrierung beim Öffnen erneut ab. Für den ausgewählten Eintrag werden `connectedVia`, Anbieterbeschreibung, Hersteller, Modell, Typen, Aliase und unterstützte Fähigkeiten angezeigt; der letzte Bestandsabruf bleibt separat gekennzeichnet.
