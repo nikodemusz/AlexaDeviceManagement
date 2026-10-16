@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Alexa-Geräteverwaltung</title>
-  <link rel="stylesheet" href="{{INGRESS_PATH}}/static/device_overview.css?v=3.4.0">
+  <link rel="stylesheet" href="{{INGRESS_PATH}}/static/device_overview.css?v=3.5.0">
 </head>
 <body>
   <header class="topbar">
@@ -123,13 +123,20 @@
       </header>
       <div class="dialog-content">
         <p id="alexa-details-status" class="muted"></p>
+        <dl id="alexa-details-summary" class="alexa-details-summary">
+          <div><dt>Verbunden über</dt><dd id="alexa-details-connected-via">Wird abgefragt…</dd></div>
+          <div><dt>Beschreibung</dt><dd id="alexa-details-description">—</dd></div>
+          <div><dt>Hersteller / Modell</dt><dd id="alexa-details-model">—</dd></div>
+          <div><dt>Gerätetyp</dt><dd id="alexa-details-type">—</dd></div>
+        </dl>
+        <h3>Alexa-Rohdaten (auswählbar und kopierbar)</h3>
         <textarea id="alexa-details-json" rows="24" readonly spellcheck="false" aria-label="Alexa-Gerätedetails als auswählbares JSON"></textarea>
       </div>
     </div>
   </dialog>
 
   <script>document.documentElement.dataset.ingressPath="{{INGRESS_PATH}}";</script>
-  <script src="{{INGRESS_PATH}}/static/device_overview.js?v=3.4.0"></script>
-  <script src="{{INGRESS_PATH}}/static/device_export_guard.js?v=3.4.0"></script>
+  <script src="{{INGRESS_PATH}}/static/device_overview.js?v=3.5.0"></script>
+  <script src="{{INGRESS_PATH}}/static/device_export_guard.js?v=3.5.0"></script>
 </body>
 </html>
