@@ -330,12 +330,24 @@ async def reconcile(server, force=False):
 
 
 def install(app, server):
-    state = {"job": None}
+    state = {"job": None, "rerun": False}
     def start_job(force=False):
         task = state["job"]
         if task and not task.done():
+            state["rerun"] = state["rerun"] or bool(force)
             return
-        state["job"] = asyncio.create_task(reconcile(server, force))
+        async def run():
+            next_force = force
+            while True:
+                await reconcile(server, next_force)
+                if not state["rerun"]:
+                    break
+                state["rerun"] = False
+                next_force = True
+        state["job"] = asyncio.create_task(run())
+    # Let selection-save routes queue reconciliation immediately. The regular
+    # timer remains a fallback for retries and external Alexa changes.
+    app["native_reconcile_trigger"] = start_job
     async def periodic():
         while True:
             start_job()

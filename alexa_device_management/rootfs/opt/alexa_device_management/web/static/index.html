@@ -409,7 +409,7 @@
         return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
       };
       const lines = [header.join(';')].concat(
-        visible.map(d => cols.map(c => cell(c === 'online' ? (d.online ? 'ja' : 'nein') : d[c])).join(';'))
+        visible.map(d => cols.map(c => cell(c === 'online' ? (d.online === true ? 'ja' : d.online === false ? 'nein' : 'unbekannt') : d[c])).join(';'))
       );
       const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
       const a = document.createElement('a');
@@ -434,7 +434,7 @@
         const da = _deviceBySerial[a.dataset.serial] || {};
         const db = _deviceBySerial[b.dataset.serial] || {};
         let va = da[key], vb = db[key];
-        if (key === 'online') { va = da.online ? 1 : 0; vb = db.online ? 1 : 0; return (va - vb) * _sortDir; }
+        if (key === 'online') { va = da.online === true ? 1 : da.online === false ? 0 : -1; vb = db.online === true ? 1 : db.online === false ? 0 : -1; return (va - vb) * _sortDir; }
         return String(va || '').localeCompare(String(vb || ''), 'de', { sensitivity: 'base' }) * _sortDir;
       });
       rows.forEach(r => tbody.appendChild(r));
@@ -477,7 +477,7 @@
           (!mfr    || (d.family || '').toLowerCase().includes(mfr)) &&
           (!room   || (d.room || '') === room) &&
           (!source || d.source === source) &&
-          (!online || (online === 'online' ? d.online : !d.online))
+          (!online || (online === 'online' ? d.online === true : online === 'offline' ? d.online === false : d.online == null))
         );
         tr.style.display = show ? '' : 'none';
         if (show) visible++;
@@ -545,7 +545,7 @@
             <input type="checkbox" class="row-check" data-serial="${esc(d.serial)}" data-source="${esc(d.source)}" data-index="${i}" />
           </td>
           <td class="col-status">
-            <span class="online-dot ${d.online ? 'online' : 'offline'}" title="${d.online ? 'Online' : 'Offline'}"></span>
+            <span class="online-dot ${d.online === true ? 'online' : d.online === false ? 'offline' : 'unknown'}" title="${d.online === true ? 'Von Alexa als erreichbar gemeldet' : d.online === false ? 'Von Alexa als nicht erreichbar gemeldet' : 'Alexa liefert in diesem Bestandsabruf keinen Erreichbarkeitsstatus'}"></span>
           </td>
           <td class="col-name">${esc(d.name)}</td>
           <td class="col-type">${esc((d.type || '').replace(/_/g, ' '))}</td>
@@ -593,6 +593,7 @@
                     <option value="">Alle</option>
                     <option value="online">🟢</option>
                     <option value="offline">⚫</option>
+                    <option value="unknown">❔</option>
                   </select>
                 </th>
                 <th class="col-name"><input id="f-name" class="f-input" type="text" placeholder="Filter…" /></th>

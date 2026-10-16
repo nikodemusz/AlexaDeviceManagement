@@ -871,7 +871,7 @@ def _normalize_echo_device(raw: dict[str, Any]) -> dict[str, Any]:
         "type": str(raw.get("deviceType") or "ECHO_DEVICE"),
         "family": str(raw.get("deviceFamily") or "ECHO"),
         "skill": "",
-        "online": bool(raw.get("online", raw.get("isOnline", False))),
+        "online": _reported_online(raw),
         "firmware": str(raw.get("softwareVersion") or ""),
         "capabilities": _normalize_capabilities(raw),
         "room": "",
@@ -923,10 +923,7 @@ def _normalize_smart_home_device(raw: dict[str, Any]) -> dict[str, Any]:
         raw.get("roomName") or raw.get("location") or raw.get("groupName")
         or details.get("roomName") or ""
     )
-    online = (
-        raw.get("availability") == "AVAILABLE"
-        or bool(raw.get("isReachable", raw.get("reachable", raw.get("online", False))))
-    )
+    online = _reported_online(raw)
     # Phoenix API needs the legacy applianceId, not the behaviors entityId
     appliance_id = str(legacy.get("applianceId") or raw.get("applianceId") or device_id)
     return {
@@ -943,6 +940,33 @@ def _normalize_smart_home_device(raw: dict[str, Any]) -> dict[str, Any]:
         "source": "smart_home",
         "raw": raw,
     }
+
+
+def _reported_online(raw: dict[str, Any]) -> bool | None:
+    """Return Alexa's explicit connectivity value, or None when not supplied.
+
+    Alexa's account inventory often omits health fields. Treating omission as
+    offline makes a successful device look unreachable and can also make it a
+    false duplicate-cleanup candidate. EndpointHealth is a separate signal.
+    """
+    availability = raw.get("availability")
+    if isinstance(availability, str):
+        normalized = availability.strip().upper()
+        if normalized == "AVAILABLE":
+            return True
+        if normalized in {"UNAVAILABLE", "UNREACHABLE"}:
+            return False
+    for key in ("isReachable", "reachable", "online", "isOnline"):
+        value = raw.get(key)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "online", "available", "reachable"}:
+                return True
+            if normalized in {"false", "offline", "unavailable", "unreachable"}:
+                return False
+    return None
 
 
 async def _fetch_devices_from_alexa(data: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:

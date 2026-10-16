@@ -31,6 +31,13 @@ def device(serial, **raw):
 
 
 class SelectionTargetTests(unittest.TestCase):
+    def test_missing_health_remains_unknown(self):
+        self.assertIsNone(device("no-health")["online"])
+
+    def test_explicit_alexa_availability_is_preserved(self):
+        self.assertIs(device("available", availability="AVAILABLE")["online"], True)
+        self.assertIs(device("unavailable", availability="UNAVAILABLE")["online"], False)
+
     def test_nested_legacy_provider_from_real_normalizer_identifies_v5(self):
         old = device("old", legacyAppliance={"manufacturerName": "Home Assistant", "applianceId": "legacy-old"})
         self.assertEqual(old["family"], "Home Assistant")
@@ -69,6 +76,15 @@ class SelectionTargetTests(unittest.TestCase):
         echo = {**device("native:fritz", manufacturerName="Alexa Device Management"), "source": "echo"}
         targets = lifecycle.selection_targets([managed, unrelated, named_only, echo], selection())
         self.assertEqual([t["device"]["serial"] for t in targets], ["native:removed"])
+
+    def test_opaque_uuid_with_graphql_native_id_is_removed_when_deselected(self):
+        opaque = device("6d0bd9a9-9f50-4ee0-b299-a5d1d554c0b7",
+                        endpointId="native:fritz",
+                        manufacturerName="Alexa Device Management")
+        no_identity = device("unmapped", manufacturerName="Alexa Device Management")
+        targets = lifecycle.selection_targets([opaque, no_identity], selection())
+        self.assertEqual([t["device"]["serial"] for t in targets], [opaque["serial"]])
+        self.assertEqual(targets[0]["native_ids"], ["native:fritz"])
 
     def test_known_disabled_id_does_not_depend_on_provider_metadata_or_history(self):
         targets = lifecycle.selection_targets([device("native:fritz")], selection())

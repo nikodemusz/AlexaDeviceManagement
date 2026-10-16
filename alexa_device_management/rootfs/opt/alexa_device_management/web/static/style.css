@@ -336,6 +336,10 @@ body {
   background: #bdc3c7;
 }
 
+.online-dot.unknown {
+  background: #f0ad4e;
+}
+
 .badge {
   display: inline-block;
   padding: 2px 8px;

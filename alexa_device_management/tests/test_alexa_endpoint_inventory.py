@@ -72,6 +72,31 @@ def test_graphql_inventory_adds_only_orphaned_endpoints():
     assert orphan["lifecycle"] == "orphaned"
 
 
+def test_graphql_identity_enriches_opaque_active_inventory_entry():
+    """Join Amazon's UUID card to the endpointId sent by v6 Discovery."""
+    serial = "6d0bd9a9-9f50-4ee0-b299-a5d1d554c0b7"
+    active = {
+        "name": "Heizrelais Keller Büro",
+        "serial": serial,
+        "appliance_id": serial,
+        "source": "smart_home",
+        "family": "Alexa Device Management",
+        "raw": {"id": serial},
+    }
+    graph = endpoint(serial, active["name"])
+    graph["endpointId"] = "native:ha:switch.heizrelais_kellerbuero"
+    server = make_server(active_devices=[active], graph_endpoints=[graph])
+
+    inventory.install(server)
+    devices, errors = asyncio.run(server._fetch_devices_from_alexa({}))
+
+    assert errors == []
+    assert len(devices) == 1
+    assert devices[0]["serial"] == serial
+    assert devices[0]["raw"]["endpointId"] == graph["endpointId"]
+    assert devices[0]["raw"]["legacyIdentifiers"] == graph["legacyIdentifiers"]
+
+
 def test_graphql_inventory_reports_api_failure_without_hiding_active_devices():
     active = {
         "name": "Aktive Lampe",

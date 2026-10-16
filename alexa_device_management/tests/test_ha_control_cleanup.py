@@ -63,6 +63,22 @@ class AlexaCleanupTests(unittest.TestCase):
         )
         self.assertEqual(duplicates, [])
 
+    def test_unknown_health_is_not_reported_as_offline_or_deleted(self) -> None:
+        reachable = {
+            "serial": "new",
+            "online": True,
+            "raw": {"description": "light.kueche via Home Assistant"},
+        }
+        unknown = {
+            "serial": "old",
+            "online": None,
+            "raw": {"description": "light.kueche via Home Assistant"},
+        }
+        _, duplicates = _cleanup_plan(
+            [reachable, unknown], set(), {"light.kueche"}
+        )
+        self.assertEqual(duplicates, [])
+
 
 if __name__ == "__main__":
     unittest.main()
