@@ -601,7 +601,7 @@
     const description = document.getElementById("alexa-details-description");
     const model = document.getElementById("alexa-details-model");
     const type = document.getElementById("alexa-details-type");
-    document.getElementById("alexa-details-title").textContent = \`Weitere Infos: \${item.name}\`;
+    document.getElementById("alexa-details-title").textContent = `Weitere Infos: ${item.name}`;
     status.textContent = "Frage erweiterte Gerätedetails aktuell bei Alexa ab…";
     connectedVia.textContent = "Wird abgefragt…";
     description.textContent = "—";
@@ -624,21 +624,21 @@
         model.textContent = [live.manufacturer, live.model].filter(Boolean).join(" · ") || "Von Alexa nicht angegeben";
         const deviceTypes = Array.isArray(live.device_types) ? live.device_types : [];
         type.textContent = [live.custom_device_type, ...deviceTypes].filter(Boolean).join(" · ") || "Von Alexa nicht angegeben";
-        status.textContent = \`Erweiterte Daten direkt von Alexa • \${timestamp || "Zeitpunkt unbekannt"}\${live.connected_via_source ? \` • Quelle „Verbunden über“: \${live.connected_via_source}\` : ""}\`;
+        status.textContent = `Erweiterte Daten direkt von Alexa • ${timestamp || "Zeitpunkt unbekannt"}${live.connected_via_source ? ` • Quelle „Verbunden über“: ${live.connected_via_source}` : ""}`;
       } else if (api.status === "not_found") {
         connectedVia.textContent = "Gerät in der aktuellen Alexa-Abfrage nicht gefunden";
         status.textContent = "Alexa hat für dieses Gerät keinen passenden Datensatz zurückgegeben. Angezeigt werden zusätzlich die Daten des letzten Bestandsabrufs.";
       } else {
         connectedVia.textContent = "Alexa hat keine Angabe geliefert";
-        status.textContent = \`\${api.error || "Erweiterte Alexa-Daten konnten nicht geladen werden."} Die Daten des letzten Bestandsabrufs bleiben unten verfügbar.\`;
+        status.textContent = `${api.error || "Erweiterte Alexa-Daten konnten nicht geladen werden."} Die Daten des letzten Bestandsabrufs bleiben unten verfügbar.`;
       }
       output.value = JSON.stringify({alexa_api: api, letzter_bestandsabruf: details.device}, null, 2);
       const inventoryTimestamp = details.cache_updated_at
         ? new Date(details.cache_updated_at * 1000).toLocaleString()
         : "Zeitpunkt unbekannt";
-      status.textContent += \` • Bestandsabruf: \${inventoryTimestamp}\${details.warning_sources?.length ? \` • Warnungen: \${details.warning_sources.join(", ")}\` : ""}\`;
+      status.textContent += ` • Bestandsabruf: ${inventoryTimestamp}${details.warning_sources?.length ? ` • Warnungen: ${details.warning_sources.join(", ")}` : ""}`;
     } catch (error) {
-      status.textContent = \`Gerätedetails konnten nicht geladen werden: \${error.message}\`;
+      status.textContent = `Gerätedetails konnten nicht geladen werden: ${error.message}`;
       output.value = "";
     }
   }
