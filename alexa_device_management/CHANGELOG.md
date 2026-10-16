@@ -3,6 +3,7 @@
 ## 3.5.2
 
 - Verknüpft aktive Alexa-Geräte mit opaken Amazon-IDs über die exakte GraphQL-`endpointId`. Dadurch stimmen v6-Zähler und Gerätezuordnung; nach Abwahl kann der Lifecycle-Abgleich dieselbe native ID gezielt aus Alexa entfernen. Hersteller- oder Namensähnlichkeit allein wird nicht als Gerätezuordnung verwendet.
+- Eine gespeicherte Aktivierung/Abwahl startet den Alexa-Abgleich sofort im Hintergrund; laufende Abgleiche werden nach einer gleichzeitigen Änderung erneut ausgeführt.
 
 
 ## 3.5.1
