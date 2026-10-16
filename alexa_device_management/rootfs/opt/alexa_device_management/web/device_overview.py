@@ -366,7 +366,7 @@ def _public_alexa_device(
         "family": str(device.get("family") or ""),
         "skill": str(device.get("skill") or ""),
         "room": str(device.get("room") or ""),
-        "online": bool(device.get("online")),
+        "online": device.get("online") if isinstance(device.get("online"), bool) else None,
         "lifecycle": str(device.get("lifecycle") or ""),
         "entity_id": _alexa_entity_id(device),
         "groups": _group_names_for_device(device, groups),
