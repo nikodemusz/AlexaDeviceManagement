@@ -597,21 +597,48 @@
     const dialog = document.getElementById("alexa-details-dialog");
     const output = document.getElementById("alexa-details-json");
     const status = document.getElementById("alexa-details-status");
-    document.getElementById("alexa-details-title").textContent = `Weitere Infos: ${item.name}`;
-    status.textContent = "Lade Rohdaten dieses Geräts aus dem letzten Alexa-Bestandsabruf…";
+    const connectedVia = document.getElementById("alexa-details-connected-via");
+    const description = document.getElementById("alexa-details-description");
+    const model = document.getElementById("alexa-details-model");
+    const type = document.getElementById("alexa-details-type");
+    document.getElementById("alexa-details-title").textContent = \`Weitere Infos: \${item.name}\`;
+    status.textContent = "Frage erweiterte Gerätedetails aktuell bei Alexa ab…";
+    connectedVia.textContent = "Wird abgefragt…";
+    description.textContent = "—";
+    model.textContent = "—";
+    type.textContent = "—";
     output.value = "";
     if (!dialog.open) dialog.showModal();
     try {
       const details = await request("/api/device-overview/alexa-details", {
         method: "POST", body: JSON.stringify({key})
       });
-      output.value = JSON.stringify(details.device, null, 2);
-      const timestamp = details.cache_updated_at
+      const api = details.alexa_api || {};
+      const live = api.device || {};
+      const timestamp = api.fetched_at
+        ? new Date(api.fetched_at * 1000).toLocaleString()
+        : null;
+      if (api.status === "matched") {
+        connectedVia.textContent = live.connected_via || "Von Alexa nicht angegeben";
+        description.textContent = live.description || "Von Alexa nicht angegeben";
+        model.textContent = [live.manufacturer, live.model].filter(Boolean).join(" · ") || "Von Alexa nicht angegeben";
+        const deviceTypes = Array.isArray(live.device_types) ? live.device_types : [];
+        type.textContent = [live.custom_device_type, ...deviceTypes].filter(Boolean).join(" · ") || "Von Alexa nicht angegeben";
+        status.textContent = \`Erweiterte Daten direkt von Alexa • \${timestamp || "Zeitpunkt unbekannt"}\${live.connected_via_source ? \` • Quelle „Verbunden über“: \${live.connected_via_source}\` : ""}\`;
+      } else if (api.status === "not_found") {
+        connectedVia.textContent = "Gerät in der aktuellen Alexa-Abfrage nicht gefunden";
+        status.textContent = "Alexa hat für dieses Gerät keinen passenden Datensatz zurückgegeben. Angezeigt werden zusätzlich die Daten des letzten Bestandsabrufs.";
+      } else {
+        connectedVia.textContent = "Alexa hat keine Angabe geliefert";
+        status.textContent = \`\${api.error || "Erweiterte Alexa-Daten konnten nicht geladen werden."} Die Daten des letzten Bestandsabrufs bleiben unten verfügbar.\`;
+      }
+      output.value = JSON.stringify({alexa_api: api, letzter_bestandsabruf: details.device}, null, 2);
+      const inventoryTimestamp = details.cache_updated_at
         ? new Date(details.cache_updated_at * 1000).toLocaleString()
         : "Zeitpunkt unbekannt";
-      status.textContent = `Alexa-Bestandsabruf: ${timestamp}${details.warning_sources?.length ? ` • Quelle mit Warnung: ${details.warning_sources.join(", ")}` : ""}`;
+      status.textContent += \` • Bestandsabruf: \${inventoryTimestamp}\${details.warning_sources?.length ? \` • Warnungen: \${details.warning_sources.join(", ")}\` : ""}\`;
     } catch (error) {
-      status.textContent = `Gerätedetails konnten nicht geladen werden: ${error.message}`;
+      status.textContent = \`Gerätedetails konnten nicht geladen werden: \${error.message}\`;
       output.value = "";
     }
   }
