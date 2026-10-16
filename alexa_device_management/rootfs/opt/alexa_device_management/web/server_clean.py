@@ -240,6 +240,19 @@ GRAPHQL_PATH = "/nexus/v1/graphql"
 # - endpoints takes no latencyTolerance argument
 # - LegacyIdentifiers has no legacyApplianceIdentifier field
 # - Mutation has no deleteEndpoint field / DeleteEndpointInput type
+ENDPOINTS_QUERY_IDENTITY = """query CustomerSmartHome {
+  endpoints {
+    items {
+      endpointId
+      friendlyName
+      legacyAppliance {
+        entityId
+        manufacturerName
+      }
+    }
+  }
+}"""
+
 ENDPOINTS_QUERY_FULL = """query CustomerSmartHome {
   endpoints {
     items {
@@ -435,7 +448,9 @@ async def graphql_find_endpoint(uuid: str, data: dict[str, Any]) -> tuple[dict[s
     """
     debug: dict[str, Any] = {}
     arn = uuid if uuid.startswith("amzn1.alexa.endpoint.") else f"amzn1.alexa.endpoint.{uuid}"
-    for label, query in (("full", ENDPOINTS_QUERY_FULL), ("minimal", ENDPOINTS_QUERY_MINIMAL)):
+    for label, query in (("identity", ENDPOINTS_QUERY_IDENTITY),
+                         ("full", ENDPOINTS_QUERY_FULL),
+                         ("minimal", ENDPOINTS_QUERY_MINIMAL)):
         st, payload = await alexa_graphql(query, None, data)
         info: dict[str, Any] = {"status": st}
         if isinstance(payload, dict):

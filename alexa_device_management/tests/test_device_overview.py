@@ -103,6 +103,37 @@ class DeviceOverviewTests(unittest.TestCase):
         self.assertEqual(result["summary"]["synced"], 1)
         self.assertEqual(result["alexa_only"], [])
 
+    def test_opaque_alexa_uuid_joins_native_selection_by_graphql_appliance_entity_id(self):
+        native = {"enabled": True, "devices": {
+            "ha:switch.heizrelais_kellerbuero": {
+                "name": "Heizrelais Keller Büro", "capabilities": [
+                    {"entity_id": "switch.heizrelais_kellerbuero",
+                     "interface": "Alexa.PowerController"}
+                ]
+            }
+        }}
+        alexa = {
+            "serial": "amazon-generated-uuid",
+            "appliance_id": "amazon-generated-uuid",
+            "name": "Heizrelais Keller Büro",
+            "source": "graphql",
+            "family": "Alexa Device Management",
+            "raw": {"legacyAppliance": {
+                "entityId": "native:ha:switch.heizrelais_kellerbuero",
+                "manufacturerName": "Alexa Device Management",
+            }},
+        }
+        inventory = {"devices": [{"device_id": "heater", "name": "Heizung",
+                                   "entities": [{"entity_id": "switch.heizrelais_kellerbuero",
+                                                 "domain": "switch", "name": "Heizrelais"}]}]}
+
+        result = build_overview(inventory, [alexa], [], {"entities": {}}, native)
+
+        entity = result["devices"][0]["entities"][0]
+        self.assertEqual(entity["status"], "synced")
+        self.assertEqual(entity["alexa"]["count"], 1)
+        self.assertEqual(result["summary"]["synced"], 1)
+
     def test_disabled_native_drafts_and_legacy_json_devices_are_not_active_exports(self):
         device = {"capabilities": [{"entity_id": "light.wohnzimmer"}]}
         endpoint = {"serial": "native:living", "source": "smart_home", "raw": {}}

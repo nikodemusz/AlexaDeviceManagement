@@ -93,6 +93,10 @@ def _endpoint_serial(endpoint: dict[str, Any]) -> str:
         chrs = {}
 
     entity_id = str(chrs.get("entityId") or "").strip()
+    if not entity_id:
+        appliance = endpoint.get("legacyAppliance")
+        if isinstance(appliance, dict):
+            entity_id = str(appliance.get("entityId") or "").strip()
     if entity_id:
         return entity_id
 
@@ -135,10 +139,13 @@ async def _fetch_graphql_endpoints(
     """Read all smart-home endpoints from the Nexus GraphQL registry."""
     failures: list[str] = []
     queries = (
+        ("identity", getattr(server, "ENDPOINTS_QUERY_IDENTITY", None)),
         ("full", server.ENDPOINTS_QUERY_FULL),
         ("minimal", server.ENDPOINTS_QUERY_MINIMAL),
     )
     for label, query in queries:
+        if not query:
+            continue
         try:
             status, payload = await server.alexa_graphql(query, None, data)
         except Exception as exc:

@@ -9,10 +9,12 @@ WEB = Path(__file__).parents[1] / "rootfs/opt/alexa_device_management/web"
 sys.path.insert(0, str(WEB))
 
 import alexa_endpoint_inventory as inventory
+import server_clean
 
 
 FULL_QUERY = "query full"
 MINIMAL_QUERY = "query minimal"
+IDENTITY_QUERY = "query identity"
 
 
 def endpoint(identifier, name):
@@ -26,6 +28,8 @@ def endpoint(identifier, name):
 
 
 def make_server(*, active_devices, graph_endpoints):
+    queries = []
+
     async def original_fetch(_data):
         return list(active_devices), []
 
@@ -33,11 +37,14 @@ def make_server(*, active_devices, graph_endpoints):
         raise AssertionError("original delete should not be used for GraphQL endpoints")
 
     async def alexa_graphql(_query, _variables, _data):
+        queries.append(_query)
         return 200, {"data": {"endpoints": {"items": list(graph_endpoints)}}}
 
     return SimpleNamespace(
+        ENDPOINTS_QUERY_IDENTITY=IDENTITY_QUERY,
         ENDPOINTS_QUERY_FULL=FULL_QUERY,
         ENDPOINTS_QUERY_MINIMAL=MINIMAL_QUERY,
+        queries=queries,
         _fetch_devices_from_alexa=original_fetch,
         _delete_target=original_delete,
         alexa_graphql=alexa_graphql,
@@ -95,6 +102,32 @@ def test_graphql_identity_enriches_opaque_active_inventory_entry():
     assert devices[0]["serial"] == serial
     assert devices[0]["raw"]["endpointId"] == graph["endpointId"]
     assert devices[0]["raw"]["legacyIdentifiers"] == graph["legacyIdentifiers"]
+
+
+def test_native_endpoint_identity_from_legacy_appliance_is_kept_when_amazon_uuid_is_opaque():
+    graph = {
+        "endpointId": "amzn1.alexa.endpoint.amazon-generated-uuid",
+        "friendlyName": "Heizrelais Keller Büro",
+        "legacyAppliance": {
+            "entityId": "native:ha:switch.heizrelais_kellerbuero",
+            "manufacturerName": "Alexa Device Management",
+        },
+    }
+    server = make_server(active_devices=[], graph_endpoints=[graph])
+
+    inventory.install(server)
+    devices, errors = asyncio.run(server._fetch_devices_from_alexa({}))
+
+    assert errors == []
+    assert len(devices) == 1
+    assert devices[0]["source"] == "graphql"
+    assert devices[0]["serial"] == "native:ha:switch.heizrelais_kellerbuero"
+    assert devices[0]["raw"]["legacyAppliance"]["entityId"] == (
+        "native:ha:switch.heizrelais_kellerbuero"
+    )
+    assert server.queries[0] == server.ENDPOINTS_QUERY_IDENTITY
+    assert "legacyAppliance" in server_clean.ENDPOINTS_QUERY_IDENTITY
+    assert "entityId" in server_clean.ENDPOINTS_QUERY_IDENTITY
 
 
 def test_graphql_inventory_reports_api_failure_without_hiding_active_devices():
