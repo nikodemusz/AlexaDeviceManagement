@@ -160,10 +160,11 @@ def _cleanup_plan(
         matches = by_entity.get(entity_id.lower(), [])
         if len(matches) < 2:
             continue
-        reachable = [item for item in matches if bool(item.get("online"))]
+        reachable = [item for item in matches if item.get("online") is True]
         if not reachable:
             continue
-        duplicate_matches.extend(item for item in matches if not bool(item.get("online")))
+        # Omitted connectivity is not evidence that a duplicate is dead.
+        duplicate_matches.extend(item for item in matches if item.get("online") is False)
 
     removed_serials = {str(item.get("serial") or "") for item in removed_matches}
     duplicate_matches = [
