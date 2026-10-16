@@ -276,7 +276,7 @@
 
   function alexaMatchHtml(match, entity) {
     const groupText = (match.groups || []).length ? ` • Gruppen: ${(match.groups || []).join(", ")}` : "";
-    const online = match.online ? "erreichbar" : "nicht erreichbar";
+    const online = match.online === true ? "erreichbar" : match.online === false ? "nicht erreichbar" : "Status von Alexa nicht geliefert";
     return `<div class="alexa-match"><div class="alexa-line"><div><div class="alexa-name">${esc(match.name)}</div><div class="alexa-meta">${esc(match.source)} • ${esc(online)}${esc(groupText)}<br>${esc(match.serial)}</div></div><div class="alexa-actions"><button class="button secondary small" data-action="details-alexa" data-key="${attr(match.key)}">Weitere Infos</button><button class="button secondary small" data-action="rename-alexa" data-key="${attr(match.key)}">Umbenennen</button><button class="button danger small" data-action="delete-alexa" data-key="${attr(match.key)}">Löschen</button></div></div>${entity.export.alexa_group ? `<button class="button secondary small" data-action="assign-group" data-entity="${attr(entity.entity_id)}" data-key="${attr(match.key)}">Gruppe „${esc(entity.export.alexa_group)}“ zuweisen</button>` : ""}</div>`;
   }
 
@@ -524,6 +524,9 @@
     clearMessage();
     try {
       model = await request(`/api/device-overview${force ? "?refresh=1" : ""}`);
+      if (!model || !model.configuration || typeof model.configuration.native_enabled !== "boolean") {
+        throw new Error("Die Geräteübersicht-API liefert keine v6-Konfiguration. Add-on und Oberfläche haben unterschiedliche Versionen; Add-on aktualisieren und Seite neu laden.");
+      }
       config = model.configuration;
       const availableAlexaKeys = new Set((model.alexa_only || []).map(item => item.key));
       for (const key of selectedAlexaKeys) if (!availableAlexaKeys.has(key)) selectedAlexaKeys.delete(key);
