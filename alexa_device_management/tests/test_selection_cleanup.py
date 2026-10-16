@@ -31,6 +31,13 @@ def device(serial, **raw):
 
 
 class SelectionTargetTests(unittest.TestCase):
+    def test_missing_health_remains_unknown(self):
+        self.assertIsNone(device("no-health")["online"])
+
+    def test_explicit_alexa_availability_is_preserved(self):
+        self.assertIs(device("available", availability="AVAILABLE")["online"], True)
+        self.assertIs(device("unavailable", availability="UNAVAILABLE")["online"], False)
+
     def test_nested_legacy_provider_from_real_normalizer_identifies_v5(self):
         old = device("old", legacyAppliance={"manufacturerName": "Home Assistant", "applianceId": "legacy-old"})
         self.assertEqual(old["family"], "Home Assistant")
