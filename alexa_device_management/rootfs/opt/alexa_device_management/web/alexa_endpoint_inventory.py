@@ -242,7 +242,35 @@ def install(server: Any) -> None:
 
         for endpoint in endpoints:
             identifiers = _endpoint_identifiers(endpoint)
-            if not identifiers or identifiers & known_ids:
+            if not identifiers:
+                continue
+
+            # behaviors/entities uses Amazon's opaque UUID as `id` while
+            # GraphQL also knows the endpointId sent by native Discovery.
+            # Previously, a shared UUID caused the GraphQL record to be skipped
+            # without attaching endpointId to the active inventory item. That
+            # left v6 counts and deselection cleanup unable to join the record.
+            # Enrich only a unique ID match; names and manufacturer are not
+            # identity evidence.
+            matches = [device for device in devices
+                       if identifiers & _device_identifiers(device)]
+            if len(matches) == 1:
+                raw = matches[0].get("raw")
+                if not isinstance(raw, dict):
+                    raw = {}
+                    matches[0]["raw"] = raw
+                for field in ("endpointId", "legacyIdentifiers"):
+                    if endpoint.get(field) is not None:
+                        raw[field] = endpoint[field]
+                known_ids.update(identifiers)
+                continue
+            if len(matches) > 1:
+                errors.append(
+                    "Alexa-Endpunkte (GraphQL): eine Gerätekennung passt auf "
+                    "mehrere aktive Einträge; Zuordnung wurde ausgelassen."
+                )
+                continue
+            if identifiers & known_ids:
                 continue
             device = _normalize_orphaned_endpoint(endpoint)
             if not device:
