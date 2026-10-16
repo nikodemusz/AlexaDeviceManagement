@@ -148,7 +148,12 @@ async def autosave(request):
             preferences[key] = copy.deepcopy(body[key])
     preferences["legacy_export_enabled"] = False
     preferences = ha_export.CONFIG_STORE.save(preferences)
-    return web.json_response({"ok": True, "configuration": configuration(proposed, preferences)})
+    trigger = request.app.get("native_reconcile_trigger")
+    queued = callable(trigger)
+    if queued:
+        trigger(force=True)
+    return web.json_response({"ok": True, "reconciliation_queued": queued,
+                              "configuration": configuration(proposed, preferences)})
 
 
 async def preview(request):
@@ -167,7 +172,12 @@ async def save_yaml(request):
     except (ValueError, TypeError, yaml.YAMLError) as exc:
         return web.json_response({"error": str(exc)}, status=400)
     STORE.save(proposed)
-    return web.json_response({"ok": True, "configuration": configuration(proposed, ha_export.CONFIG_STORE.load())})
+    trigger = request.app.get("native_reconcile_trigger")
+    queued = callable(trigger)
+    if queued:
+        trigger(force=True)
+    return web.json_response({"ok": True, "reconciliation_queued": queued,
+                              "configuration": configuration(proposed, ha_export.CONFIG_STORE.load())})
 
 
 def register_routes(app):
