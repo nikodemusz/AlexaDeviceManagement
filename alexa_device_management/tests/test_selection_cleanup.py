@@ -77,6 +77,15 @@ class SelectionTargetTests(unittest.TestCase):
         targets = lifecycle.selection_targets([managed, unrelated, named_only, echo], selection())
         self.assertEqual([t["device"]["serial"] for t in targets], ["native:removed"])
 
+    def test_opaque_uuid_with_graphql_native_id_is_removed_when_deselected(self):
+        opaque = device("6d0bd9a9-9f50-4ee0-b299-a5d1d554c0b7",
+                        endpointId="native:fritz",
+                        manufacturerName="Alexa Device Management")
+        no_identity = device("unmapped", manufacturerName="Alexa Device Management")
+        targets = lifecycle.selection_targets([opaque, no_identity], selection())
+        self.assertEqual([t["device"]["serial"] for t in targets], [opaque["serial"]])
+        self.assertEqual(targets[0]["native_ids"], ["native:fritz"])
+
     def test_known_disabled_id_does_not_depend_on_provider_metadata_or_history(self):
         targets = lifecycle.selection_targets([device("native:fritz")], selection())
         self.assertEqual(targets[0]["endpoint_id"], "native:fritz")
