@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import pathlib
+import re
 import time
 from copy import deepcopy
 from typing import Any, Iterable
