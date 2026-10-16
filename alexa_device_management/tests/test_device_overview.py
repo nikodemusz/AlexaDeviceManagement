@@ -13,6 +13,7 @@ WEB_DIR = pathlib.Path(__file__).resolve().parents[1] / "rootfs/opt/alexa_device
 sys.path.insert(0, str(WEB_DIR))
 
 import device_overview
+import server_clean
 from device_overview import build_overview
 
 
@@ -183,6 +184,16 @@ class DeviceOverviewTests(unittest.TestCase):
         self.assertTrue(device["entities"][1]["hidden_directly"])
 
 
+    def test_connected_via_falls_back_to_amazon_skill_description(self):
+        self.assertEqual(
+            device_overview._connected_via({
+                "connectedVia": "",
+                "friendlyDescription": "Schalter via Alexa Device Management",
+            }),
+            ("Alexa Device Management", "friendlyDescription"),
+        )
+
+
 class DeviceOverviewRouteTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         device_overview._OVERVIEW_CACHE_LOADED = True
@@ -328,6 +339,75 @@ class DeviceOverviewRouteTests(unittest.IsolatedAsyncioTestCase):
             device_overview._schedule_overview_refresh(app, server)
         create_task.assert_not_called()
 
+
+    async def test_device_details_fetch_fresh_graphql_and_extracts_connected_via(self):
+        cached = {
+            "serial": "entity-123",
+            "appliance_id": "skill-device-123",
+            "name": "iPhone Internetzugang",
+            "source": "smart_home",
+            "raw": {"entityId": "entity-123"},
+        }
+        endpoint = {
+            "endpointId": "amzn1.alexa.endpoint.entity-123",
+            "legacyIdentifiers": {"chrsIdentifier": {"entityId": "entity-123"}},
+            "legacyAppliance": {
+                "applianceId": "skill-device-123",
+                "entityId": "entity-123",
+                "friendlyName": "iPhone Internetzugang",
+                "friendlyDescription": "Mobilfunkzugang via Alexa Device Management",
+                "manufacturerName": "Home Assistant",
+                "connectedVia": "Echo Show Küche",
+                "modelName": "HA Skill",
+                "applianceTypes": ["SWITCH"],
+                "capabilities": [{"interfaceName": "Alexa.PowerController"}],
+            },
+        }
+        server = Mock()
+        server.is_configured.return_value = True
+        server.session_data.return_value = {"session": "not-returned"}
+        server.alexa_graphql = AsyncMock(return_value=(200, {
+            "data": {"endpoints": {"items": [endpoint, {"endpointId": "other"}]}}
+        }))
+        server._DEVICES_CACHE = {"devices": [cached], "updated_at": 123, "warnings": []}
+        server._load_devices_cache = Mock()
+        request = Mock()
+        request.json = AsyncMock(return_value={"key": "smart_home:entity-123"})
+        request.app = {"device_overview_server": server}
+
+        response = await device_overview.alexa_device_details(request)
+        body = json.loads(response.text)
+
+        self.assertEqual(body["alexa_api"]["status"], "matched")
+        self.assertEqual(body["alexa_api"]["device"]["connected_via"], "Echo Show Küche")
+        self.assertEqual(body["alexa_api"]["device"]["description"], "Mobilfunkzugang via Alexa Device Management")
+        self.assertEqual(body["alexa_api"]["device"]["manufacturer"], "Home Assistant")
+        self.assertEqual(body["device"]["name"], "iPhone Internetzugang")
+        query, variables, session = server.alexa_graphql.await_args.args
+        self.assertIn("connectedVia", query)
+        self.assertIn("friendlyDescription", query)
+        self.assertIsNone(variables)
+        self.assertEqual(session, {"session": "not-returned"})
+        self.assertNotIn("session", response.text)
+
+    async def test_device_details_reports_live_api_failure_without_mislabeling_cache(self):
+        server = Mock()
+        server.is_configured.return_value = True
+        server.session_data.return_value = {}
+        server.alexa_graphql = AsyncMock(return_value=(429, {"errors": ["rate limit"]}))
+        server._DEVICES_CACHE = {"devices": [alexa_device("entity-123", "light.x")], "updated_at": 123, "warnings": []}
+        server._load_devices_cache = Mock()
+        request = Mock()
+        request.json = AsyncMock(return_value={"key": "smart_home:entity-123"})
+        request.app = {"device_overview_server": server}
+
+        response = await device_overview.alexa_device_details(request)
+        body = json.loads(response.text)
+
+        self.assertEqual(body["alexa_api"]["status"], "error")
+        self.assertEqual(body["alexa_api"]["http_status"], 429)
+        self.assertEqual(body["device"]["name"], "Wohnzimmer Licht")
+        self.assertNotIn("rate limit", response.text)
 
 if __name__ == "__main__":
     unittest.main()
