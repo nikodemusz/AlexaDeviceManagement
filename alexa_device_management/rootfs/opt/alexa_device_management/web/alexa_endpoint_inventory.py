@@ -266,7 +266,13 @@ def install(server: Any) -> None:
                 if not isinstance(raw, dict):
                     raw = {}
                     matches[0]["raw"] = raw
-                for field in ("endpointId", "legacyIdentifiers"):
+                # The active behavior inventory exposes Amazon's opaque UUID,
+                # while the native v6 discovery identity is in
+                # legacyAppliance.entityId. Keep the exact identity payload on
+                # the active row so the overview can join it to the selected
+                # Home Assistant entity. Without this field the v6 overview
+                # only sees the opaque UUID and reports every export as pending.
+                for field in ("endpointId", "legacyIdentifiers", "legacyAppliance"):
                     if endpoint.get(field) is not None:
                         raw[field] = endpoint[field]
                 known_ids.update(identifiers)

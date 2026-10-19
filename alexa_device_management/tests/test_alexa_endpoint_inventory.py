@@ -92,6 +92,10 @@ def test_graphql_identity_enriches_opaque_active_inventory_entry():
     }
     graph = endpoint(serial, active["name"])
     graph["endpointId"] = "native:ha:switch.heizrelais_kellerbuero"
+    graph["legacyAppliance"] = {
+        "entityId": "native:ha:switch.heizrelais_kellerbuero",
+        "manufacturerName": "Alexa Device Management",
+    }
     server = make_server(active_devices=[active], graph_endpoints=[graph])
 
     inventory.install(server)
@@ -102,6 +106,7 @@ def test_graphql_identity_enriches_opaque_active_inventory_entry():
     assert devices[0]["serial"] == serial
     assert devices[0]["raw"]["endpointId"] == graph["endpointId"]
     assert devices[0]["raw"]["legacyIdentifiers"] == graph["legacyIdentifiers"]
+    assert devices[0]["raw"]["legacyAppliance"] == graph["legacyAppliance"]
 
 
 def test_native_endpoint_identity_from_legacy_appliance_is_kept_when_amazon_uuid_is_opaque():
