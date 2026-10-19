@@ -147,4 +147,96 @@ class PrimaryAPITests(unittest.IsolatedAsyncioTestCase):
         with patch.object(native_export.support, "deploy_component") as install, \
              patch.object(ha_export.YAML_GENERATOR, "deploy") as write, \
              patch.object(ha_control, "check_config", AsyncMock()) as check:
-            response = await self.client.post("/api/native-export/set
+            response = await self.client.post("/api/native-export/setup", json={})
+            result = await response.json()
+        self.assertEqual(response.status, 200)
+        self.assertFalse(result["configured"])
+        self.assertFalse(result["restart_required"])
+        install.assert_not_called()
+        write.assert_not_called()
+        check.assert_not_awaited()
+
+    async def test_saved_sync_setting_installs_service_and_preserves_native_selection(self):
+        target = Path(self.temp.name) / "alexa.yaml"
+        generator = AlexaYamlGenerator(target)
+        before = self.store.path.read_bytes()
+        body = (await (await self.client.get("/api/ha-export/config")).json())["configuration"]
+        body["event_gateway"] = {"enabled": True}
+        response = await self.client.post("/api/ha-export/autosave", json=body)
+        self.assertEqual(response.status, 200)
+        with patch.object(ha_export, "ALEXA_YAML_PATH", target), \
+             patch.object(ha_export, "YAML_GENERATOR", generator), \
+             patch.object(native_export.support, "deploy_component", return_value={"restart_required": True}) as install, \
+             patch.object(native_export.support, "_service_available", AsyncMock(return_value=False)), \
+             patch.object(ha_control, "check_config", AsyncMock(return_value={"valid": True})) as check, \
+             patch.object(native_export.support, "_call_sync_service", AsyncMock()) as send:
+            response = await self.client.post("/api/native-export/setup", json={})
+            result = await response.json()
+        self.assertEqual(response.status, 200)
+        self.assertTrue(result["configured"])
+        self.assertTrue(result["restart_required"])
+        self.assertIn("HA neu starten", result["note"])
+        install.assert_called_once()
+        check.assert_awaited_once()
+        send.assert_not_awaited()
+        self.assertEqual(self.store.path.read_bytes(), before)
+        rendered = generator.generate(self.preferences).document
+        self.assertIn("alexa_device_management_sync", rendered)
+        self.assertEqual(rendered["alexa"]["smart_home"]["filter"]["include_entities"], [])
+
+    async def test_saving_existing_loaded_service_is_idempotent(self):
+        self.preferences["event_gateway"] = {"enabled": True}
+        target = Path(self.temp.name) / "alexa.yaml"
+        generator = AlexaYamlGenerator(target)
+        generator.deploy(self.preferences)
+        before = target.read_bytes()
+        with patch.object(ha_export, "ALEXA_YAML_PATH", target), \
+             patch.object(ha_export, "YAML_GENERATOR", generator), \
+             patch.object(generator, "deploy") as write, \
+             patch.object(native_export.support, "deploy_component", return_value={"restart_required": False}), \
+             patch.object(native_export.support, "_service_available", AsyncMock(return_value=True)), \
+             patch.object(ha_control, "check_config", AsyncMock()) as check:
+            response = await self.client.post("/api/native-export/setup", json={})
+            result = await response.json()
+        self.assertEqual(response.status, 200)
+        self.assertFalse(result["restart_required"])
+        self.assertEqual(target.read_bytes(), before)
+        write.assert_not_called()
+        check.assert_not_awaited()
+
+    async def test_failed_setup_check_restores_previous_yaml_and_returns_cause(self):
+        self.preferences["event_gateway"] = {"enabled": True}
+        target = Path(self.temp.name) / "alexa.yaml"
+        before = b"alexa:\n  smart_home:\n    locale: de-DE\n"
+        target.write_bytes(before)
+        with patch.object(ha_export, "ALEXA_YAML_PATH", target), \
+             patch.object(ha_export, "YAML_GENERATOR", AlexaYamlGenerator(target)), \
+             patch.object(native_export.support, "deploy_component", return_value={"restart_required": False}), \
+             patch.object(native_export.support, "_service_available", AsyncMock(return_value=False)), \
+             patch.object(ha_control, "check_config", AsyncMock(return_value={"valid": False, "message": "Missing secret"})):
+            response = await self.client.post("/api/native-export/setup", json={})
+            result = await response.json()
+        self.assertEqual(response.status, 400)
+        self.assertEqual(result["check"]["message"], "Missing secret")
+        self.assertEqual(target.read_bytes(), before)
+
+    async def test_updated_helper_requires_restart_even_with_unchanged_yaml(self):
+        self.preferences["event_gateway"] = {"enabled": True}
+        target = Path(self.temp.name) / "alexa.yaml"
+        generator = AlexaYamlGenerator(target)
+        generator.deploy(self.preferences)
+        with patch.object(ha_export, "ALEXA_YAML_PATH", target), \
+             patch.object(ha_export, "YAML_GENERATOR", generator), \
+             patch.object(generator, "deploy") as write, \
+             patch.object(native_export.support, "deploy_component", return_value={"restart_required": True}), \
+             patch.object(native_export.support, "_service_available", AsyncMock(return_value=True)), \
+             patch.object(ha_control, "check_config", AsyncMock(return_value={"valid": True})) as check:
+            response = await self.client.post("/api/native-export/setup", json={})
+            result = await response.json()
+        self.assertTrue(result["restart_required"])
+        check.assert_awaited_once()
+        write.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()

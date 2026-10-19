@@ -144,4 +144,304 @@ def apply_device_group(native, device_id, entity_ids, mode, group_name, inventor
         raise ValueError("Home-Assistant-Gerät ist nicht mehr verfügbar.")
     available = {entity.get("entity_id") for entity in ha_device.get("entities", [])}
     if not set(selected) <= available:
-        r
+        raise ValueError("Alle ausgewählten Entitäten müssen zum selben Home-Assistant-Gerät gehören.")
+    names = names if isinstance(names, dict) else {}
+    selected_settings = {}
+    for entity_id in selected:
+        selected_settings[entity_id] = {"enabled": True}
+        member_name = str(names.get(entity_id) or "").strip()
+        if member_name:
+            selected_settings[entity_id]["name"] = member_name
+    # First materialize newly selected entities and apply their member labels.
+    # Then rebuild only this physical HA device's selected capabilities. This
+    # also removes unchecked members from an old combined endpoint instead of
+    # silently leaving them exported.
+    proposed = apply_entities(native, selected_settings, inventory)
+    physical_entities = {entity.get("entity_id") for entity in ha_device.get("entities", [])
+                         if isinstance(entity, dict) and isinstance(entity.get("entity_id"), str)}
+    capabilities_by_entity = {entity_id: [] for entity_id in selected}
+    member_templates = {}
+    group_key = "ha:group:" + hashlib.sha256(device_id.encode("utf-8")).hexdigest()[:16]
+    old_group = copy.deepcopy(proposed["devices"].get(group_key))
+    for endpoint_id, device in list(proposed["devices"].items()):
+        keep = []
+        moved = []
+        for capability in device.get("capabilities", []):
+            entity_id = capability["entity_id"]
+            if entity_id in physical_entities:
+                moved.append(copy.deepcopy(capability))
+                if entity_id in capabilities_by_entity:
+                    capabilities_by_entity[entity_id].append(copy.deepcopy(capability))
+                member_templates.setdefault(entity_id, copy.deepcopy(device))
+            else:
+                keep.append(capability)
+        if not moved:
+            continue
+        if keep:
+            device["capabilities"] = keep
+            device["enabled"] = any(cap.get("enabled", True) for cap in keep)
+            if device.get("group_mode") == "combined":
+                device["members"] = sorted({cap["entity_id"] for cap in keep})
+        else:
+            del proposed["devices"][endpoint_id]
+
+    # The deterministic group key is owned by this HA device. Remove any
+    # remaining members absent from today's HA inventory so stale members do
+    # not survive when the user changes the group or switches back to separate.
+    proposed["devices"].pop(group_key, None)
+
+    missing = [entity_id for entity_id, caps in capabilities_by_entity.items() if not caps]
+    if missing:
+        raise ValueError("Keine v6-Funktionen für: " + ", ".join(missing))
+
+    if mode == "combined":
+        group_name = str(group_name or "").strip()
+        if not group_name or len(group_name) > 128:
+            raise ValueError("Der Alexa-Gesamtname muss 1 bis 128 Zeichen enthalten.")
+        powers = [cap for values in capabilities_by_entity.values() for cap in values
+                  if cap["interface"] == "Alexa.PowerController"]
+        if len(powers) > 1:
+            unsupported = [cap["entity_id"] for cap in powers
+                           if not cap["entity_id"].startswith(("switch.", "input_boolean."))]
+            if unsupported:
+                raise ValueError("Mehrere PowerController können nur für Schalter als Alexa-Gesamtgerät kombiniert werden. Verwende einzelne Alexa-Geräte für: " + ", ".join(unsupported))
+            for capability in powers:
+                capability["interface"] = "Alexa.ToggleController"
+                capability["instance"] = "power_" + hashlib.sha256(
+                    capability["entity_id"].encode("utf-8")).hexdigest()[:12]
+                capability["capability_names"] = [
+                    str(names.get(capability["entity_id"]) or capability["entity_id"])
+                ]
+        for entity_id, capabilities in capabilities_by_entity.items():
+            label = str(names.get(entity_id) or entity_id)
+            for capability in capabilities:
+                capability.setdefault("capability_names", [label])
+                capability["enabled"] = True
+        combined = [cap for values in capabilities_by_entity.values() for cap in values]
+        aliases = list(dict.fromkeys(str(names.get(eid) or eid) for eid in selected))
+        description = (old_group or {}).get("description", "")
+        category = ((old_group or {}).get("display_category")
+                    or member_templates[selected[0]].get("display_category", "OTHER"))
+        proposed["devices"][group_key] = {
+            "name": group_name,
+            "description": description,
+            "display_category": category,
+            "aliases": aliases,
+            "capabilities": combined,
+            "enabled": True,
+            "ha_device_id": device_id,
+            "group_mode": "combined",
+            "members": sorted(set(selected)),
+        }
+    else:
+        for entity_id in selected:
+            template = member_templates[entity_id]
+            key = "ha:" + entity_id
+            name = str(names.get(entity_id) or "").strip()
+            if not name:
+                capability_names = next((cap.get("capability_names", []) for cap in capabilities_by_entity[entity_id]
+                                         if cap.get("capability_names")), [])
+                name = str(capability_names[0] if capability_names else entity_id)
+            existing = proposed["devices"].get(key)
+            capabilities = capabilities_by_entity[entity_id]
+            for capability in capabilities:
+                if (capability.get("interface") == "Alexa.ToggleController"
+                        and str(capability.get("instance", "")).startswith("power_")
+                        and entity_id.startswith(("switch.", "input_boolean."))):
+                    capability["interface"] = "Alexa.PowerController"
+                    capability.pop("instance", None)
+                    capability.pop("capability_names", None)
+            if existing:
+                capabilities = [*existing.get("capabilities", []), *capabilities]
+            proposed["devices"][key] = {
+                **template,
+                "name": name,
+                "capabilities": capabilities,
+                "enabled": True,
+            }
+            for field in ("ha_device_id", "group_mode", "members"):
+                proposed["devices"][key].pop(field, None)
+    try:
+        return NativeSkillConfigStore.validate(proposed)
+    except ValueError as exc:
+        if mode == "combined":
+            raise ValueError(f"Diese Funktionen können nicht gemeinsam in einem Alexa-Gerät liegen: {exc} Wähle einzelne Alexa-Geräte.") from exc
+        raise
+
+
+async def read_config(request):
+    native = STORE.load()
+    preferences = ha_export.CONFIG_STORE.load()
+    return web.json_response({"configuration": configuration(native, preferences),
+                              "yaml": yaml.safe_dump(native, allow_unicode=True, sort_keys=False),
+                              "selected": sum(
+                                  bool(d.get("enabled", True) and any(
+                                      cap.get("enabled", True) for cap in d.get("capabilities", [])
+                                  )) for d in native["devices"].values()
+                              )})
+
+
+async def inventory(request):
+    data = await ha_export._inventory()
+    data["configuration"] = configuration(STORE.load(), ha_export.CONFIG_STORE.load())
+    return web.json_response(data)
+
+
+async def autosave(request):
+    body = await request.json()
+    current = STORE.load()
+    if not isinstance(body, dict) or body.get("export_mode") != "native":
+        return web.json_response({"error": "v5-Export ist entfernt. Bitte die v6-Hauptansicht neu laden."}, status=409)
+    if body.get("native_revision") != revision(current):
+        return web.json_response({"error": "v6-Konfiguration wurde geändert. Ansicht neu laden."}, status=409)
+    try:
+        entities = body.get("entities", {})
+        if not isinstance(entities, dict):
+            raise ValueError("entities muss eine Zuordnung sein.")
+        inventory = await ha_export._inventory() if any(
+            v.get("enabled") and not entity_settings(current).get(key, {}).get("enabled")
+            for key, v in entities.items() if isinstance(v, dict)) else {"devices": []}
+        proposed = apply_entities(current, entities, inventory)
+        if "native_enabled" in body:
+            if type(body["native_enabled"]) is not bool:
+                raise ValueError("Native enabled muss boolesch sein.")
+            proposed["enabled"] = body["native_enabled"]
+        proposed["locale"] = str(body.get("locale") or current["locale"])
+        STORE.validate(proposed)
+    except (ValueError, TypeError) as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    # No await between revision check, final recheck and atomic native save.
+    if revision(STORE.load()) != body["native_revision"]:
+        return web.json_response({"error": "v6-Konfiguration wurde zwischenzeitlich geändert."}, status=409)
+    STORE.save(proposed)
+    preferences = ha_export.CONFIG_STORE.load()
+    # Preserve historical entity data; only UI/connection preferences go into JSON.
+    for key in ("ui", "event_gateway", "group_sync"):
+        if isinstance(body.get(key), dict):
+            preferences[key] = copy.deepcopy(body[key])
+    preferences["legacy_export_enabled"] = False
+    preferences = ha_export.CONFIG_STORE.save(preferences)
+    trigger = request.app.get("native_reconcile_trigger")
+    queued = callable(trigger)
+    if queued:
+        trigger(force=True)
+    return web.json_response({"ok": True, "reconciliation_queued": queued,
+                              "configuration": configuration(proposed, preferences)})
+
+
+async def configure_group(request):
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise web.HTTPBadRequest(text="Ungültige JSON-Daten.") from exc
+    current = STORE.load()
+    if not isinstance(body, dict) or body.get("native_revision") != revision(current):
+        return web.json_response({"error": "v6-Konfiguration wurde geändert. Ansicht neu laden."}, status=409)
+    try:
+        inventory = await ha_export._inventory()
+        proposed = apply_device_group(
+            current,
+            body.get("device_id"),
+            body.get("entity_ids"),
+            body.get("mode"),
+            body.get("name"),
+            inventory,
+            body.get("names"),
+        )
+    except (ValueError, TypeError) as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    if revision(STORE.load()) != body["native_revision"]:
+        return web.json_response({"error": "v6-Konfiguration wurde zwischenzeitlich geändert."}, status=409)
+    STORE.save(proposed)
+    trigger = request.app.get("native_reconcile_trigger")
+    queued = callable(trigger)
+    if queued:
+        trigger(force=True)
+    return web.json_response({"ok": True, "reconciliation_queued": queued,
+                              "configuration": configuration(proposed, ha_export.CONFIG_STORE.load())})
+
+
+async def preview(request):
+    return await read_config(request)
+
+
+async def save_yaml(request):
+    body = await request.json()
+    current = STORE.load()
+    if not isinstance(body, dict) or body.get("native_revision") != revision(current):
+        return web.json_response({"error": "v6-Konfiguration geändert. YAML neu laden."}, status=409)
+    try:
+        if not isinstance(body.get("yaml"), str):
+            raise ValueError("YAML-Text fehlt.")
+        proposed = STORE.validate(yaml.safe_load(body["yaml"]))
+    except (ValueError, TypeError, yaml.YAMLError) as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    STORE.save(proposed)
+    trigger = request.app.get("native_reconcile_trigger")
+    queued = callable(trigger)
+    if queued:
+        trigger(force=True)
+    return web.json_response({"ok": True, "reconciliation_queued": queued,
+                              "configuration": configuration(proposed, ha_export.CONFIG_STORE.load())})
+
+
+def register_routes(app):
+    app.router.add_get("/api/native-export/config", read_config)
+    app.router.add_post("/api/native-export/yaml", save_yaml)
+    app.router.add_post("/api/native-export/group", configure_group)
+    app.router.add_post("/api/native-export/setup", setup_sync_service)
+
+
+async def setup_sync_service(request):
+    """Apply the saved sync setting without publishing or restarting HA."""
+    return await deploy(request, only_if_changed=True)
+
+
+async def deploy(request, *, only_if_changed=False):
+    # v6 YAML is already atomic/live. HA YAML only retains OAuth/event plumbing,
+    # with an unconditional deny-all v5 filter.
+    preferences = ha_export.CONFIG_STORE.load()
+    enabled = support._event_settings(preferences)["enabled"]
+    if only_if_changed and not enabled:
+        return web.json_response({"ok": True, "configured": False, "restart_required": False,
+                                  "note": "Einstellungen gespeichert. Alexa-Abgleich ist deaktiviert."})
+    target = ha_export.ALEXA_YAML_PATH
+    previous = target.read_bytes() if target.exists() else None
+    try:
+        rendered = ha_export.YAML_GENERATOR.generate(preferences)
+    except ValueError:
+        return web.json_response({"error": "Alexa-Abgleich ist ungültig konfiguriert. Amazon-Region und Secret-Namen prüfen."}, status=400)
+    yaml_changed = previous != rendered.yaml_text.encode("utf-8")
+    component = support.deploy_component() if enabled else {}
+    available = await support._service_available() if only_if_changed else False
+    restart_required = not only_if_changed or yaml_changed or bool(component.get("restart_required")) or not available
+    written = not only_if_changed or yaml_changed
+    if written:
+        ha_export.YAML_GENERATOR.deploy(preferences)
+    check = await ha_control.check_config() if restart_required else {"valid": True}
+    if not check.get("valid"):
+        if written:
+            if previous is None:
+                target.unlink(missing_ok=True)
+            else:
+                support._atomic_write_bytes(target, previous)
+        return web.json_response({"error": check.get("message") or "HA-Konfiguration ungültig.", "check": check}, status=400)
+    native = STORE.load()
+    return web.json_response({"ok": True, "selected_count": sum(
+        bool(device.get("enabled", True) and any(
+            capability.get("enabled", True) for capability in device.get("capabilities", [])
+        )) for device in native["devices"].values()
+    ) if native["enabled"] else 0,
+                              "path": str(STORE.path), "configured": True, "restart_required": restart_required,
+                              "component": component, "check": check,
+                              "note": ("Einstellungen gespeichert. Alexa-Abgleich ist eingerichtet. Bitte HA neu starten, um den Dienst und seine Konfiguration zu laden."
+                                       if restart_required else "Einstellungen gespeichert. Alexa-Abgleich ist bereits eingerichtet und in Home Assistant verfügbar.")})
+
+
+def install():
+    ha_export.inventory = inventory
+    ha_export.configuration = read_config
+    ha_export.autosave = autosave
+    ha_export.preview = preview
+    ha_export.save = deploy
+    ha_control.checked_deploy = deploy

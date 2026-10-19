@@ -137,4 +137,44 @@ def validate_devices(devices: Any) -> dict[str, dict[str, Any]]:
             if interface == "Alexa.ThermostatController" and not entity_id.startswith("climate."):
                 raise DeviceModelError(f"{endpoint_id}: ThermostatController requires climate")
             if interface == "Alexa.ThermostatController" and "supported_modes" in cap:
-                modes =
+                modes = cap["supported_modes"]
+                if (not isinstance(modes, list) or not modes
+                        or any(not isinstance(mode, str) or mode not in {"HEAT", "COOL", "AUTO", "OFF", "ECO"} for mode in modes)
+                        or len(set(modes)) != len(modes)
+                        or not set(modes) & {"HEAT", "COOL"}):
+                    raise DeviceModelError(f"{endpoint_id}: unsupported thermostat modes")
+            if interface == "Alexa.PlaybackController":
+                if not entity_id.startswith("cover.") or cap.get("supported_operations", ["Stop"]) != ["Stop"]:
+                    raise DeviceModelError(f"{endpoint_id}: PlaybackController only supports cover Stop")
+        if group_mode == "combined":
+            if not ha_device_id or not members:
+                raise DeviceModelError(f"{endpoint_id}: combined group requires ha_device_id and members")
+            if set(members) != {cap["entity_id"] for cap in capabilities}:
+                raise DeviceModelError(f"{endpoint_id}: members must match its capability entities")
+        elif members:
+            raise DeviceModelError(f"{endpoint_id}: members are only valid for a combined group")
+        if replaces is not None:
+            if replaces in legacy_replacements:
+                raise DeviceModelError(f"{endpoint_id}: duplicate legacy replacement {replaces!r}")
+            legacy_replacements.add(replaces)
+        normalized = deepcopy(raw)
+        normalized.setdefault("description", "")
+        normalized.setdefault("display_category", "OTHER")
+        normalized["aliases"] = list(aliases)
+        normalized["capabilities"] = deepcopy(capabilities)
+        normalized.setdefault("enabled", True)
+        result[endpoint_id] = normalized
+    return result
+
+
+def device_preview(devices: dict[str, Any]) -> list[dict[str, Any]]:
+    """One discovery-preview record per logical Alexa endpoint."""
+    valid = validate_devices(devices)
+    return [
+        {"endpoint_id": endpoint_id, "name": device["name"],
+         "capabilities": [deepcopy(capability) for capability in device["capabilities"]
+                          if capability.get("enabled", True)]}
+        for endpoint_id, device in sorted(valid.items())
+        if device.get("enabled", True)
+        and any(capability.get("enabled", True) for capability in device["capabilities"])
+    ]

@@ -145,4 +145,21 @@
         <p class="muted">Wähle die Home-Assistant-Entitäten aus, die Alexa erhalten soll. Abgewählte Entitäten werden aus dem Alexa-Export entfernt. Sie können danach wieder einzeln aktiviert werden.</p>
         <fieldset>
           <legend>Exportform</legend>
-          <label class="check"><input type="radio" name="device-group-mode" valu
+          <label class="check"><input type="radio" name="device-group-mode" value="combined"> Ein Alexa-Gesamtgerät mit den ausgewählten Funktionen</label>
+          <label class="check"><input type="radio" name="device-group-mode" value="separate"> Für jede ausgewählte Entität ein eigenes Alexa-Gerät</label>
+          <label id="device-group-name-field">Name des Alexa-Gesamtgeräts<input id="device-group-name" maxlength="128" autocomplete="off"></label>
+        </fieldset>
+        <h3>Entitäten und Alexa-Funktionsnamen</h3>
+        <div id="device-group-entities" class="device-group-entities"></div>
+      </div>
+      <footer>
+        <button id="btn-save-device-group" class="button primary">Auswahl speichern</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <script>document.documentElement.dataset.ingressPath="{{INGRESS_PATH}}";</script>
+  <script src="{{INGRESS_PATH}}/static/device_overview.js?v=3.6.0"></script>
+  <script src="{{INGRESS_PATH}}/static/device_export_guard.js?v=3.5.0"></script>
+</body>
+</html>
