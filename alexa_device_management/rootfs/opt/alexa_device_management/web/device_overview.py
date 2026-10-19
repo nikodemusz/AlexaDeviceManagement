@@ -268,14 +268,27 @@ def _canonical(value: Any) -> set[str]:
     text = str(value or "").strip().lower()
     if not text:
         return set()
-    values = {text}
-    prefix = "amzn1.alexa.endpoint."
-    if text.startswith(prefix):
-        values.add(text[len(prefix):])
-    if "#" in text:
-        values.add(text.replace("#", ".", 1))
-    if "." in text:
-        values.add(text.replace(".", "#", 1))
+    values: set[str] = set()
+    pending = [text]
+    # Discovery endpoint IDs are namespaced, while Amazon may return either
+    # the namespaced value or just HA's entity_id from legacyAppliance. Treat
+    # these documented wrappers as aliases; never compare friendly names.
+    while pending:
+        current = pending.pop()
+        if not current or current in values:
+            continue
+        values.add(current)
+        prefix = "amzn1.alexa.endpoint."
+        if current.startswith(prefix):
+            pending.append(current[len(prefix):])
+        for wrapper in ("native:ha:", "native:", "ha:"):
+            if current.startswith(wrapper):
+                pending.append(current[len(wrapper):])
+                break
+        if "#" in current:
+            pending.append(current.replace("#", ".", 1))
+        if "." in current:
+            pending.append(current.replace(".", "#", 1))
     return values
 
 
@@ -553,8 +566,9 @@ def build_overview(
             matched_indexes.update(match_indexes)
             matches = [public_alexa[index] for index in match_indexes]
             native_matches = [index for index, alexa in enumerate(alexa_devices)
-                              if set(native_ids) & native_inventory_ids[index]]
-            status = (_entity_status(bool(native_ids), int(bool(native_matches))) if native_primary
+                              if any(_canonical(value) & native_inventory_ids[index]
+                                     for value in native_ids)]
+            status = (_entity_status(bool(native_ids), len(native_matches)) if native_primary
                       else _entity_status(enabled or bool(native_ids), len(matches)))
             if native_primary and not native_ids and matches:
                 status = "only_alexa"
@@ -623,12 +637,17 @@ def build_overview(
 
     if native_primary:
         active_ids = {endpoint for values in native_bindings.values() for endpoint in values}
-        present_ids = {endpoint for endpoint in active_ids
-                       if any(endpoint in ids for ids in native_inventory_ids)}
+        alexa_counts = {
+            endpoint: sum(bool(_canonical(endpoint) & identifiers)
+                          for identifiers in native_inventory_ids)
+            for endpoint in active_ids
+        }
+        present_ids = {endpoint for endpoint, count in alexa_counts.items() if count}
         # Count logical endpoints once, including ones with missing HA registry rows.
         summary.update(selected=len(active_ids), native_selected=len(active_ids),
                        synced=len(present_ids), pending=len(active_ids - present_ids),
-                       duplicates=0, only_alexa=len(native_lifecycle.legacy_targets(alexa_devices)))
+                       duplicates=sum(max(0, count - 1) for count in alexa_counts.values()),
+                       only_alexa=len(native_lifecycle.legacy_targets(alexa_devices)))
 
     return {
         "devices": devices,
