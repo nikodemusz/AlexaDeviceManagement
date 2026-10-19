@@ -44,6 +44,31 @@ class DeviceSchemaTests(unittest.TestCase):
         for schema in self.schemas():
             Draft202012Validator(schema).validate(config)
 
+    def test_combined_group_metadata_and_capability_selection_validate(self):
+        config = NativeSkillConfigStore.default()
+        config["enabled"] = True
+        config["devices"] = {"ha:group:1234567890abcdef": {
+            "name": "Doppelrelais", "ha_device_id": "device-123", "group_mode": "combined",
+            "members": ["switch.left", "switch.right"],
+            "capabilities": [
+                {"interface": "Alexa.ToggleController", "instance": "left",
+                 "entity_id": "switch.left", "capability_names": ["Linker Schalter"]},
+                {"interface": "Alexa.ToggleController", "instance": "right",
+                 "entity_id": "switch.right", "enabled": False,
+                 "capability_names": ["Rechter Schalter"]},
+            ],
+        }}
+        NativeSkillConfigStore.validate(config)
+        for schema in self.schemas():
+            Draft202012Validator(schema).validate(config)
+
+        invalid = deepcopy(config)
+        invalid["devices"]["ha:group:1234567890abcdef"].pop("members")
+        with self.assertRaises(ValidationError):
+            Draft202012Validator(json.loads((ROOT / "schemas/native-skill.schema.json").read_text())).validate(invalid)
+        with self.assertRaises(DeviceModelError):
+            NativeSkillConfigStore.validate(invalid)
+
     def test_writable_sensor_ranges_and_non_cover_playback_stay_rejected(self):
         for binding in (
             {"interface": "Alexa.RangeController", "entity_id": "sensor.tank",

@@ -23,9 +23,17 @@ class AlexaBulkDeleteUiTests(unittest.TestCase):
         self.assertIn('appliance_id: item.appliance_id || ""', SCRIPT)
         self.assertIn('request("/api/devices/delete-job")', SCRIPT)
 
+    def test_device_group_editor_is_present_and_posts_the_explicit_entity_selection(self):
+        self.assertIn('id="device-group-dialog"', HTML)
+        self.assertIn('name="device-group-mode" value="combined"', HTML)
+        self.assertIn('name="device-group-mode" value="separate"', HTML)
+        self.assertIn('data-group-name=', SCRIPT)
+        self.assertIn('request("/api/native-export/group"', SCRIPT)
+        self.assertIn("Abgewählte Entitäten werden aus dem Alexa-Export entfernt", HTML)
+
 
     def test_failed_bulk_delete_targets_remain_selected_and_versioned_assets_refresh(self):
         self.assertIn("Fehlgeschlagene Geräte bleiben in der Auswahl.", SCRIPT)
         self.assertIn("selectedAlexaKeys.delete(item.key)", SCRIPT)
-        self.assertIn("device_overview.js?v=3.5.0", HTML)
-        self.assertIn("device_overview.css?v=3.5.0", HTML)
+        self.assertIn("device_overview.js?v=3.6.0", HTML)
+        self.assertIn("device_overview.css?v=3.6.0", HTML)

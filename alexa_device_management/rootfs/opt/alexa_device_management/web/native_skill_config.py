@@ -46,7 +46,9 @@ class NativeSkillConfigStore:
         normalized = deepcopy(value)
         normalized["devices"] = validate_devices(value["devices"])
         if normalized["enabled"] and sum(
-            bool(device.get("enabled", True) and device.get("capabilities"))
+            bool(device.get("enabled", True) and any(
+                capability.get("enabled", True) for capability in device.get("capabilities", [])
+            ))
             for device in normalized["devices"].values()
         ) > 300:
             raise NativeSkillConfigError("Alexa erlaubt höchstens 300 aktive Endpunkte.")

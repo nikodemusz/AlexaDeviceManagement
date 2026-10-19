@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Alexa-Geräteverwaltung</title>
-  <link rel="stylesheet" href="{{INGRESS_PATH}}/static/device_overview.css?v=3.5.0">
+  <link rel="stylesheet" href="{{INGRESS_PATH}}/static/device_overview.css?v=3.6.0">
 </head>
 <body>
   <header class="topbar">
@@ -135,8 +135,14 @@
     </div>
   </dialog>
 
-  <script>document.documentElement.dataset.ingressPath="{{INGRESS_PATH}}";</script>
-  <script src="{{INGRESS_PATH}}/static/device_overview.js?v=3.5.0"></script>
-  <script src="{{INGRESS_PATH}}/static/device_export_guard.js?v=3.5.0"></script>
-</body>
-</html>
+  <dialog id="device-group-dialog">
+    <div class="dialog-shell wide">
+      <header>
+        <h2 id="device-group-title">Alexa-Gerät konfigurieren</h2>
+        <button id="btn-close-device-group" class="button secondary">Schließen</button>
+      </header>
+      <div class="dialog-content">
+        <p class="muted">Wähle die Home-Assistant-Entitäten aus, die Alexa erhalten soll. Abgewählte Entitäten werden aus dem Alexa-Export entfernt. Sie können danach wieder einzeln aktiviert werden.</p>
+        <fieldset>
+          <legend>Exportform</legend>
+          <label class="check"><input type="radio" name="device-group-mode" valu

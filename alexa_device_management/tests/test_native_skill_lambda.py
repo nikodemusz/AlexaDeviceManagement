@@ -79,6 +79,16 @@ class CombinedSkillTests(unittest.TestCase):
             self.assertEqual(properties[0]["timeOfSample"], states["light.desk"]["last_updated"])
             self.assertEqual(result["event"]["header"]["correlationToken"], "dummy-correlation")
 
+    def test_discovery_omits_individually_disabled_group_capabilities(self):
+        config = {"devices": {"relay": {"name": "Doppelrelais", "capabilities": [
+            {"interface": "Alexa.ToggleController", "instance": "left", "entity_id": "switch.left"},
+            {"interface": "Alexa.ToggleController", "instance": "right", "entity_id": "switch.right", "enabled": False},
+        ]}}}
+        capabilities = mod.discovery(event(), config)["event"]["payload"]["endpoints"][0]["capabilities"]
+        toggles = [capability for capability in capabilities
+                   if capability["interface"] == "Alexa.ToggleController"]
+        self.assertEqual([capability["instance"] for capability in toggles], ["left"])
+
     def test_unavailable_entities_never_report_off_or_successful_health(self):
         binding = {"interface": "Alexa.PowerController", "entity_id": "light.desk"}
         config = {"devices": {"desk": {"name": "Desk", "capabilities": [binding]}}}
@@ -123,143 +133,4 @@ class CombinedSkillTests(unittest.TestCase):
             failure.close()
 
     def test_discovery_returns_native_only_without_calling_legacy(self):
-        config = {"devices": {"zisterne": {"name": "Zisterne", "display_category": "OTHER",
-                                          "capabilities": [
-            {"interface": "Alexa.RangeController", "instance": "litres",
-             "entity_id": "sensor.zisterne_liter", "unit": "Volume.Liters"},
-            {"interface": "Alexa.RangeController", "instance": "percent",
-             "entity_id": "sensor.zisterne_prozent", "unit": "Percent"},
-        ]}}}
-        def gateway(path, method="GET", payload=None):
-            if path == "/v1/legacy":
-                raise AssertionError("Retired v5 discovery must not be contacted")
-            if path == "/v1/config":
-                return config
-            raise AssertionError(path)
-        with patch.object(mod, "verify_account", return_value="test-oauth"), patch.object(mod, "gateway", side_effect=gateway):
-            result = mod.lambda_handler(event(), None)
-        endpoints = result["event"]["payload"]["endpoints"]
-        self.assertEqual([e["endpointId"] for e in endpoints], ["native:zisterne"])
-        self.assertEqual(len(endpoints[0]["capabilities"]), 4)
-
-    def test_empty_native_discovery_never_falls_back_to_legacy(self):
-        with patch.object(mod, "verify_account", return_value="test-oauth"), patch.object(
-            mod, "gateway", side_effect=lambda path, method="GET", payload=None:
-            legacy_discovery() if path == "/v1/legacy" else {"devices": {}}):
-            result = mod.lambda_handler(event(), None)
-        self.assertEqual(len(result["event"]["payload"]["endpoints"]), 0)
-
-    def test_retired_legacy_device_returns_no_such_endpoint(self):
-        request = event("Alexa", "ReportState", "legacy-light")
-        result = {"event": {"header": {"name": "StateReport"}, "payload": {}}}
-        def gw(path, method="GET", payload=None):
-            self.assertEqual(path, "/v1/legacy")
-            self.assertEqual(payload["event"], request)
-            return result
-        with patch.object(mod, "verify_account", return_value="test-oauth"), patch.object(mod, "gateway", side_effect=gw):
-            self.assertEqual(mod.lambda_handler(request, None)["event"]["payload"]["type"], "NO_SUCH_ENDPOINT")
-
-    def test_old_discovery_data_cannot_leak_into_native_response(self):
-        import copy
-        endpoints = [
-            {"endpointId": "cover#blind", "displayCategories": ["INTERIOR_BLIND"],
-             "capabilities": [{"interface": name} for name in (
-                 "Alexa.PowerController", "Alexa.RangeController",
-                 "Alexa.PlaybackController", "Alexa.EndpointHealth")]},
-            {"endpointId": "switch#desk", "displayCategories": ["SWITCH"],
-             "capabilities": [{"interface": "Alexa.PowerController"},
-                              {"interface": "Alexa.ContactSensor"}]},
-            {"endpointId": "binary_sensor#door", "displayCategories": ["CONTACT_SENSOR"],
-             "capabilities": [{"interface": "Alexa.ContactSensor"}]},
-        ]
-        original = copy.deepcopy(endpoints)
-        legacy = legacy_discovery()
-        legacy["event"]["payload"]["endpoints"] = endpoints
-        def gw(path, method="GET", payload=None):
-            if path == "/v1/legacy":
-                return legacy
-            if path == "/v1/config":
-                return {"devices": {}}
-            raise AssertionError(path)
-        with patch.object(mod, "verify_account", return_value="test-oauth"), patch.object(mod, "gateway", side_effect=gw):
-            result = mod.lambda_handler(event(), None)
-        self.assertEqual(result["event"]["payload"]["endpoints"], [])
-
-    def test_all_legacy_controls_are_retired(self):
-        for eid in ("cover#blind", "switch#desk", "binary_sensor#door"):
-            for namespace, name in (("Alexa", "ReportState"), ("Alexa.PowerController", "TurnOn")):
-                result = {"context": {"properties": [
-                    {"namespace": "Alexa.PowerController", "name": "powerState", "value": "ON"},
-                    {"namespace": "Alexa.ContactSensor", "name": "detectionState", "value": "DETECTED"},
-                    {"namespace": "Alexa.RangeController", "name": "rangeValue", "value": 50},
-                    {"namespace": "Alexa.EndpointHealth", "name": "connectivity", "value": {"value": "OK"}}]}}
-                original = __import__("copy").deepcopy(result)
-                with patch.object(mod, "verify_account", return_value="test-oauth"), patch.object(mod, "gateway", return_value=result):
-                    actual = mod.lambda_handler(event(namespace, name, eid), None)
-                self.assertEqual(actual["event"]["payload"]["type"], "NO_SUCH_ENDPOINT")
-
-    def test_cover_discovery_has_position_and_stop_without_power_switch(self):
-        bindings = [
-            {"interface": "Alexa.RangeController", "instance": "cover.position",
-             "entity_id": "cover.blind", "unit": "Alexa.Unit.Percent",
-             "read_only": False, "minimum": 0, "maximum": 100},
-            {"interface": "Alexa.PlaybackController", "entity_id": "cover.blind",
-             "supported_operations": ["Stop"]},
-        ]
-        result = mod.discovery(event(), {"devices": {
-            "blind": {"name": "Rollladen", "display_category": "INTERIOR_BLIND",
-                      "capabilities": bindings}}})
-        caps = result["event"]["payload"]["endpoints"][0]["capabilities"]
-        self.assertEqual([cap["interface"] for cap in caps],
-                         ["Alexa", "Alexa.RangeController", "Alexa.PlaybackController", "Alexa.EndpointHealth"])
-        self.assertNotIn("nonControllable", caps[1]["properties"])
-        self.assertEqual(caps[2]["supportedOperations"], ["Stop"])
-
-    def test_cover_reports_position_from_attributes_not_on_state(self):
-        b = {"interface": "Alexa.RangeController", "instance": "cover.position",
-             "entity_id": "cover.blind", "unit": "Alexa.Unit.Percent",
-             "read_only": False}
-        value = mod.state_for(b, {"cover.blind": {
-            "state": "open", "attributes": {"current_position": 37}}})
-        self.assertEqual(value["value"], 37)
-
-    def test_cover_stop_is_forwarded_with_health_property(self):
-        req = event("Alexa.PlaybackController", "Stop", "native:blind")
-        req["directive"]["header"]["instance"] = None
-        config = {"devices": {"blind": {"name": "Blind", "capabilities": [
-            {"interface": "Alexa.PlaybackController", "entity_id": "cover.blind"}]}}}
-        calls = []
-        def gw(path, method="GET", payload=None):
-            calls.append((path, payload))
-            if path == "/v1/config":
-                return config
-            if path == "/v1/control":
-                return {"ok": True}
-            if path == "/v1/state":
-                return {"states": {"cover.blind": {"state": "open"}}}
-            raise AssertionError(path)
-        with patch.object(mod, "verify_account", return_value="test-oauth"), patch.object(mod, "gateway", side_effect=gw):
-            result = mod.lambda_handler(req, None)
-        self.assertEqual(result["event"]["header"]["name"], "Response")
-        self.assertEqual(result["context"]["properties"][0]["namespace"], "Alexa.EndpointHealth")
-        self.assertEqual(calls[-2][1]["action"], "Stop")
-
-    def test_native_state_uses_correct_binding_and_linked_token(self):
-        request = event("Alexa", "ReportState", "native:zisterne")
-        config = {"devices": {"zisterne": {"name": "Zisterne", "capabilities": [
-            {"interface": "Alexa.RangeController", "instance": "litres",
-             "entity_id": "sensor.zisterne_liter", "unit": "Volume.Liters"}]}}}
-        def gw(path, method="GET", payload=None):
-            if path == "/v1/config":
-                return config
-            self.assertEqual((path, method), ("/v1/state", "POST"))
-            self.assertEqual(payload["token"], "test-oauth")
-            return {"states": {"sensor.zisterne_liter": {"state": "1599"}}}
-        with patch.object(mod, "verify_account", return_value="test-oauth"), patch.object(mod, "gateway", side_effect=gw):
-            result = mod.lambda_handler(request, None)
-        self.assertEqual(result["context"]["properties"][0]["value"], 1599.0)
-        self.assertEqual(result["event"]["endpoint"]["endpointId"], "native:zisterne")
-
-
-if __name__ == "__main__":
-    unittest.main()
+        config = {"devices": {"zisterne": {"name": "Zisterne",

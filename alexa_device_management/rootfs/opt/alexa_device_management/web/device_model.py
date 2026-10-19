@@ -75,6 +75,18 @@ def validate_devices(devices: Any) -> dict[str, dict[str, Any]]:
             not isinstance(a, str) or not a.strip() for a in aliases
         ):
             raise DeviceModelError(f"{endpoint_id}: aliases must be non-empty strings")
+        group_mode = raw.get("group_mode")
+        if group_mode is not None and group_mode not in ("combined", "separate"):
+            raise DeviceModelError(f"{endpoint_id}: group_mode must be combined or separate")
+        ha_device_id = raw.get("ha_device_id")
+        if ha_device_id is not None and (not isinstance(ha_device_id, str) or not ha_device_id.strip()):
+            raise DeviceModelError(f"{endpoint_id}: ha_device_id must be a non-empty string")
+        members = raw.get("members", [])
+        if (not isinstance(members, list)
+                or any(not isinstance(member, str) or not re.fullmatch(r"[a-z_]+\.[A-Za-z0-9_]+", member)
+                       for member in members)
+                or len(set(members)) != len(members)):
+            raise DeviceModelError(f"{endpoint_id}: members must be unique Home Assistant entity IDs")
         replaces = raw.get("replaces_legacy_endpoint")
         if replaces is not None and (not isinstance(replaces, str) or
                                      not LEGACY_ENDPOINT_RE.fullmatch(replaces) or
@@ -87,6 +99,14 @@ def validate_devices(devices: Any) -> dict[str, dict[str, Any]]:
         for cap in capabilities:
             if not isinstance(cap, dict):
                 raise DeviceModelError(f"{endpoint_id}: capability must be an object")
+            if type(cap.get("enabled", True)) is not bool:
+                raise DeviceModelError(f"{endpoint_id}: capability enabled must be true or false")
+            capability_names = cap.get("capability_names")
+            if capability_names is not None and (
+                not isinstance(capability_names, list)
+                or any(not isinstance(label, str) or not label.strip() for label in capability_names)
+            ):
+                raise DeviceModelError(f"{endpoint_id}: capability_names must contain non-empty strings")
             interface, entity_id = cap.get("interface"), cap.get("entity_id")
             if interface not in SUPPORTED_INTERFACES:
                 raise DeviceModelError(f"{endpoint_id}: unsupported interface {interface!r}")
@@ -117,35 +137,4 @@ def validate_devices(devices: Any) -> dict[str, dict[str, Any]]:
             if interface == "Alexa.ThermostatController" and not entity_id.startswith("climate."):
                 raise DeviceModelError(f"{endpoint_id}: ThermostatController requires climate")
             if interface == "Alexa.ThermostatController" and "supported_modes" in cap:
-                modes = cap["supported_modes"]
-                if (not isinstance(modes, list) or not modes
-                        or any(not isinstance(mode, str) or mode not in {"HEAT", "COOL", "AUTO", "OFF", "ECO"} for mode in modes)
-                        or len(set(modes)) != len(modes)
-                        or not set(modes) & {"HEAT", "COOL"}):
-                    raise DeviceModelError(f"{endpoint_id}: unsupported thermostat modes")
-            if interface == "Alexa.PlaybackController":
-                if not entity_id.startswith("cover.") or cap.get("supported_operations", ["Stop"]) != ["Stop"]:
-                    raise DeviceModelError(f"{endpoint_id}: PlaybackController only supports cover Stop")
-        if replaces is not None:
-            if replaces in legacy_replacements:
-                raise DeviceModelError(f"{endpoint_id}: duplicate legacy replacement {replaces!r}")
-            legacy_replacements.add(replaces)
-        normalized = deepcopy(raw)
-        normalized.setdefault("description", "")
-        normalized.setdefault("display_category", "OTHER")
-        normalized["aliases"] = list(aliases)
-        normalized["capabilities"] = deepcopy(capabilities)
-        normalized.setdefault("enabled", True)
-        result[endpoint_id] = normalized
-    return result
-
-
-def device_preview(devices: dict[str, Any]) -> list[dict[str, Any]]:
-    """One discovery-preview record per logical Alexa endpoint."""
-    valid = validate_devices(devices)
-    return [
-        {"endpoint_id": endpoint_id, "name": device["name"],
-         "capabilities": deepcopy(device["capabilities"])}
-        for endpoint_id, device in sorted(valid.items())
-        if device.get("enabled", True)
-    ]
+                modes =
