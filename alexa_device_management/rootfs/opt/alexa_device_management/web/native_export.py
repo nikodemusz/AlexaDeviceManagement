@@ -27,14 +27,22 @@ def entity_settings(native):
     for key, device in native.get("devices", {}).items():
         for capability in device.get("capabilities", []):
             entity_id = capability["entity_id"]
+            capability_names = capability.get("capability_names") or []
+            name = (capability_names[0] if device.get("group_mode") == "combined" and capability_names
+                    else device.get("name", key))
             settings = result.setdefault(entity_id, {
-                "enabled": False, "name": device.get("name", key),
+                "enabled": False, "name": name,
                 "description": device.get("description", ""),
                 "display_category": device.get("display_category", "OTHER"),
                 "alexa_group": device.get("alexa_group", ""),
                 "native_endpoint_ids": [],
+                "group_mode": device.get("group_mode", "separate"),
+                "logical_device_name": device.get("name", key),
             })
-            settings["enabled"] |= bool(device.get("enabled", True))
+            settings["enabled"] |= bool(device.get("enabled", True) and capability.get("enabled", True))
+            if device.get("group_mode") == "combined":
+                settings["group_mode"] = "combined"
+                settings["logical_device_name"] = device.get("name", key)
             if "native:" + key not in settings["native_endpoint_ids"]:
                 settings["native_endpoint_ids"].append("native:" + key)
     return result
@@ -95,9 +103,170 @@ def apply_entities(native, requested, inventory):
             proposed["devices"][key] = draft
             owners = [key]
         for key in owners:
-            # An entity row edits its complete logical endpoint (e.g. both tank values).
-            proposed["devices"][key].update(changes)
+            device = proposed["devices"][key]
+            if "enabled" in changes:
+                if device.get("group_mode") == "combined":
+                    for capability in device.get("capabilities", []):
+                        if capability["entity_id"] == entity_id:
+                            capability["enabled"] = changes["enabled"]
+                    device["enabled"] = any(cap.get("enabled", True) for cap in device.get("capabilities", []))
+                else:
+                    # Preserve the established v6 behavior: any bound entity
+                    # toggle controls its whole logical endpoint (for example,
+                    # disabling either tank value disables the entire tank).
+                    device["enabled"] = changes["enabled"]
+            device_changes = {key: value for key, value in changes.items() if key != "enabled"}
+            if device.get("group_mode") == "combined" and "name" in device_changes:
+                # The endpoint name belongs to the group editor. A row name is
+                # the member control's accessible name (used by ToggleController).
+                for capability in device.get("capabilities", []):
+                    if capability["entity_id"] == entity_id:
+                        capability["capability_names"] = [device_changes["name"]]
+                device_changes.pop("name")
+            device.update(device_changes)
     return NativeSkillConfigStore.validate(proposed)
+
+
+def apply_device_group(native, device_id, entity_ids, mode, group_name, inventory, names=None):
+    """Group selected entities into one Alexa endpoint or restore one per entity."""
+    if mode not in {"combined", "separate"}:
+        raise ValueError("Exportform muss Gesamtgerät oder einzelne Alexa-Geräte sein.")
+    if not isinstance(device_id, str) or not device_id.strip():
+        raise ValueError("Home-Assistant-Gerät fehlt.")
+    if not isinstance(entity_ids, list) or not entity_ids:
+        raise ValueError("Mindestens eine Entität auswählen.")
+    if any(not isinstance(entity_id, str) or not entity_id.strip() for entity_id in entity_ids):
+        raise ValueError("Ungültige Entity-ID.")
+    selected = list(dict.fromkeys(entity_ids))
+    ha_device = next((item for item in inventory.get("devices", [])
+                      if str(item.get("device_id") or "") == device_id), None)
+    if not ha_device:
+        raise ValueError("Home-Assistant-Gerät ist nicht mehr verfügbar.")
+    available = {entity.get("entity_id") for entity in ha_device.get("entities", [])}
+    if not set(selected) <= available:
+        raise ValueError("Alle ausgewählten Entitäten müssen zum selben Home-Assistant-Gerät gehören.")
+    names = names if isinstance(names, dict) else {}
+    selected_settings = {}
+    for entity_id in selected:
+        selected_settings[entity_id] = {"enabled": True}
+        member_name = str(names.get(entity_id) or "").strip()
+        if member_name:
+            selected_settings[entity_id]["name"] = member_name
+    # First materialize newly selected entities and apply their member labels.
+    # Then rebuild only this physical HA device's selected capabilities. This
+    # also removes unchecked members from an old combined endpoint instead of
+    # silently leaving them exported.
+    proposed = apply_entities(native, selected_settings, inventory)
+    physical_entities = {entity.get("entity_id") for entity in ha_device.get("entities", [])
+                         if isinstance(entity, dict) and isinstance(entity.get("entity_id"), str)}
+    capabilities_by_entity = {entity_id: [] for entity_id in selected}
+    member_templates = {}
+    group_key = "ha:group:" + hashlib.sha256(device_id.encode("utf-8")).hexdigest()[:16]
+    old_group = copy.deepcopy(proposed["devices"].get(group_key))
+    for endpoint_id, device in list(proposed["devices"].items()):
+        keep = []
+        moved = []
+        for capability in device.get("capabilities", []):
+            entity_id = capability["entity_id"]
+            if entity_id in physical_entities:
+                moved.append(copy.deepcopy(capability))
+                if entity_id in capabilities_by_entity:
+                    capabilities_by_entity[entity_id].append(copy.deepcopy(capability))
+                member_templates.setdefault(entity_id, copy.deepcopy(device))
+            else:
+                keep.append(capability)
+        if not moved:
+            continue
+        if keep:
+            device["capabilities"] = keep
+            device["enabled"] = any(cap.get("enabled", True) for cap in keep)
+            if device.get("group_mode") == "combined":
+                device["members"] = sorted({cap["entity_id"] for cap in keep})
+        else:
+            del proposed["devices"][endpoint_id]
+
+    # The deterministic group key is owned by this HA device. Remove any
+    # remaining members absent from today's HA inventory so stale members do
+    # not survive when the user changes the group or switches back to separate.
+    proposed["devices"].pop(group_key, None)
+
+    missing = [entity_id for entity_id, caps in capabilities_by_entity.items() if not caps]
+    if missing:
+        raise ValueError("Keine v6-Funktionen für: " + ", ".join(missing))
+
+    if mode == "combined":
+        group_name = str(group_name or "").strip()
+        if not group_name or len(group_name) > 128:
+            raise ValueError("Der Alexa-Gesamtname muss 1 bis 128 Zeichen enthalten.")
+        powers = [cap for values in capabilities_by_entity.values() for cap in values
+                  if cap["interface"] == "Alexa.PowerController"]
+        if len(powers) > 1:
+            unsupported = [cap["entity_id"] for cap in powers
+                           if not cap["entity_id"].startswith(("switch.", "input_boolean."))]
+            if unsupported:
+                raise ValueError("Mehrere PowerController können nur für Schalter als Alexa-Gesamtgerät kombiniert werden. Verwende einzelne Alexa-Geräte für: " + ", ".join(unsupported))
+            for capability in powers:
+                capability["interface"] = "Alexa.ToggleController"
+                capability["instance"] = "power_" + hashlib.sha256(
+                    capability["entity_id"].encode("utf-8")).hexdigest()[:12]
+                capability["capability_names"] = [
+                    str(names.get(capability["entity_id"]) or capability["entity_id"])
+                ]
+        for entity_id, capabilities in capabilities_by_entity.items():
+            label = str(names.get(entity_id) or entity_id)
+            for capability in capabilities:
+                capability.setdefault("capability_names", [label])
+                capability["enabled"] = True
+        combined = [cap for values in capabilities_by_entity.values() for cap in values]
+        aliases = list(dict.fromkeys(str(names.get(eid) or eid) for eid in selected))
+        description = (old_group or {}).get("description", "")
+        category = ((old_group or {}).get("display_category")
+                    or member_templates[selected[0]].get("display_category", "OTHER"))
+        proposed["devices"][group_key] = {
+            "name": group_name,
+            "description": description,
+            "display_category": category,
+            "aliases": aliases,
+            "capabilities": combined,
+            "enabled": True,
+            "ha_device_id": device_id,
+            "group_mode": "combined",
+            "members": sorted(set(selected)),
+        }
+    else:
+        for entity_id in selected:
+            template = member_templates[entity_id]
+            key = "ha:" + entity_id
+            name = str(names.get(entity_id) or "").strip()
+            if not name:
+                capability_names = next((cap.get("capability_names", []) for cap in capabilities_by_entity[entity_id]
+                                         if cap.get("capability_names")), [])
+                name = str(capability_names[0] if capability_names else entity_id)
+            existing = proposed["devices"].get(key)
+            capabilities = capabilities_by_entity[entity_id]
+            for capability in capabilities:
+                if (capability.get("interface") == "Alexa.ToggleController"
+                        and str(capability.get("instance", "")).startswith("power_")
+                        and entity_id.startswith(("switch.", "input_boolean."))):
+                    capability["interface"] = "Alexa.PowerController"
+                    capability.pop("instance", None)
+                    capability.pop("capability_names", None)
+            if existing:
+                capabilities = [*existing.get("capabilities", []), *capabilities]
+            proposed["devices"][key] = {
+                **template,
+                "name": name,
+                "capabilities": capabilities,
+                "enabled": True,
+            }
+            for field in ("ha_device_id", "group_mode", "members"):
+                proposed["devices"][key].pop(field, None)
+    try:
+        return NativeSkillConfigStore.validate(proposed)
+    except ValueError as exc:
+        if mode == "combined":
+            raise ValueError(f"Diese Funktionen können nicht gemeinsam in einem Alexa-Gerät liegen: {exc} Wähle einzelne Alexa-Geräte.") from exc
+        raise
 
 
 async def read_config(request):
@@ -105,7 +274,11 @@ async def read_config(request):
     preferences = ha_export.CONFIG_STORE.load()
     return web.json_response({"configuration": configuration(native, preferences),
                               "yaml": yaml.safe_dump(native, allow_unicode=True, sort_keys=False),
-                              "selected": sum(d.get("enabled", True) for d in native["devices"].values())})
+                              "selected": sum(
+                                  bool(d.get("enabled", True) and any(
+                                      cap.get("enabled", True) for cap in d.get("capabilities", [])
+                                  )) for d in native["devices"].values()
+                              )})
 
 
 async def inventory(request):
@@ -156,6 +329,38 @@ async def autosave(request):
                               "configuration": configuration(proposed, preferences)})
 
 
+async def configure_group(request):
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise web.HTTPBadRequest(text="Ungültige JSON-Daten.") from exc
+    current = STORE.load()
+    if not isinstance(body, dict) or body.get("native_revision") != revision(current):
+        return web.json_response({"error": "v6-Konfiguration wurde geändert. Ansicht neu laden."}, status=409)
+    try:
+        inventory = await ha_export._inventory()
+        proposed = apply_device_group(
+            current,
+            body.get("device_id"),
+            body.get("entity_ids"),
+            body.get("mode"),
+            body.get("name"),
+            inventory,
+            body.get("names"),
+        )
+    except (ValueError, TypeError) as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    if revision(STORE.load()) != body["native_revision"]:
+        return web.json_response({"error": "v6-Konfiguration wurde zwischenzeitlich geändert."}, status=409)
+    STORE.save(proposed)
+    trigger = request.app.get("native_reconcile_trigger")
+    queued = callable(trigger)
+    if queued:
+        trigger(force=True)
+    return web.json_response({"ok": True, "reconciliation_queued": queued,
+                              "configuration": configuration(proposed, ha_export.CONFIG_STORE.load())})
+
+
 async def preview(request):
     return await read_config(request)
 
@@ -183,6 +388,7 @@ async def save_yaml(request):
 def register_routes(app):
     app.router.add_get("/api/native-export/config", read_config)
     app.router.add_post("/api/native-export/yaml", save_yaml)
+    app.router.add_post("/api/native-export/group", configure_group)
     app.router.add_post("/api/native-export/setup", setup_sync_service)
 
 
@@ -222,7 +428,9 @@ async def deploy(request, *, only_if_changed=False):
         return web.json_response({"error": check.get("message") or "HA-Konfiguration ungültig.", "check": check}, status=400)
     native = STORE.load()
     return web.json_response({"ok": True, "selected_count": sum(
-        bool(device.get("enabled", True) and device.get("capabilities")) for device in native["devices"].values()
+        bool(device.get("enabled", True) and any(
+            capability.get("enabled", True) for capability in device.get("capabilities", [])
+        )) for device in native["devices"].values()
     ) if native["enabled"] else 0,
                               "path": str(STORE.path), "configured": True, "restart_required": restart_required,
                               "component": component, "check": check,

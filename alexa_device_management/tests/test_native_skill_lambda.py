@@ -79,6 +79,16 @@ class CombinedSkillTests(unittest.TestCase):
             self.assertEqual(properties[0]["timeOfSample"], states["light.desk"]["last_updated"])
             self.assertEqual(result["event"]["header"]["correlationToken"], "dummy-correlation")
 
+    def test_discovery_omits_individually_disabled_group_capabilities(self):
+        config = {"devices": {"relay": {"name": "Doppelrelais", "capabilities": [
+            {"interface": "Alexa.ToggleController", "instance": "left", "entity_id": "switch.left"},
+            {"interface": "Alexa.ToggleController", "instance": "right", "entity_id": "switch.right", "enabled": False},
+        ]}}}
+        capabilities = mod.discovery(event(), config)["event"]["payload"]["endpoints"][0]["capabilities"]
+        toggles = [capability for capability in capabilities
+                   if capability["interface"] == "Alexa.ToggleController"]
+        self.assertEqual([capability["instance"] for capability in toggles], ["left"])
+
     def test_unavailable_entities_never_report_off_or_successful_health(self):
         binding = {"interface": "Alexa.PowerController", "entity_id": "light.desk"}
         config = {"devices": {"desk": {"name": "Desk", "capabilities": [binding]}}}

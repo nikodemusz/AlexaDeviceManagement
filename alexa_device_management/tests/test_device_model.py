@@ -57,6 +57,17 @@ class DeviceModelTests(unittest.TestCase):
         ]}}
         self.assertEqual(len(device_preview(devices)), 1)
 
+    def test_disabled_capability_is_not_in_preview_and_all_disabled_endpoint_is_omitted(self):
+        devices = {"combined": {"name": "Doppelrelais", "capabilities": [
+            {"interface": "Alexa.ToggleController", "instance": "left", "entity_id": "switch.left"},
+            {"interface": "Alexa.ToggleController", "instance": "right", "entity_id": "switch.right", "enabled": False},
+        ]}}
+        preview = device_preview(devices)
+        self.assertEqual(len(preview), 1)
+        self.assertEqual([cap["instance"] for cap in preview[0]["capabilities"]], ["left"])
+        devices["combined"]["capabilities"][0]["enabled"] = False
+        self.assertEqual(device_preview(devices), [])
+
     def test_rejects_ambiguous_duplicate_controller(self):
         data = {"tank": {"name": "Tank", "capabilities": [
             {"interface": "Alexa.RangeController", "instance": "fill",

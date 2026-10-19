@@ -81,6 +81,47 @@ class PrimaryAPITests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.store.load()["devices"]["desk"].get("enabled", True))
         trigger.assert_called_once_with(force=True)
 
+    async def test_group_api_saves_named_combined_endpoint_and_queues_reconciliation(self):
+        inventory = {"devices": [{
+            "device_id": "relay-device", "name": "Doppelrelais", "entities": [
+                {"entity_id": "switch.relay_a", "domain": "switch", "name": "Relais A",
+                 "category_suggestion": "SWITCH"},
+                {"entity_id": "switch.relay_b", "domain": "switch", "name": "Relais B",
+                 "category_suggestion": "SWITCH"},
+            ],
+        }]}
+        with patch.object(ha_export, "_inventory", AsyncMock(return_value=inventory)):
+            body = (await (await self.client.get("/api/ha-export/config")).json())["configuration"]
+            trigger = Mock()
+            self.client.server.app["native_reconcile_trigger"] = trigger
+            response = await self.client.post("/api/native-export/group", json={
+                "native_revision": body["native_revision"],
+                "device_id": "relay-device",
+                "entity_ids": ["switch.relay_a", "switch.relay_b"],
+                "mode": "combined",
+                "name": "Heizrelais",
+                "names": {"switch.relay_a": "Büro", "switch.relay_b": "Keller"},
+            })
+            result = await response.json()
+
+        self.assertEqual(response.status, 200, result)
+        self.assertTrue(result["reconciliation_queued"])
+        group = next(device for device in self.store.load()["devices"].values()
+                     if device.get("group_mode") == "combined")
+        self.assertEqual(group["name"], "Heizrelais")
+        self.assertEqual({cap["interface"] for cap in group["capabilities"]}, {"Alexa.ToggleController"})
+        self.assertEqual(result["configuration"]["entities"]["switch.relay_a"]["logical_device_name"], "Heizrelais")
+        trigger.assert_called_once_with(force=True)
+
+    async def test_group_api_rejects_stale_configuration_revision(self):
+        with patch.object(ha_export, "_inventory", AsyncMock()) as inventory:
+            response = await self.client.post("/api/native-export/group", json={
+                "native_revision": "stale", "device_id": "relay-device",
+                "entity_ids": ["switch.relay_a"], "mode": "separate", "name": "",
+            })
+        self.assertEqual(response.status, 409)
+        inventory.assert_not_awaited()
+
     async def test_old_browser_cannot_enable_v5_and_migration_page_is_retired(self):
         response = await self.client.post("/api/ha-export/autosave", json={"entities": {"light.bad": {"enabled": True}}})
         self.assertEqual(response.status, 409)

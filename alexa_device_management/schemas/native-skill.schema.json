@@ -60,6 +60,24 @@
             "minLength": 1
           }
         },
+        "ha_device_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "group_mode": {
+          "enum": [
+            "combined",
+            "separate"
+          ]
+        },
+        "members": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z_]+\\.[A-Za-z0-9_]+$"
+          }
+        },
         "capabilities": {
           "type": "array",
           "items": {
@@ -67,6 +85,52 @@
           }
         }
       },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "group_mode": {
+                "const": "combined"
+              }
+            },
+            "required": [
+              "group_mode"
+            ]
+          },
+          "then": {
+            "required": [
+              "ha_device_id",
+              "members"
+            ],
+            "properties": {
+              "members": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "properties": {
+                "group_mode": {
+                  "const": "combined"
+                }
+              },
+              "required": [
+                "group_mode"
+              ]
+            }
+          },
+          "then": {
+            "properties": {
+              "members": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ],
       "additionalProperties": true
     },
     "capability": {
@@ -76,6 +140,10 @@
         "entity_id"
       ],
       "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
         "interface": {
           "enum": [
             "Alexa.PowerController",
@@ -109,6 +177,13 @@
           "const": [
             "Stop"
           ]
+        },
+        "capability_names": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       },
       "allOf": [

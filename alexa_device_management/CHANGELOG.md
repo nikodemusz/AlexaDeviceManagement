@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.6.0
+
+- Home-Assistant-Geräte lassen sich in der Geräteübersicht als benanntes Alexa-Gesamtgerät mit mehreren Funktionen oder als mehrere einzelne Alexa-Geräte konfigurieren. Pro Funktion sind Name und Exportauswahl einstellbar; abgewählte Entitäten werden aus dem v6-Export entfernt und der Alexa-Abgleich startet automatisch.
+- Mehrere Relais werden in einem Gesamtgerät als getrennte Alexa-ToggleController mit stabilen Instanzen angeboten. Beim Wechsel zurück zu einzelnen Geräten werden sie wieder zu eigenständigen PowerControllern.
+
 ## 3.5.3
 
 - Fragt Amazons `legacyAppliance.entityId` gezielt im Gerätebestand ab. Diese stabile Herstellerkennung fehlte im bisherigen Überblick, obwohl sie in den Gerätedetails vorhanden ist; v6-Zuordnungen werden damit auch dann erkannt, wenn Amazons interne UUID nicht mit der nativen Endpunkt-ID übereinstimmt.

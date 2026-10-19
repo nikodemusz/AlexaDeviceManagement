@@ -44,6 +44,16 @@ class FakeSession:
 
 
 class GatewayOAuthTests(unittest.TestCase):
+    def test_disabled_group_capability_cannot_be_controlled(self):
+        config = {"devices": {"relay": {"name": "Doppelrelais", "capabilities": [
+            {"interface": "Alexa.ToggleController", "instance": "left", "entity_id": "switch.left"},
+            {"interface": "Alexa.ToggleController", "instance": "right", "entity_id": "switch.right", "enabled": False},
+        ]}}}
+        self.assertEqual(gateway.lookup_binding(config, "relay", "Alexa.ToggleController", "left")["entity_id"],
+                         "switch.left")
+        with self.assertRaises(web.HTTPNotFound):
+            gateway.lookup_binding(config, "relay", "Alexa.ToggleController", "right")
+
     def test_expired_ha_user_token_is_not_masked_as_gateway_failure(self):
         for status in (401, 403):
             with self.subTest(status=status), patch.object(FakeResponse, "status", status), \

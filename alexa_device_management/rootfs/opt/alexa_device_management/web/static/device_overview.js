@@ -50,6 +50,7 @@
     "delete-alexa": "Löscht den bereits bei Alexa vorhandenen Endpunkt.",
     "delete-selected-alexa": "Löscht die ausgewählten Alexa-Geräte nach einer Sicherheitsabfrage nacheinander.",
     "assign-group": "Ordnet diesen Alexa-Endpunkt der angegebenen Alexa-Gruppe zu.",
+    "configure-device-group": "Wählt die exportierten Entitäten, den Alexa-Gesamtnamen und die Exportform dieses Home-Assistant-Geräts.",
     "fill-entity": "Übernimmt den automatisch ermittelten Alexa-Namen und die passende Kategorie.",
     "suggest-simple-name": "Übernimmt den vorgeschlagenen Alexa-Namen in das weiterhin editierbare Namensfeld."
   };
@@ -289,7 +290,7 @@
 
   function deviceHtml(device, entities) {
     const expanded = expandedDevices.has(device.device_id);
-    return `<section class="device status-${attr(device.status)} ${device.hidden ? "hidden-item" : ""}" data-device-section="${attr(device.device_id)}"><div class="device-head"><button class="collapse-toggle" data-action="toggle-device" data-device="${attr(device.device_id)}" aria-expanded="${expanded}">${expanded ? "▾" : "▸"}</button><div class="device-title"><div class="device-name">${esc(device.name)}</div><div class="device-meta">${esc(device.area_name || "Kein Bereich")}${device.floor_name ? ` • ${esc(device.floor_name)}` : ""}${device.manufacturer ? ` • ${esc(device.manufacturer)}` : ""}${device.model ? ` • ${esc(device.model)}` : ""}</div></div><div class="device-actions"><button class="button primary small" data-action="prepare-device" data-device="${attr(device.device_id)}">Sinnvoll aktivieren</button><button class="button secondary small" data-action="${device.hidden ? "show-device" : "hide-device"}" data-device="${attr(device.device_id)}">${device.hidden ? "Einblenden" : "Gerät ausblenden"}</button></div></div>${expanded ? `<div class="entity-grid">${entities.map(entity => entityHtml(entity, device)).join("")}</div>` : ""}</section>`;
+    return `<section class="device status-${attr(device.status)} ${device.hidden ? "hidden-item" : ""}" data-device-section="${attr(device.device_id)}"><div class="device-head"><button class="collapse-toggle" data-action="toggle-device" data-device="${attr(device.device_id)}" aria-expanded="${expanded}">${expanded ? "▾" : "▸"}</button><div class="device-title"><div class="device-name">${esc(device.name)}</div><div class="device-meta">${esc(device.area_name || "Kein Bereich")}${device.floor_name ? ` • ${esc(device.floor_name)}` : ""}${device.manufacturer ? ` • ${esc(device.manufacturer)}` : ""}${device.model ? ` • ${esc(device.model)}` : ""}</div></div><div class="device-actions"><button class="button primary small" data-action="prepare-device" data-device="${attr(device.device_id)}">Sinnvoll aktivieren</button><button class="button secondary small" data-action="configure-device-group" data-device="${attr(device.device_id)}" title="Entitäten zu einem Alexa-Gesamtgerät gruppieren oder wieder trennen">Alexa-Gerät konfigurieren</button><button class="button secondary small" data-action="${device.hidden ? "show-device" : "hide-device"}" data-device="${attr(device.device_id)}">${device.hidden ? "Einblenden" : "Gerät ausblenden"}</button></div></div>${expanded ? `<div class="entity-grid">${entities.map(entity => entityHtml(entity, device)).join("")}</div>` : ""}</section>`;
   }
 
   function deviceSummaryElement(device) {
@@ -329,7 +330,13 @@
     visibility.dataset.action = device.hidden ? "show-device" : "hide-device";
     visibility.dataset.device = String(device.device_id || "");
     visibility.textContent = device.hidden ? "Einblenden" : "Gerät ausblenden";
-    actions.append(prepare, visibility);
+    const grouping = document.createElement("button");
+    grouping.className = "button secondary small";
+    grouping.dataset.action = "configure-device-group";
+    grouping.dataset.device = String(device.device_id || "");
+    grouping.textContent = "Alexa-Gerät konfigurieren";
+    grouping.title = "Entitäten zu einem Alexa-Gesamtgerät gruppieren oder wieder trennen";
+    actions.append(prepare, grouping, visibility);
     head.append(toggle, title, actions);
     section.append(head);
     return section;
@@ -768,6 +775,65 @@
     finally { setBusy(button, false); }
   }
 
+  function openDeviceGroup(deviceId) {
+    const device = (model.devices || []).find(item => String(item.device_id) === String(deviceId));
+    if (!device) throw new Error("Home-Assistant-Gerät wurde nicht gefunden.");
+    const selectedEntities = (device.entities || []).filter(entity => entity.export?.enabled);
+    const combined = (device.entities || []).some(entity => entity.export?.group_mode === "combined");
+    const currentGroupName = (device.entities || []).find(entity => entity.export?.logical_device_name)?.export.logical_device_name;
+    document.getElementById("device-group-dialog").dataset.deviceId = String(deviceId);
+    document.getElementById("device-group-title").textContent = `Alexa-Gerät konfigurieren: ${device.name}`;
+    document.getElementById("device-group-name").value = currentGroupName || device.name || "";
+    document.querySelector('input[name="device-group-mode"][value="combined"]').checked = combined;
+    document.querySelector('input[name="device-group-mode"][value="separate"]').checked = !combined;
+    document.getElementById("device-group-entities").innerHTML = (device.entities || []).map(entity => {
+      const settings = entityConfig(entity.entity_id);
+      const enabled = entity.export?.enabled;
+      const label = settings.name || suggestedName(entity, device);
+      return `<div class="device-group-entity"><label class="device-group-selection"><input type="checkbox" data-group-entity="${attr(entity.entity_id)}" ${enabled ? "checked" : ""}><span><strong>${esc(entity.name || entity.entity_id)}</strong><small>${esc(entity.entity_id)}</small></span></label><label class="device-group-member-name">Alexa-Funktionsname<input data-group-name="${attr(entity.entity_id)}" value="${attr(label)}" maxlength="128" autocomplete="off"></label></div>`;
+    }).join("");
+    document.getElementById("device-group-name-field").classList.toggle("hidden", !combined);
+    document.getElementById("device-group-dialog").showModal();
+  }
+
+  async function saveDeviceGroup() {
+    const dialog = document.getElementById("device-group-dialog");
+    const button = document.getElementById("btn-save-device-group");
+    const entityIds = [...dialog.querySelectorAll("input[data-group-entity]:checked")]
+      .map(input => input.dataset.groupEntity);
+    if (!entityIds.length) return message("Wähle mindestens eine Entität aus.", "warn");
+    const mode = dialog.querySelector('input[name="device-group-mode"]:checked')?.value;
+    const memberNameInputs = [...dialog.querySelectorAll("input[data-group-name]")];
+    const names = Object.fromEntries(entityIds.map(entityId => [entityId,
+      String(memberNameInputs.find(input => input.dataset.groupName === entityId)?.value || "").trim()]));
+    const groupName = document.getElementById("device-group-name").value.trim();
+    if (mode === "combined" && !groupName) return message("Gib einen Namen für das Alexa-Gesamtgerät ein.", "warn");
+    setBusy(button, true, "Speichere…");
+    try {
+      await saveConfig();
+      const result = await request("/api/native-export/group", {
+        method: "POST",
+        body: JSON.stringify({
+          native_revision: config.native_revision,
+          device_id: dialog.dataset.deviceId,
+          entity_ids: entityIds,
+          mode,
+          name: groupName,
+          names,
+        }),
+      });
+      dialog.close();
+      await load(false);
+      message(mode === "combined"
+        ? `Alexa-Gesamtgerät „${groupName}“ gespeichert. Die ausgewählten Funktionen werden unter einem Alexa-Gerät angeboten; abgewählte Entitäten sind aus dem Export entfernt.`
+        : "Ausgewählte Entitäten werden wieder als einzelne Alexa-Geräte exportiert.", "warn");
+    } catch (error) {
+      message(`Alexa-Gerätegruppierung fehlgeschlagen: ${error.message}`, "err");
+    } finally {
+      setBusy(button, false);
+    }
+  }
+
   async function previewYaml() {
     try {
       const result = await request("/api/ha-export/preview", {method: "POST", body: JSON.stringify(config)});
@@ -846,6 +912,7 @@
       else if (action === "delete-selected-alexa") await deleteSelectedAlexa();
       else if (action === "assign-group") await assignGroup(button.dataset.entity, button.dataset.key);
       else if (action === "prepare-device") await prepareDevice(button.dataset.device);
+      else if (action === "configure-device-group") openDeviceGroup(button.dataset.device);
       else if (action === "disable-device-export") await disableDeviceExport(button.dataset.device);
       else if (action === "toggle-simple-device") toggleSimpleDevice(button, button.dataset.device);
       else if (action === "suggest-simple-name") {
@@ -938,6 +1005,11 @@
       document.getElementById("yaml-dialog").close(); await load(false); message("v6-Konfiguration gespeichert.");
     } catch (error) { message(error.message, "err"); }
   });
+  document.getElementById("btn-save-device-group").addEventListener("click", saveDeviceGroup);
+  document.getElementById("btn-close-device-group").addEventListener("click", () => document.getElementById("device-group-dialog").close());
+  document.querySelectorAll('input[name="device-group-mode"]').forEach(input => input.addEventListener("change", () => {
+    document.getElementById("device-group-name-field").classList.toggle("hidden", input.value !== "combined");
+  }));
   document.getElementById("btn-close-yaml").addEventListener("click", () => document.getElementById("yaml-dialog").close());
   document.getElementById("btn-close-alexa-details").addEventListener("click", () => document.getElementById("alexa-details-dialog").close());
   document.getElementById("btn-logout").addEventListener("click", () => logout().catch(error => message(error.message, "err")));
@@ -979,7 +1051,7 @@
       const status = await request("/api/native-export/lifecycle");
       if (status.running) reconciliationRunning = true;
       else if (reconciliationRunning) {
-        if (document.activeElement?.matches("input, select, textarea") || document.getElementById("settings-dialog").open || document.getElementById("yaml-dialog").open) return;
+        if (document.activeElement?.matches("input, select, textarea") || document.getElementById("settings-dialog").open || document.getElementById("yaml-dialog").open || document.getElementById("device-group-dialog").open) return;
         reconciliationRunning = false;
         const errors = [status.publish_error, status.legacy_error, status.background_error].filter(Boolean);
         const completed = `Alexa-Abgleich abgeschlossen. Alte v5-Geräte gelöscht: ${status.legacy_deleted || 0}. Abgewählte v6-Geräte gelöscht: ${status.unselected_native_deleted || 0}. Noch unerwünscht: ${status.selection_remaining ?? "ungeprüft"}. Bestand wird neu geladen.`;

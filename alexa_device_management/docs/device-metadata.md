@@ -10,9 +10,16 @@ anything and never automatically activate native endpoints.
 
 Each key in native `devices` is a stable logical endpoint, externally prefixed
 with `native:`. Multiple HA values, such as cistern liters and percentage,
-remain capabilities of one device with distinct controller instances. Selecting
-or renaming one bound entity in the editor updates that complete logical device.
-Endpoint IDs and existing capabilities are preserved.
+remain capabilities of one device with distinct controller instances. The
+device overview can explicitly group selected entities belonging to one HA
+device into a named Alexa endpoint, or expose them as separate Alexa endpoints.
+The `group_mode`, `ha_device_id`, and `members` fields record combined-group
+membership. Capability-level `enabled` flags control individual exported
+functions, and `capability_names` provides friendly names for controllers that
+need instances, such as each relay in a dual relay. Entities left unchecked in
+the grouping editor are removed from the native export; reconciliation then
+retires endpoints no longer selected. Endpoint IDs and unrelated capabilities
+are preserved.
 
 The native file remains disabled by default on new installations. Existing
 native files retain their global and individual activation settings. Selection

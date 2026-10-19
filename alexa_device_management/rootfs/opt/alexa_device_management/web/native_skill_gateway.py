@@ -60,7 +60,9 @@ def lookup_binding(config: dict, endpoint_id: str, interface: str, instance: str
     if not device or not device.get("enabled", True):
         raise web.HTTPNotFound(text="Unknown endpoint")
     for binding in device["capabilities"]:
-        if binding["interface"] == interface and binding.get("instance") == instance:
+        if (binding.get("enabled", True)
+                and binding["interface"] == interface
+                and binding.get("instance") == instance):
             return binding
     raise web.HTTPNotFound(text="Unknown capability")
 
@@ -91,7 +93,8 @@ async def state_route(request: web.Request) -> web.Response:
     device = config["devices"].get(endpoint_id)
     if not device or not device.get("enabled", True):
         raise web.HTTPNotFound(text="Unknown endpoint")
-    entities = sorted({cap["entity_id"] for cap in device["capabilities"]})
+    entities = sorted({cap["entity_id"] for cap in device["capabilities"]
+                       if cap.get("enabled", True)})
     states = {}
     for entity in entities:
         states[entity] = await ha_request("GET", "/states/" + entity, token=token)

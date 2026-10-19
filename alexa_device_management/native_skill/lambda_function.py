@@ -66,7 +66,9 @@ def migrated_legacy_ids(config):
     """Only actively enabled native devices can replace a v5 Discovery entry."""
     replacements = set()
     for device in config.get("devices", {}).values():
-        if not device.get("enabled", True) or not device.get("capabilities"):
+        if not device.get("enabled", True) or not any(
+            capability.get("enabled", True) for capability in device.get("capabilities", [])
+        ):
             continue
         old_id = device.get("replaces_legacy_endpoint")
         if isinstance(old_id, str) and old_id:
@@ -133,10 +135,11 @@ def capability_config(binding):
 def discovery(event, config):
     endpoints = []
     for endpoint_id, device in sorted(config["devices"].items()):
-        if not device.get("enabled", True) or not device["capabilities"]:
+        bindings = [binding for binding in device["capabilities"] if binding.get("enabled", True)]
+        if not device.get("enabled", True) or not bindings:
             continue
         capabilities = [{"type": "AlexaInterface", "interface": "Alexa", "version": "3"}]
-        capabilities.extend(capability_config(binding) for binding in device["capabilities"])
+        capabilities.extend(capability_config(binding) for binding in bindings)
         capabilities.append({"type": "AlexaInterface", "interface": "Alexa.EndpointHealth", "version": "3.1",
                              "properties": {"supported": [{"name": "connectivity"}],
                                             "proactivelyReported": False, "retrievable": True}})
@@ -295,7 +298,9 @@ def lambda_handler(event, context):
         device = config["devices"].get(endpoint_id)
         if not device or not device.get("enabled", True):
             return error(event, "NO_SUCH_ENDPOINT", "Unknown endpoint", external_id)
-        bindings = device["capabilities"]
+        bindings = [binding for binding in device["capabilities"] if binding.get("enabled", True)]
+        if not bindings:
+            return error(event, "NO_SUCH_ENDPOINT", "Unknown endpoint", external_id)
         if namespace == "Alexa" and name == "ReportState":
             states = gateway("/v1/state", "POST", {"endpoint_id": endpoint_id, "token": token})["states"]
             values = state_properties(bindings, states)
