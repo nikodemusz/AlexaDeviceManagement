@@ -16,6 +16,7 @@ import alexa_group_manager
 import ha_export
 import native_export
 import native_lifecycle
+from native_identity import embedded_native_endpoint_ids
 from native_skill_config import NativeSkillConfigStore
 
 STATIC_DIR = ha_export.STATIC_DIR
@@ -310,6 +311,9 @@ def _collect_identifiers(value: Any) -> set[str]:
                     "deviceserialnumber",
                 } and not isinstance(child, (dict, list)):
                     result.update(_canonical(child))
+                    if normalized == "applianceid":
+                        for endpoint_id in embedded_native_endpoint_ids(child):
+                            result.update(_canonical(endpoint_id))
                 if isinstance(child, (dict, list)):
                     walk(child)
         elif isinstance(current, list):
@@ -330,6 +334,9 @@ def _alexa_entity_id(device: dict[str, Any]) -> str:
         return explicit.lower()
 
     raw = device.get("raw") if isinstance(device.get("raw"), dict) else {}
+    legacy = raw.get("legacyAppliance") if isinstance(raw.get("legacyAppliance"), dict) else {}
+    for endpoint_id in embedded_native_endpoint_ids(legacy.get("applianceId")):
+        return endpoint_id.removeprefix("native:ha:")
     for value in (
         raw.get("entityId"),
         raw.get("entity_id"),

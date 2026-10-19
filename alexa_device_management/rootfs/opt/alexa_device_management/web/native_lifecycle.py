@@ -17,6 +17,7 @@ from aiohttp import web
 import alexa_event_support as support
 import ha_export
 from native_endpoints import endpoints
+from native_identity import embedded_native_endpoint_ids
 from native_skill_config import NativeSkillConfigStore
 
 STATUS_PATH = Path("/data/alexa_device_management/native_lifecycle.json")
@@ -45,11 +46,14 @@ def identifiers(device):
     def walk(value):
         if isinstance(value, dict):
             for key, child in value.items():
-                if key.replace("_", "").lower() in {
+                normalized_key = key.replace("_", "").lower()
+                if normalized_key in {
                     "id", "entityid", "endpointid", "applianceid", "serial", "serialnumber"
                 } and isinstance(child, str):
                     result.add(child)
                     result.add(child.removeprefix("amzn1.alexa.endpoint."))
+                    if normalized_key == "applianceid":
+                        result.update(embedded_native_endpoint_ids(child))
                 elif isinstance(child, (dict, list)):
                     walk(child)
                 elif isinstance(child, str) and child[:1] in ("{", "["):

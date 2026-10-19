@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.6.1
+
+- Der Alexa-Abgleich fragt jetzt auch `legacyAppliance.applianceId` ab und liest daraus die native `native:ha:<entity_id>`-Kennung. Amazons `legacyAppliance.entityId` ist bei diesen Skill-Geräten nur eine UUID; dadurch wurden ausgewählte Home-Assistant-Entitäten trotz vorhandenem Alexa-Endpunkt als ausstehend gezählt.
+
 ## 3.6.0
 
 - Home-Assistant-Geräte lassen sich in der Geräteübersicht als benanntes Alexa-Gesamtgerät mit mehreren Funktionen oder als mehrere einzelne Alexa-Geräte konfigurieren. Pro Funktion sind Name und Exportauswahl einstellbar; abgewählte Entitäten werden aus dem v6-Export entfernt und der Alexa-Abgleich startet automatisch.
