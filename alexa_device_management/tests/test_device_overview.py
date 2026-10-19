@@ -166,6 +166,47 @@ class DeviceOverviewTests(unittest.TestCase):
         self.assertEqual(result["summary"]["duplicates"], 1)
         self.assertEqual(result["alexa_only"], [])
 
+    def test_native_mapping_extracts_entity_from_skill_appliance_id_suffix(self):
+        entity_id = "switch.test_mirror"
+        endpoint_id = "native:ha:" + entity_id
+        native = {"enabled": True, "devices": {
+            "ha:" + entity_id: {"name": "Test mirror", "capabilities": [
+                {"entity_id": entity_id, "interface": "Alexa.PowerController"}
+            ]}
+        }}
+        alexa = {
+            "serial": "opaque-endpoint-id",
+            "appliance_id": "opaque-endpoint-id",
+            "name": "Test mirror",
+            "source": "smart_home",
+            "family": "Alexa Device Management",
+            "raw": {
+                "endpointId": "amzn1.alexa.endpoint.opaque-endpoint-id",
+                "legacyAppliance": {
+                    "applianceId": "SKILL_opaque_native:ha:switch.test_mirror",
+                    "entityId": "opaque-endpoint-id",
+                    "manufacturerName": "Alexa Device Management",
+                },
+            },
+        }
+        inventory = {"devices": [{"device_id": "bathroom", "name": "Bathroom",
+                                   "entities": [{"entity_id": entity_id,
+                                                 "domain": "switch", "name": "Test mirror"}]}]}
+
+        result = build_overview(
+            inventory, [alexa], [], {"entities": {}, "export_mode": "native"}, native
+        )
+        entity = result["devices"][0]["entities"][0]
+
+        self.assertEqual(entity["status"], "synced")
+        self.assertEqual(entity["native"]["endpoint_ids"], [endpoint_id])
+        self.assertEqual(entity["alexa"]["count"], 1)
+        self.assertEqual(entity["alexa"]["matches"][0]["entity_id"], entity_id)
+        self.assertEqual(result["summary"]["synced"], 1)
+        self.assertEqual(result["summary"]["pending"], 0)
+        self.assertEqual(result["summary"]["duplicates"], 0)
+        self.assertEqual(result["alexa_only"], [])
+
     def test_disabled_native_drafts_and_legacy_json_devices_are_not_active_exports(self):
         device = {"capabilities": [{"entity_id": "light.wohnzimmer"}]}
         endpoint = {"serial": "native:living", "source": "smart_home", "raw": {}}

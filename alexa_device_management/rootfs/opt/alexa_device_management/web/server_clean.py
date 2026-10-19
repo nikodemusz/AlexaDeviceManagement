@@ -246,6 +246,7 @@ ENDPOINTS_QUERY_IDENTITY = """query CustomerSmartHome {
       endpointId
       friendlyName
       legacyAppliance {
+        applianceId
         entityId
         manufacturerName
       }

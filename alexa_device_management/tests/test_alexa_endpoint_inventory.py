@@ -93,6 +93,7 @@ def test_graphql_identity_enriches_opaque_active_inventory_entry():
     graph = endpoint(serial, active["name"])
     graph["endpointId"] = "native:ha:switch.heizrelais_kellerbuero"
     graph["legacyAppliance"] = {
+        "applianceId": "SKILL_opaque_native:ha:switch.heizrelais_kellerbuero",
         "entityId": "native:ha:switch.heizrelais_kellerbuero",
         "manufacturerName": "Alexa Device Management",
     }
@@ -107,6 +108,29 @@ def test_graphql_identity_enriches_opaque_active_inventory_entry():
     assert devices[0]["raw"]["endpointId"] == graph["endpointId"]
     assert devices[0]["raw"]["legacyIdentifiers"] == graph["legacyIdentifiers"]
     assert devices[0]["raw"]["legacyAppliance"] == graph["legacyAppliance"]
+    assert "applianceId" in server_clean.ENDPOINTS_QUERY_IDENTITY
+
+
+def test_graphql_identity_exposes_native_appliance_id_suffix():
+    """Amazon's legacy entityId may be an opaque UUID; applianceId carries the HA ID."""
+    appliance_id = "SKILL_opaque_native:ha:switch.test_mirror"
+    graph = {
+        "endpointId": "amzn1.alexa.endpoint.opaque-endpoint-id",
+        "friendlyName": "Test mirror",
+        "legacyAppliance": {
+            "applianceId": appliance_id,
+            "entityId": "opaque-endpoint-id",
+            "manufacturerName": "Alexa Device Management",
+        },
+    }
+    server = make_server(active_devices=[], graph_endpoints=[graph])
+
+    inventory.install(server)
+    devices, errors = asyncio.run(server._fetch_devices_from_alexa({}))
+
+    assert errors == []
+    assert len(devices) == 1
+    assert devices[0]["raw"]["legacyAppliance"]["applianceId"] == appliance_id
 
 
 def test_native_endpoint_identity_from_legacy_appliance_is_kept_when_amazon_uuid_is_opaque():
