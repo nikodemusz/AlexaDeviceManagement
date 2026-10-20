@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.7.0
+
+- Die geöffnete Entitätenauswahl bleibt bei Bestandsaktualisierungen geöffnet. Im Lesemodus sind Auswahlfelder und Aktionen geschützt; „Bearbeiten“ pausiert den regelmäßigen Alexa-Abgleich, wartet den laufenden Durchlauf ab und gibt dann die Eingaben frei. „Fertig“ speichert und gibt den Abgleich wieder frei.
+
 ## 3.6.3
 
 - Der Alexa-Sync wartet vor dem Abgleich auf ausstehende Namensänderungen, damit kein alter Name aus der gespeicherten Konfiguration zurückkommt.

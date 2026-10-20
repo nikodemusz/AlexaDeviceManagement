@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Alexa-Geräteverwaltung</title>
-  <link rel="stylesheet" href="{{INGRESS_PATH}}/static/device_overview.css?v=3.6.3">
+  <link rel="stylesheet" href="{{INGRESS_PATH}}/static/device_overview.css?v=3.7.0">
 </head>
 <body>
   <header class="topbar">
@@ -28,6 +28,7 @@
       <button id="btn-event-sync" class="button primary">Änderungen an Alexa senden</button>
       <button id="btn-group-sync" class="button secondary">Alexa-Gruppen synchronisieren</button>
     </section>
+    <div id="sync-edit-status" class="message warn hidden" role="status" aria-live="polite"></div>
     <div id="v5-disabled" class="message warn hidden">v6 ist global deaktiviert. In den Einstellungen aktivieren, um ausgewählte Geräte für Alexa freizugeben.</div>
 
     <section class="filters">
@@ -159,7 +160,7 @@
   </dialog>
 
   <script>document.documentElement.dataset.ingressPath="{{INGRESS_PATH}}";</script>
-  <script src="{{INGRESS_PATH}}/static/device_overview.js?v=3.6.3"></script>
+  <script src="{{INGRESS_PATH}}/static/device_overview.js?v=3.7.0"></script>
   <script src="{{INGRESS_PATH}}/static/device_export_guard.js?v=3.5.0"></script>
 </body>
 </html>
