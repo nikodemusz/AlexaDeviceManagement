@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.6.3
+
+- Der Alexa-Sync wartet vor dem Abgleich auf ausstehende Namensänderungen, damit kein alter Name aus der gespeicherten Konfiguration zurückkommt.
+
 ## 3.6.2
 
 - Alexa-Namen in der Geräteübersicht lassen sich jetzt ausdrücklich speichern und werden zusätzlich beim Verlassen des Feldes übernommen. Die Oberfläche bestätigt den gespeicherten Wert.
