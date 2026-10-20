@@ -16,6 +16,16 @@ def test_autosave_does_not_replace_newer_browser_configuration():
     assert "savePromise.catch(() => {}).then" in SCRIPT
 
 
+def test_entity_alexa_name_has_explicit_save_and_commits_on_blur():
+    assert 'data-action="save-entity-name"' in SCRIPT
+    assert 'saveName.dataset.action = "save-entity-name"' in SCRIPT
+    assert 'else if (target.classList.contains("export-name"))' in SCRIPT
+    assert "Alexa-Name für ${entityId} wurde gespeichert." in SCRIPT
+    queue_start = SCRIPT.index("savePromise = savePromise.catch(() => {}).then")
+    snapshot = SCRIPT.index("const snapshot = JSON.parse(JSON.stringify(config))")
+    assert snapshot > queue_start
+
+
 def test_verifies_entities_and_names_from_written_yaml(tmp_path):
     target = tmp_path / "alexa.yaml"
     target.write_text(
