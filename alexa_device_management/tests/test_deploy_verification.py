@@ -26,6 +26,11 @@ def test_entity_alexa_name_has_explicit_save_and_commits_on_blur():
     assert snapshot > queue_start
 
 
+def test_alexa_sync_waits_for_pending_entity_name_save():
+    sync = SCRIPT.split("async function eventSync()", 1)[1].split("async function groupSync()", 1)[0]
+    assert sync.index("await saveConfig();") < sync.index('request("/api/native-export/sync"')
+
+
 def test_verifies_entities_and_names_from_written_yaml(tmp_path):
     target = tmp_path / "alexa.yaml"
     target.write_text(

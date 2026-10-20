@@ -793,6 +793,9 @@
   async function eventSync() {
     const button = document.getElementById("btn-event-sync"); setBusy(button, true, "Synchronisiere…");
     try {
+      // A name edit may still be saving after its input blur. Persist all queued
+      // edits before reconciliation reads the native configuration from disk.
+      await saveConfig();
       const result = await request("/api/native-export/sync", {method: "POST", body: JSON.stringify({force: true})});
       if (result.queued) { message(result.message, "warn"); return; }
       message(`Alexa Event Gateway erfolgreich.\nUpdates: ${result.official?.add_or_update_count || 0}\nNative Löschungen: ${result.official?.delete_count || 0}\nAlte v5-Geräte gelöscht: ${result.lifecycle?.legacy_deleted || 0}\nVerbleibende v5-Geräte: ${result.lifecycle?.legacy_remaining ?? "ungeprüft"}`); await load(true);
