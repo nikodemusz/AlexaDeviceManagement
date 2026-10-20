@@ -182,14 +182,19 @@
     return `<span class="badge ${cls}">${esc(STATUS_TEXT[status] || status)}</span>`;
   }
 
-  function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(saveConfig, 500); }
+  function scheduleSave() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => { saveConfig().catch(() => {}); }, 500);
+  }
   function saveConfig() {
     clearTimeout(saveTimer);
     if (!config) return Promise.resolve();
-    const snapshot = JSON.parse(JSON.stringify(config));
     savePromise = savePromise.catch(() => {}).then(async () => {
+      // Capture only after earlier queued saves complete so the native revision
+      // is current and rapid edits cannot overwrite each other with a stale CAS.
+      const snapshot = JSON.parse(JSON.stringify(config));
       try {
-        const result = await request("/api/ha-export/autosave", {method: "POST", body: JSON.stringify({...snapshot, native_revision: config.native_revision})});
+        const result = await request("/api/ha-export/autosave", {method: "POST", body: JSON.stringify(snapshot)});
         if (result.configuration?.native_revision) config.native_revision = result.configuration.native_revision;
         for (const [entityId, saved] of Object.entries(result.configuration?.entities || {})) {
           const current = config.entities?.[entityId];
@@ -199,6 +204,7 @@
             }
           }
         }
+        return result;
       } catch (error) {
         message(`Autosave fehlgeschlagen: ${error.message}`, "err");
         throw error;
@@ -285,7 +291,7 @@
     const exportData = entity.export;
     const matches = entity.alexa?.matches || [];
     const categories = (model.display_categories || []).map(category => `<option value="${attr(category)}" ${exportData.display_category === category ? "selected" : ""}>${esc(category)}</option>`).join("");
-    return `<article class="entity status-${attr(entity.status)} ${entity.hidden ? "hidden-item" : ""}" data-entity="${attr(entity.entity_id)}"><div class="entity-top"><input class="export-toggle" type="checkbox" data-entity="${attr(entity.entity_id)}" ${exportData.enabled ? "checked" : ""} title="Für Alexa exportieren"><div><div class="entity-name">${esc(entity.name || entity.entity_id)}</div><div class="entity-id">${esc(entity.entity_id)}</div><div class="badges">${statusBadge(entity.status)}${entity.native?.enabled ? '<span class="badge alexa">Nativ v6</span>' : ""}${matches.length ? `<span class="badge alexa">${matches.length} Alexa-Endpunkt${matches.length === 1 ? "" : "e"}</span>` : ""}${isTechnical(entity) ? '<span class="badge">technisch</span>' : ""}${entity.hidden ? '<span class="badge hidden-badge">ausgeblendet</span>' : ""}</div></div><button class="button secondary small" data-action="${entity.hidden_directly ? "show-entity" : "hide-entity"}" data-entity="${attr(entity.entity_id)}">${entity.hidden_directly ? "Einblenden" : "Ausblenden"}</button></div><div class="fields"><div class="field"><label>Alexa-Name</label><input class="export-name" data-entity="${attr(entity.entity_id)}" value="${attr(exportData.name)}" placeholder="${attr(suggestedName(entity, device))}"></div><div class="field"><label>Kategorie</label><select class="export-category" data-entity="${attr(entity.entity_id)}"><option value="">Automatisch</option>${categories}</select></div><div class="field full"><label>Alexa-Gruppe</label><input class="export-group" data-entity="${attr(entity.entity_id)}" value="${attr(exportData.alexa_group)}" list="group-list" placeholder="${attr(device.area_name || "")}"></div></div><div class="entity-actions"><button class="button secondary small" data-action="fill-entity" data-entity="${attr(entity.entity_id)}">Vorschlag übernehmen</button></div>${matches.map(match => alexaMatchHtml(match, entity)).join("")}</article>`;
+    return `<article class="entity status-${attr(entity.status)} ${entity.hidden ? "hidden-item" : ""}" data-entity="${attr(entity.entity_id)}"><div class="entity-top"><input class="export-toggle" type="checkbox" data-entity="${attr(entity.entity_id)}" ${exportData.enabled ? "checked" : ""} title="Für Alexa exportieren"><div><div class="entity-name">${esc(entity.name || entity.entity_id)}</div><div class="entity-id">${esc(entity.entity_id)}</div><div class="badges">${statusBadge(entity.status)}${entity.native?.enabled ? '<span class="badge alexa">Nativ v6</span>' : ""}${matches.length ? `<span class="badge alexa">${matches.length} Alexa-Endpunkt${matches.length === 1 ? "" : "e"}</span>` : ""}${isTechnical(entity) ? '<span class="badge">technisch</span>' : ""}${entity.hidden ? '<span class="badge hidden-badge">ausgeblendet</span>' : ""}</div></div><button class="button secondary small" data-action="${entity.hidden_directly ? "show-entity" : "hide-entity"}" data-entity="${attr(entity.entity_id)}">${entity.hidden_directly ? "Einblenden" : "Ausblenden"}</button></div><div class="fields"><div class="field"><label>Alexa-Name</label><div class="entity-name-editor"><input class="export-name" data-entity="${attr(entity.entity_id)}" value="${attr(exportData.name)}" placeholder="${attr(suggestedName(entity, device))}"><button class="button secondary small save-entity-name" data-action="save-entity-name" data-entity="${attr(entity.entity_id)}">Speichern</button></div></div><div class="field"><label>Kategorie</label><select class="export-category" data-entity="${attr(entity.entity_id)}"><option value="">Automatisch</option>${categories}</select></div><div class="field full"><label>Alexa-Gruppe</label><input class="export-group" data-entity="${attr(entity.entity_id)}" value="${attr(exportData.alexa_group)}" list="group-list" placeholder="${attr(device.area_name || "")}"></div></div><div class="entity-actions"><button class="button secondary small" data-action="fill-entity" data-entity="${attr(entity.entity_id)}">Vorschlag übernehmen</button></div>${matches.map(match => alexaMatchHtml(match, entity)).join("")}</article>`;
   }
 
   function deviceHtml(device, entities) {
@@ -722,6 +728,13 @@
       nameInput.value = String(entity.export?.name || "");
       nameInput.placeholder = suggestedName(entity, device);
       nameInput.setAttribute("aria-label", `Alexa-Name für ${entity.name || entity.entity_id}`);
+      const saveName = document.createElement("button");
+      saveName.type = "button";
+      saveName.className = "button secondary small save-entity-name";
+      saveName.dataset.action = "save-entity-name";
+      saveName.dataset.entity = String(entity.entity_id || "");
+      saveName.textContent = "Speichern";
+      saveName.title = "Alexa-Namen jetzt dauerhaft speichern";
       const suggestion = document.createElement("button");
       suggestion.type = "button";
       suggestion.className = "button secondary small simple-name-suggestion";
@@ -729,7 +742,7 @@
       suggestion.dataset.entity = String(entity.entity_id || "");
       suggestion.dataset.suggestion = suggestedName(entity, device);
       suggestion.textContent = "Vorschlag";
-      nameField.append(nameCaption, nameInput, suggestion);
+      nameField.append(nameCaption, nameInput, saveName, suggestion);
       entityRow.append(checkbox, text, nameField);
       list.append(entityRow);
     }
@@ -742,6 +755,31 @@
       const settings = entityConfig(entityId);
       settings.name = suggestedName(entity, device); settings.display_category = suggestedCategory(entity); settings.alexa_group ||= device.area_name || ""; settings.enabled = true;
       await saveConfig(); await load(false); return;
+    }
+  }
+
+  async function saveEntityName(button) {
+    const entityId = String(button.dataset.entity || "");
+    const input = [...document.querySelectorAll(".export-name")]
+      .find(item => item.dataset.entity === entityId);
+    if (!entityId || !input) throw new Error("Alexa-Namensfeld wurde nicht gefunden.");
+    const name = input.value;
+    entityConfig(entityId).name = name;
+    button.disabled = true;
+    button.textContent = "Speichert…";
+    try {
+      const result = await saveConfig();
+      if (result.configuration?.entities?.[entityId]?.name !== name) {
+        throw new Error("Der gespeicherte Name stimmt nicht mit der Eingabe überein.");
+      }
+      button.textContent = "Gespeichert";
+      message(`Alexa-Name für ${entityId} wurde dauerhaft gespeichert.`, "ok");
+      setTimeout(() => { if (button.isConnected) button.textContent = "Speichern"; }, 1800);
+    } catch (error) {
+      button.textContent = "Erneut speichern";
+      throw error;
+    } finally {
+      button.disabled = false;
     }
   }
 
@@ -923,6 +961,7 @@
         if (input) input.value = value;
         await saveConfig(); message(`Alexa-Name für ${entityId} wurde übernommen.`);
       }
+      else if (action === "save-entity-name") await saveEntityName(button);
       else if (action === "fill-entity") await fillEntity(button.dataset.entity);
     } catch (error) { message(error.message, "err"); }
   }
@@ -982,6 +1021,22 @@
       }
       await saveConfig(); await load(false); message(`${entityId} wurde ${target.checked ? "für v6 aktiviert" : "für v6 deaktiviert"}. Der Alexa-Abgleich übernimmt die gespeicherte Auswahl.`, "warn");
     } else if (target.classList.contains("export-category")) { settings.display_category = target.value; scheduleSave(); }
+    else if (target.classList.contains("export-name")) {
+      settings.name = target.value;
+      const saveButton = target.closest(".field, .simple-alexa-name")?.querySelector('.save-entity-name');
+      // Clicking the explicit save button fires change first; let its handler
+      // perform the single confirmed write in that case.
+      if (event.relatedTarget === saveButton || document.activeElement === saveButton) return;
+      try {
+        const result = await saveConfig();
+        if (result.configuration?.entities?.[entityId]?.name !== target.value) {
+          throw new Error("Gespeicherter Name weicht von der Eingabe ab.");
+        }
+        message(`Alexa-Name für ${entityId} wurde gespeichert.`, "ok");
+      } catch (error) {
+        message(`Alexa-Name konnte nicht gespeichert werden: ${error.message}`, "err");
+      }
+    }
   });
   document.getElementById("content").addEventListener("input", event => {
     const target = event.target, entityId = target.dataset.entity; if (!entityId) return;

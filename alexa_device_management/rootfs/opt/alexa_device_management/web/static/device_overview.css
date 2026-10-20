@@ -30,6 +30,7 @@ main{max-width:1600px;margin:auto;padding:16px}.workflow{margin-bottom:12px}
 .entity-top{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:9px;align-items:start}.entity-top input[type=checkbox]{width:22px;height:22px}.entity-name{font-weight:700;overflow-wrap:anywhere}.entity-id{font:11px ui-monospace,monospace;color:#475569;overflow-wrap:anywhere}
 .badges{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}.badge{border-radius:999px;padding:3px 7px;font-size:11px;background:#e2e8f0;color:#475569}.badge.synced{background:#dcfce7;color:#166534}.badge.pending{background:#fef3c7;color:#92400e}.badge.problem{background:#fee2e2;color:#991b1b}.badge.alexa{background:#e0f2fe;color:#075985}.badge.hidden-badge{background:#f1f5f9;color:#475569}
 .fields{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}.field.full{grid-column:1/-1}.field label{display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:4px}.entity-actions{margin-top:9px}
+.entity-name-editor{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center}.entity-name-editor input{min-width:0}
 .alexa-match{margin-top:9px;padding-top:9px;border-top:1px dashed #cbd5e1}.alexa-line{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:start}.alexa-name{font-weight:650}.alexa-meta{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
 .alexa-only-title{margin:20px 0 8px}.alexa-only-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px}.alexa-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}.alexa-card.orphaned{border-color:#fca5a5;background:var(--danger-bg)}.alexa-card.hidden-item{opacity:.65}
 .alexa-selection-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.alexa-selection-toolbar label,.alexa-select{display:flex;align-items:center;gap:7px}.alexa-selection-toolbar span{color:var(--muted);font-size:12px}.alexa-select{font-size:12px;color:var(--muted);margin-bottom:7px}.alexa-select input,.alexa-selection-toolbar input{width:18px;height:18px}
@@ -54,7 +55,7 @@ pre{margin:0;max-height:70vh;overflow:auto;padding:16px;background:#111827;color
 .simple-entity-list { grid-column: 1/-1; display: grid; gap: 5px; padding-top: 8px; border-top: 1px solid var(--line); }
 .simple-entity-row { display: grid; grid-template-columns: auto minmax(180px,1fr) minmax(220px,1fr); align-items: center; gap: 8px; padding: 5px 2px; overflow-wrap: anywhere; }
 .simple-entity-row input { width: 18px; height: 18px; flex: 0 0 auto; }
-.simple-entity-row .simple-alexa-name { display: grid; grid-template-columns: auto minmax(140px,1fr) auto; align-items: center; gap: 7px; font-size: 12px; font-weight: 650; }
+.simple-entity-row .simple-alexa-name { display: grid; grid-template-columns: auto minmax(140px,1fr) auto auto; align-items: center; gap: 7px; font-size: 12px; font-weight: 650; }
 .simple-entity-row .simple-alexa-name input { width: 100%; height: auto; padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 7px; background: var(--panel); color: var(--text); }
 .simple-entity-row .simple-name-suggestion { width: auto; height: auto; }
 @media(max-width:700px){.simple-device-row{grid-template-columns:1fr}.simple-device-row .device-actions{justify-content:flex-start}.simple-entity-row{grid-template-columns:auto minmax(0,1fr)}.simple-entity-row .simple-alexa-name{grid-column:2}}
@@ -84,7 +85,7 @@ pre{margin:0;max-height:70vh;overflow:auto;padding:16px;background:#111827;color
   .simple-entity-row:last-child{border-bottom:0}
   .simple-entity-row input[type="checkbox"]{width:16px;height:16px}
   .simple-entity-row .simple-alexa-name{
-    grid-column:2;grid-template-columns:minmax(0,1fr) auto;
+    grid-column:2;grid-template-columns:minmax(0,1fr) auto auto;
     gap:5px;font-size:11px;line-height:1.3;
   }
   .simple-entity-row .simple-alexa-name input:not([type="checkbox"]){
@@ -101,6 +102,7 @@ pre{margin:0;max-height:70vh;overflow:auto;padding:16px;background:#111827;color
   .fields{gap:5px;margin-top:5px}
   .field label{font-size:10px;margin-bottom:2px}
   .field input,.field select{padding:5px 6px;font-size:16px}
+  .entity-name-editor{grid-template-columns:minmax(0,1fr) auto}
   .entity-actions,.alexa-match{margin-top:5px}
   .alexa-match{padding-top:5px}
   .button.small{padding:4px 6px;font-size:11px}

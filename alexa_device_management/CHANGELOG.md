@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.6.2
+
+- Alexa-Namen in der Geräteübersicht lassen sich jetzt ausdrücklich speichern und werden zusätzlich beim Verlassen des Feldes übernommen. Die Oberfläche bestätigt den gespeicherten Wert.
+- Wartende Autosaves erfassen die Konfiguration erst nach vorherigen Schreibvorgängen und verwenden damit die aktuelle v6-Revision; schnelle Namensänderungen laufen nicht mehr mit einer veralteten Revision in einen Konflikt.
+
 ## 3.6.1
 
 - Der Alexa-Abgleich fragt jetzt auch `legacyAppliance.applianceId` ab und liest daraus die native `native:ha:<entity_id>`-Kennung. Amazons `legacyAppliance.entityId` ist bei diesen Skill-Geräten nur eine UUID; dadurch wurden ausgewählte Home-Assistant-Entitäten trotz vorhandenem Alexa-Endpunkt als ausstehend gezählt.

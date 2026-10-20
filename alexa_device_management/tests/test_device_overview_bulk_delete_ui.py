@@ -35,5 +35,5 @@ class AlexaBulkDeleteUiTests(unittest.TestCase):
     def test_failed_bulk_delete_targets_remain_selected_and_versioned_assets_refresh(self):
         self.assertIn("Fehlgeschlagene Geräte bleiben in der Auswahl.", SCRIPT)
         self.assertIn("selectedAlexaKeys.delete(item.key)", SCRIPT)
-        self.assertIn("device_overview.js?v=3.6.1", HTML)
-        self.assertIn("device_overview.css?v=3.6.1", HTML)
+        self.assertIn("device_overview.js?v=3.6.2", HTML)
+        self.assertIn("device_overview.css?v=3.6.2", HTML)
