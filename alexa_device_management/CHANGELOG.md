@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.7.0
+
+- Die Zähler in der Geräteübersicht sind anklickbare Filter. Treffer werden einschließlich ausgeblendeter Einträge aufgeklappt; Duplikate haben einen eigenen Filter.
+- Bei bereits ausgewählten, dimmbaren Home-Assistant-Lichtern ergänzt der Export fehlende `Alexa.BrightnessController`-Funktionen anhand der unterstützten Farbmodi. Ein-/Aus-Lichter erhalten keine Dimmfunktion.
+
 ## 3.6.3
 
 - Der Alexa-Sync wartet vor dem Abgleich auf ausstehende Namensänderungen, damit kein alter Name aus der gespeicherten Konfiguration zurückkommt.

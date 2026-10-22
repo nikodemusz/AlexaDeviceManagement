@@ -35,5 +35,15 @@ class AlexaBulkDeleteUiTests(unittest.TestCase):
     def test_failed_bulk_delete_targets_remain_selected_and_versioned_assets_refresh(self):
         self.assertIn("Fehlgeschlagene Geräte bleiben in der Auswahl.", SCRIPT)
         self.assertIn("selectedAlexaKeys.delete(item.key)", SCRIPT)
-        self.assertIn("device_overview.js?v=3.6.3", HTML)
-        self.assertIn("device_overview.css?v=3.6.3", HTML)
+        self.assertIn("device_overview.js?v=3.7.0", HTML)
+        self.assertIn("device_overview.css?v=3.7.0", HTML)
+
+    def test_summary_counters_filter_and_expand_their_matching_entities(self):
+        self.assertIn('data-summary-filter="${status}"', SCRIPT)
+        self.assertIn('if (filter.status === "duplicates" && entity.status !== "duplicate") return false;', SCRIPT)
+        self.assertIn('option value="duplicates"', HTML)
+        self.assertIn('option value="ha_devices"', HTML)
+        self.assertIn('option value="ha_entities"', HTML)
+        self.assertIn("includeHiddenSummaryMatches = true", SCRIPT)
+        self.assertIn("expandSummaryMatches();", SCRIPT)
+        self.assertIn("simpleEntityList(item.device, item.entities)", SCRIPT)
