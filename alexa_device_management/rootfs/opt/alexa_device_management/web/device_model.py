@@ -78,6 +78,8 @@ def validate_devices(devices: Any) -> dict[str, dict[str, Any]]:
         group_mode = raw.get("group_mode")
         if group_mode is not None and group_mode not in ("combined", "separate"):
             raise DeviceModelError(f"{endpoint_id}: group_mode must be combined or separate")
+        if raw.get("display_category_mode") not in (None, "custom", "standard"):
+            raise DeviceModelError(f"{endpoint_id}: display_category_mode must be custom or standard")
         ha_device_id = raw.get("ha_device_id")
         if ha_device_id is not None and (not isinstance(ha_device_id, str) or not ha_device_id.strip()):
             raise DeviceModelError(f"{endpoint_id}: ha_device_id must be a non-empty string")
@@ -101,6 +103,8 @@ def validate_devices(devices: Any) -> dict[str, dict[str, Any]]:
                 raise DeviceModelError(f"{endpoint_id}: capability must be an object")
             if type(cap.get("enabled", True)) is not bool:
                 raise DeviceModelError(f"{endpoint_id}: capability enabled must be true or false")
+            if cap.get("capability_mode") not in (None, "custom"):
+                raise DeviceModelError(f"{endpoint_id}: capability_mode must be custom when present")
             capability_names = cap.get("capability_names")
             if capability_names is not None and (
                 not isinstance(capability_names, list)

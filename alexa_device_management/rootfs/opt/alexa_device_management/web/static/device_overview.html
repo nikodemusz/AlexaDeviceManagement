@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Alexa-Geräteverwaltung</title>
-  <link rel="stylesheet" href="{{INGRESS_PATH}}/static/device_overview.css?v=3.7.0">
+  <link rel="stylesheet" href="{{INGRESS_PATH}}/static/device_overview.css?v=3.8.0">
 </head>
 <body>
   <header class="topbar">
@@ -147,6 +147,7 @@
       </header>
       <div class="dialog-content">
         <p class="muted">Wähle die Home-Assistant-Entitäten aus, die Alexa erhalten soll. Abgewählte Entitäten werden aus dem Alexa-Export entfernt. Sie können danach wieder einzeln aktiviert werden.</p>
+        <p class="muted">Standardprofile: Dimmer erhalten Ein/Aus und Helligkeits-Slider, Rollläden nur den Positions-Slider, Thermostate Modus, Sollwert und Ist-Temperatur. Unter „Eigene Funktionen“ kannst du davon abweichen.</p>
         <fieldset>
           <legend>Exportform</legend>
           <label class="check"><input type="radio" name="device-group-mode" value="combined"> Ein Alexa-Gesamtgerät mit den ausgewählten Funktionen</label>
@@ -163,7 +164,7 @@
   </dialog>
 
   <script>document.documentElement.dataset.ingressPath="{{INGRESS_PATH}}";</script>
-  <script src="{{INGRESS_PATH}}/static/device_overview.js?v=3.7.0"></script>
+  <script src="{{INGRESS_PATH}}/static/device_overview.js?v=3.8.0"></script>
   <script src="{{INGRESS_PATH}}/static/device_export_guard.js?v=3.5.0"></script>
 </body>
 </html>

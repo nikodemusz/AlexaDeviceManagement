@@ -284,6 +284,7 @@ class NativeDeviceContractTests(unittest.TestCase):
             "native:heating": {
                 ("Alexa.ThermostatController", "targetSetpoint", None): {"value": 21, "scale": "CELSIUS"},
                 ("Alexa.ThermostatController", "thermostatMode", None): "HEAT",
+                ("Alexa.ThermostatController", "thermostatTemperatureAmbient", None): {"value": 20.5, "scale": "CELSIUS"},
                 ("Alexa.TemperatureSensor", "temperature", None): {"value": 20.5, "scale": "CELSIUS"}},
         }
         for endpoint, values in expected.items():

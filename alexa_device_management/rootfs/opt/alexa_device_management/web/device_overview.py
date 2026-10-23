@@ -602,7 +602,10 @@ def build_overview(
                     "name": str(settings.get("name") or ""),
                     "description": str(settings.get("description") or ""),
                     "display_category": str(settings.get("display_category") or ""),
+                    "display_category_mode": str(settings.get("display_category_mode") or "standard"),
                     "alexa_group": str(settings.get("alexa_group") or ""),
+                    "capability_mode": str(settings.get("capability_mode") or "standard"),
+                    "capabilities": list(settings.get("capabilities") or []),
                 },
                 "alexa": {
                     "present": bool(matches),

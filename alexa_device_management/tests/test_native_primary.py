@@ -80,6 +80,38 @@ class NativePrimaryTests(unittest.TestCase):
         self.assertEqual([c["interface"] for c in updated["devices"]["desk"]["capabilities"]],
                          ["Alexa.PowerController"])
 
+    def test_standard_cover_profile_is_position_slider_without_a_switch_or_stop_button(self):
+        inventory = {"devices": [{"entities": [{"entity_id": "cover.blind", "supported_features": 4}]}]}
+        updated = native_export.apply_entities(config(), {"cover.blind": {"enabled": True}}, inventory)
+        capabilities = updated["devices"]["ha:cover.blind"]["capabilities"]
+        self.assertEqual([cap["interface"] for cap in capabilities], ["Alexa.RangeController"])
+        self.assertEqual(capabilities[0]["instance"], "cover.position")
+
+    def test_custom_cover_can_export_only_stop_without_position_support(self):
+        inventory = {"devices": [{"entities": [{"entity_id": "cover.blind", "supported_features": 0}]}]}
+        updated = native_export.apply_entities(config(), {"cover.blind": {
+            "enabled": True, "capability_mode": "custom", "capabilities": ["Alexa.PlaybackController"]
+        }}, inventory)
+        active = [cap for cap in updated["devices"]["ha:cover.blind"]["capabilities"]
+                  if cap.get("enabled", True)]
+        self.assertEqual([cap["interface"] for cap in active], ["Alexa.PlaybackController"])
+
+    def test_standard_relay_category_uses_device_names_without_changing_on_off_semantics(self):
+        for entity_id, name, category in (
+            ("switch.badlicht", "Badlicht", "LIGHT"),
+            ("switch.keller_steckdose", "Keller Steckdose", "SMARTPLUG"),
+            ("switch.heizventil", "Heizventil", "SWITCH"),
+        ):
+            with self.subTest(entity_id=entity_id):
+                inventory = {"devices": [{"name": name, "entities": [
+                    {"entity_id": entity_id, "domain": "switch", "name": name}
+                ]}]}
+                updated = native_export.apply_entities(config(), {entity_id: {"enabled": True}}, inventory)
+                device = updated["devices"]["ha:" + entity_id]
+                self.assertEqual(device["display_category"], category)
+                self.assertEqual([cap["interface"] for cap in device["capabilities"]],
+                                 ["Alexa.PowerController"])
+
     def test_unsupported_new_devices_do_not_partially_change_configuration(self):
         original = config()
         with self.assertRaises(ValueError):

@@ -50,7 +50,7 @@ class MigrationTests(unittest.TestCase):
         self.assertIn("zisterne", result["devices"])
         self.assertEqual(result["devices"]["ha:cover.blind"]["display_category"], "INTERIOR_BLIND")
         self.assertEqual([cap["interface"] for cap in result["devices"]["ha:cover.blind"]["capabilities"]],
-                         ["Alexa.RangeController", "Alexa.PlaybackController"])
+                         ["Alexa.RangeController"])
         NativeSkillConfigStore.validate(result)
         self.assertEqual(module.migrated_legacy_ids(result), set())
 
