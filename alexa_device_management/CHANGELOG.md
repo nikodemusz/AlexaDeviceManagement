@@ -2,6 +2,7 @@
 
 ## 3.7.0
 
+- Die geöffnete Entitätenauswahl bleibt bei Bestandsaktualisierungen geöffnet. Im Lesemodus sind Auswahlfelder und Aktionen geschützt; „Bearbeiten“ pausiert den regelmäßigen Alexa-Abgleich, wartet den laufenden Durchlauf ab und gibt dann die Eingaben frei. „Fertig“ speichert und gibt den Abgleich wieder frei.
 - Die Zähler in der Geräteübersicht sind anklickbare Filter. Treffer werden einschließlich ausgeblendeter Einträge aufgeklappt; Duplikate haben einen eigenen Filter.
 - Bei bereits ausgewählten, dimmbaren Home-Assistant-Lichtern ergänzt der Export fehlende `Alexa.BrightnessController`-Funktionen anhand der unterstützten Farbmodi. Ein-/Aus-Lichter erhalten keine Dimmfunktion.
 

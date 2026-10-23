@@ -46,4 +46,17 @@ class AlexaBulkDeleteUiTests(unittest.TestCase):
         self.assertIn('option value="ha_entities"', HTML)
         self.assertIn("includeHiddenSummaryMatches = true", SCRIPT)
         self.assertIn("expandSummaryMatches();", SCRIPT)
-        self.assertIn("simpleEntityList(item.device, item.entities)", SCRIPT)
+        self.assertIn('if (isOpen) renderSimpleEntityList(row, item.device, isEditing)', SCRIPT)
+
+    def test_entity_list_stays_open_and_is_read_only_until_sync_is_paused(self):
+        self.assertIn("const expandedSimpleDevices = new Set();", SCRIPT)
+        self.assertIn("if (isOpen) renderSimpleEntityList(row, item.device, isEditing)", SCRIPT)
+        self.assertIn('edit.dataset.action = "edit-simple-device"', SCRIPT)
+        self.assertIn("checkbox.disabled = !isEditing", SCRIPT)
+        self.assertIn("nameInput.disabled = !isEditing", SCRIPT)
+        self.assertIn("saveName.disabled = !isEditing", SCRIPT)
+        self.assertIn("await acquireSyncPause();", SCRIPT)
+        self.assertIn("await saveConfig();", SCRIPT)
+        self.assertIn("await releaseSyncPause();", SCRIPT)
+        self.assertIn('request("/api/native-export/lifecycle/pause"', SCRIPT)
+        self.assertIn("if (hasEditorSession()) {", SCRIPT)
