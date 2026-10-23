@@ -21,6 +21,17 @@ the grouping editor are removed from the native export; reconciliation then
 retires endpoints no longer selected. Endpoint IDs and unrelated capabilities
 are preserved.
 
+The editor applies domain-based standard profiles by default. Dimmable lights
+use PowerController and BrightnessController, covers use the writable position
+RangeController, and climate entities use ThermostatController for mode, target
+setpoint and current ambient temperature. Switches use PowerController; their
+Alexa display category is suggested as LIGHT, SMARTPLUG or SWITCH from the
+entity/device names and class. A simple relay named as a heating valve remains
+an on/off switch; a real thermostat requires a climate entity. In the group
+editor, explicitly choosing “Eigene Funktionen” stores the selected controller
+interfaces and marks them with `capability_mode: custom`. Returning to the
+standard profile regenerates its domain defaults.
+
 The native file remains disabled by default on new installations. Existing
 native files retain their global and individual activation settings. Selection
 is explicit; unsupported new types fail rather than falling back to v5.

@@ -200,16 +200,62 @@
   function isUseful(entity) {
     return !isTechnical(entity) && ["light", "switch", "cover", "climate", "fan"].includes(entity.domain);
   }
-  function suggestedCategory(entity) {
-    if (entity.category_suggestion && entity.category_suggestion !== "OTHER") return entity.category_suggestion;
+  function suggestedCategory(entity, device = null) {
     if (entity.domain === "light") return "LIGHT";
     if (entity.domain === "cover") return entity.device_class === "garage" ? "GARAGE_DOOR" : "INTERIOR_BLIND";
     if (entity.domain === "climate") return "THERMOSTAT";
     if (entity.domain === "lock") return "LOCK";
     if (entity.domain === "camera") return "CAMERA";
     if (["scene", "script"].includes(entity.domain)) return "SCENE_TRIGGER";
-    if (entity.domain === "switch" && entity.device_class === "outlet") return "SMARTPLUG";
+    if (entity.domain === "switch") {
+      const text = `${entity.entity_id || ""} ${entity.name || ""} ${device?.name || ""}`.toLocaleLowerCase();
+      if (entity.device_class === "outlet" || /steckdose|stecker|smart ?plug|socket|outlet|plug/.test(text)) return "SMARTPLUG";
+      if (/lampe|licht|light|beleuchtung|bulb/.test(text)) return "LIGHT";
+      if (entity.category_suggestion && entity.category_suggestion !== "OTHER") return entity.category_suggestion;
+      return "SWITCH";
+    }
+    if (entity.category_suggestion && entity.category_suggestion !== "OTHER") return entity.category_suggestion;
     return "SWITCH";
+  }
+  function capabilityOptions(entity) {
+    const power = {id: "Alexa.PowerController", label: "Ein/Aus-Schalter"};
+    if (entity.domain === "light") {
+      const options = [power];
+      const modes = entity.supported_color_modes || [];
+      if (modes.some(mode => !["onoff", "unknown"].includes(mode))) {
+        options.push({id: "Alexa.BrightnessController", label: "Helligkeit / Dimmer-Slider"});
+      }
+      return options;
+    }
+    if (["switch", "fan"].includes(entity.domain)) return [power];
+    if (entity.domain === "cover") {
+      const options = [];
+      if ((Number(entity.supported_features || 0) & 4) === 4) {
+        options.push({id: "Alexa.RangeController", label: "Position / Slider"});
+      }
+      options.push({id: "Alexa.PlaybackController", label: "Stopp-Taste"});
+      return options;
+    }
+    if (entity.domain === "climate") return [{id: "Alexa.ThermostatController", label: "Thermostat: Modus, Sollwert und Ist-Temperatur"}];
+    if (entity.domain === "binary_sensor") {
+      if (["door", "window", "opening", "garage_door", "lock"].includes(entity.device_class)) {
+        return [{id: "Alexa.ContactSensor", label: "Kontaktstatus (nur lesen)"}];
+      }
+      if (["motion", "occupancy", "presence"].includes(entity.device_class)) {
+        return [{id: "Alexa.MotionSensor", label: "Bewegung (nur lesen)"}];
+      }
+    }
+    if (entity.domain === "sensor" && entity.device_class === "temperature") {
+      return [{id: "Alexa.TemperatureSensor", label: "Temperatur (nur lesen)"}];
+    }
+    return [];
+  }
+  function roleNote(entity) {
+    const text = `${entity.entity_id || ""} ${entity.name || ""}`.toLocaleLowerCase();
+    if (entity.domain === "switch" && /heiz|thermostat|radiator|heating|valve|ventil/.test(text)) {
+      return "Heizventil-Relais werden als Ein/Aus-Schalter exportiert. Sollwert und Temperatur kommen von einer climate-Entität.";
+    }
+    return "";
   }
   function suggestedName(entity, device) {
     let value = String(entity.name || device.name || entity.entity_id || "Gerät")
@@ -242,7 +288,7 @@
         for (const [entityId, saved] of Object.entries(result.configuration?.entities || {})) {
           const current = config.entities?.[entityId];
           if (current) {
-            for (const field of ["enabled", "name", "description", "display_category", "alexa_group"]) {
+            for (const field of ["enabled", "name", "description", "display_category", "display_category_mode", "alexa_group", "capability_mode", "capabilities"]) {
               if (current[field] === snapshot.entities?.[entityId]?.[field]) current[field] = saved[field];
             }
           }
@@ -411,8 +457,8 @@
   function entityHtml(entity, device) {
     const exportData = entity.export;
     const matches = entity.alexa?.matches || [];
-    const categories = (model.display_categories || []).map(category => `<option value="${attr(category)}" ${exportData.display_category === category ? "selected" : ""}>${esc(category)}</option>`).join("");
-    return `<article class="entity status-${attr(entity.status)} ${entity.hidden ? "hidden-item" : ""}" data-entity="${attr(entity.entity_id)}"><div class="entity-top"><input class="export-toggle" type="checkbox" data-entity="${attr(entity.entity_id)}" ${exportData.enabled ? "checked" : ""} title="Für Alexa exportieren"><div><div class="entity-name">${esc(entity.name || entity.entity_id)}</div><div class="entity-id">${esc(entity.entity_id)}</div><div class="badges">${statusBadge(entity.status)}${entity.native?.enabled ? '<span class="badge alexa">Nativ v6</span>' : ""}${matches.length ? `<span class="badge alexa">${matches.length} Alexa-Endpunkt${matches.length === 1 ? "" : "e"}</span>` : ""}${isTechnical(entity) ? '<span class="badge">technisch</span>' : ""}${entity.hidden ? '<span class="badge hidden-badge">ausgeblendet</span>' : ""}</div></div><button class="button secondary small" data-action="${entity.hidden_directly ? "show-entity" : "hide-entity"}" data-entity="${attr(entity.entity_id)}">${entity.hidden_directly ? "Einblenden" : "Ausblenden"}</button></div><div class="fields"><div class="field"><label>Alexa-Name</label><div class="entity-name-editor"><input class="export-name" data-entity="${attr(entity.entity_id)}" value="${attr(exportData.name)}" placeholder="${attr(suggestedName(entity, device))}"><button class="button secondary small save-entity-name" data-action="save-entity-name" data-entity="${attr(entity.entity_id)}">Speichern</button></div></div><div class="field"><label>Kategorie</label><select class="export-category" data-entity="${attr(entity.entity_id)}"><option value="">Automatisch</option>${categories}</select></div><div class="field full"><label>Alexa-Gruppe</label><input class="export-group" data-entity="${attr(entity.entity_id)}" value="${attr(exportData.alexa_group)}" list="group-list" placeholder="${attr(device.area_name || "")}"></div></div><div class="entity-actions"><button class="button secondary small" data-action="fill-entity" data-entity="${attr(entity.entity_id)}">Vorschlag übernehmen</button></div>${matches.map(match => alexaMatchHtml(match, entity)).join("")}</article>`;
+    const categories = (model.display_categories || []).map(category => `<option value="${attr(category)}" ${exportData.display_category_mode === "custom" && exportData.display_category === category ? "selected" : ""}>${esc(category)}</option>`).join("");
+    return `<article class="entity status-${attr(entity.status)} ${entity.hidden ? "hidden-item" : ""}" data-entity="${attr(entity.entity_id)}"><div class="entity-top"><input class="export-toggle" type="checkbox" data-entity="${attr(entity.entity_id)}" ${exportData.enabled ? "checked" : ""} title="Für Alexa exportieren"><div><div class="entity-name">${esc(entity.name || entity.entity_id)}</div><div class="entity-id">${esc(entity.entity_id)}</div><div class="badges">${statusBadge(entity.status)}${entity.native?.enabled ? '<span class="badge alexa">Nativ v6</span>' : ""}${matches.length ? `<span class="badge alexa">${matches.length} Alexa-Endpunkt${matches.length === 1 ? "" : "e"}</span>` : ""}${isTechnical(entity) ? '<span class="badge">technisch</span>' : ""}${entity.hidden ? '<span class="badge hidden-badge">ausgeblendet</span>' : ""}</div></div><button class="button secondary small" data-action="${entity.hidden_directly ? "show-entity" : "hide-entity"}" data-entity="${attr(entity.entity_id)}">${entity.hidden_directly ? "Einblenden" : "Ausblenden"}</button></div><div class="fields"><div class="field"><label>Alexa-Name</label><div class="entity-name-editor"><input class="export-name" data-entity="${attr(entity.entity_id)}" value="${attr(exportData.name)}" placeholder="${attr(suggestedName(entity, device))}"><button class="button secondary small save-entity-name" data-action="save-entity-name" data-entity="${attr(entity.entity_id)}">Speichern</button></div></div><div class="field"><label>Kategorie</label><select class="export-category" data-entity="${attr(entity.entity_id)}"><option value="" ${exportData.display_category_mode === "custom" ? "" : "selected"}>Automatisch (${esc(suggestedCategory(entity, device))})</option>${categories}</select></div><div class="field full"><label>Alexa-Gruppe</label><input class="export-group" data-entity="${attr(entity.entity_id)}" value="${attr(exportData.alexa_group)}" list="group-list" placeholder="${attr(device.area_name || "")}"></div></div><div class="entity-actions"><button class="button secondary small" data-action="fill-entity" data-entity="${attr(entity.entity_id)}">Vorschlag übernehmen</button></div>${matches.map(match => alexaMatchHtml(match, entity)).join("")}</article>`;
   }
 
   function deviceHtml(device, entities) {
@@ -878,7 +924,7 @@
     if (!candidate) return message("Für dieses Gerät wurde keine sinnvolle Alexa-Entität gefunden.", "err");
     for (const entity of device.entities) entityConfig(entity.entity_id).enabled = false;
     const settings = entityConfig(candidate.entity_id);
-    settings.enabled = true; settings.name ||= suggestedName(candidate, device); settings.display_category ||= suggestedCategory(candidate);
+    settings.enabled = true; settings.name ||= suggestedName(candidate, device); settings.display_category ||= suggestedCategory(candidate, device);
     for (const entity of device.entities) entity.export.enabled = entity.entity_id === candidate.entity_id;
     await saveConfig(); await load(false); message(`${candidate.entity_id} wurde für v6 gespeichert.`);
   }
@@ -954,7 +1000,7 @@
     for (const device of model.devices || []) {
       const entity = device.entities.find(item => item.entity_id === entityId); if (!entity) continue;
       const settings = entityConfig(entityId);
-      settings.name = suggestedName(entity, device); settings.display_category = suggestedCategory(entity); settings.alexa_group ||= device.area_name || ""; settings.enabled = true;
+      settings.name = suggestedName(entity, device); settings.display_category = suggestedCategory(entity, device); settings.alexa_group ||= device.area_name || ""; settings.enabled = true;
       await saveConfig(); await load(false); return;
     }
   }
@@ -1034,7 +1080,20 @@
       const settings = entityConfig(entity.entity_id);
       const enabled = entity.export?.enabled;
       const label = settings.name || suggestedName(entity, device);
-      return `<div class="device-group-entity"><label class="device-group-selection"><input type="checkbox" data-group-entity="${attr(entity.entity_id)}" ${enabled ? "checked" : ""}><span><strong>${esc(entity.name || entity.entity_id)}</strong><small>${esc(entity.entity_id)}</small></span></label><label class="device-group-member-name">Alexa-Funktionsname<input data-group-name="${attr(entity.entity_id)}" value="${attr(label)}" maxlength="128" autocomplete="off"></label></div>`;
+      const options = capabilityOptions(entity);
+      const profileMode = entity.export?.capability_mode === "custom" ? "custom" : "standard";
+      const standard = options.filter(option => option.id !== "Alexa.PlaybackController").map(option => option.id);
+      const chosen = profileMode === "custom" ? (entity.export?.capabilities || []) : standard;
+      const capabilities = options.length
+        ? options.map(option => `<label class="check"><input type="checkbox" data-group-capability="${attr(entity.entity_id)}" value="${attr(option.id)}" ${chosen.includes(option.id) ? "checked" : ""}>${esc(option.label)}</label>`).join("")
+        : '<span class="muted">Keine unterstützten Alexa-Funktionen für diese Entität.</span>';
+      const customCategory = entity.export?.display_category_mode === "custom";
+      const displayCategory = customCategory ? entity.export?.display_category : suggestedCategory(entity, device);
+      const relayCategory = entity.domain === "switch"
+        ? `<label>Relais-Rolle<select data-group-category="${attr(entity.entity_id)}" data-category-mode="${customCategory ? "custom" : "standard"}">${[["LIGHT", "Lichtschalter"], ["SMARTPLUG", "Steckdose"], ["SWITCH", "Schalter / Heizventil"]].map(([value, text]) => `<option value="${value}" ${displayCategory === value ? "selected" : ""}>${text}</option>`).join("")}</select></label>`
+        : "";
+      const note = roleNote(entity);
+      return `<div class="device-group-entity"><label class="device-group-selection"><input type="checkbox" data-group-entity="${attr(entity.entity_id)}" ${enabled ? "checked" : ""}><span><strong>${esc(entity.name || entity.entity_id)}</strong><small>${esc(entity.entity_id)}</small></span></label><div class="device-group-member-name">Alexa-Funktionsname<input data-group-name="${attr(entity.entity_id)}" value="${attr(label)}" maxlength="128" autocomplete="off">${relayCategory}<label>Funktionsprofil<select data-group-profile="${attr(entity.entity_id)}"><option value="standard" ${profileMode === "standard" ? "selected" : ""}>Standard (empfohlen)</option><option value="custom" ${profileMode === "custom" ? "selected" : ""}>Eigene Funktionen</option></select></label><div class="device-group-capabilities ${profileMode === "custom" ? "" : "hidden"}" data-group-capabilities="${attr(entity.entity_id)}">${capabilities}</div>${note ? `<small class="device-group-role-note">${esc(note)}</small>` : ""}</div></div>`;
     }).join("");
     document.getElementById("device-group-name-field").classList.toggle("hidden", !combined);
     document.getElementById("device-group-dialog").showModal();
@@ -1050,6 +1109,18 @@
     const memberNameInputs = [...dialog.querySelectorAll("input[data-group-name]")];
     const names = Object.fromEntries(entityIds.map(entityId => [entityId,
       String(memberNameInputs.find(input => input.dataset.groupName === entityId)?.value || "").trim()]));
+    const profiles = Object.fromEntries(entityIds.map(entityId => {
+      const profile = [...dialog.querySelectorAll("select[data-group-profile]")]
+        .find(input => input.dataset.groupProfile === entityId)?.value || "standard";
+      const capabilities = [...dialog.querySelectorAll("input[data-group-capability]:checked")]
+        .filter(input => input.dataset.groupCapability === entityId).map(input => input.value);
+      const displayCategory = [...dialog.querySelectorAll("select[data-group-category]")]
+        .find(input => input.dataset.groupCategory === entityId)?.value;
+      const displayCategoryMode = [...dialog.querySelectorAll("select[data-group-category]")]
+        .find(input => input.dataset.groupCategory === entityId)?.dataset.categoryMode || "standard";
+      return [entityId, {mode: profile, capabilities, display_category: displayCategory,
+                         display_category_mode: displayCategoryMode}];
+    }));
     const groupName = document.getElementById("device-group-name").value.trim();
     if (mode === "combined" && !groupName) return message("Gib einen Namen für das Alexa-Gesamtgerät ein.", "warn");
     setBusy(button, true, "Speichere…");
@@ -1064,6 +1135,7 @@
           mode,
           name: groupName,
           names,
+          profiles,
         }),
       });
       dialog.close();
@@ -1225,13 +1297,17 @@
         const entity = device?.entities.find(item => item.entity_id === entityId);
         if (device && entity) {
           settings.name ||= suggestedName(entity, device);
-          settings.display_category ||= suggestedCategory(entity);
+          settings.display_category ||= suggestedCategory(entity, device);
           const nameInput = target.closest(".simple-entity-row")?.querySelector(".export-name");
           if (nameInput && !nameInput.value) nameInput.value = settings.name;
         }
       }
       await saveConfig(); await load(false); message(`${entityId} wurde ${target.checked ? "für v6 aktiviert" : "für v6 deaktiviert"}. Der Alexa-Abgleich übernimmt die gespeicherte Auswahl.`, "warn");
-    } else if (target.classList.contains("export-category")) { settings.display_category = target.value; scheduleSave(); }
+    } else if (target.classList.contains("export-category")) {
+      settings.display_category = target.value;
+      settings.display_category_mode = target.value ? "custom" : "standard";
+      scheduleSave();
+    }
     else if (target.classList.contains("export-name")) {
       settings.name = target.value;
       const saveButton = target.closest(".field, .simple-alexa-name")?.querySelector('.save-entity-name');
@@ -1288,6 +1364,15 @@
   });
   document.getElementById("btn-save-device-group").addEventListener("click", saveDeviceGroup);
   document.getElementById("btn-close-device-group").addEventListener("click", () => document.getElementById("device-group-dialog").close());
+  document.getElementById("device-group-entities").addEventListener("change", event => {
+    const category = event.target.closest("select[data-group-category]");
+    if (category) category.dataset.categoryMode = "custom";
+    const select = event.target.closest("select[data-group-profile]");
+    if (!select) return;
+    const choices = [...document.querySelectorAll("[data-group-capabilities]")]
+      .find(element => element.dataset.groupCapabilities === select.dataset.groupProfile);
+    choices?.classList.toggle("hidden", select.value !== "custom");
+  });
   document.querySelectorAll('input[name="device-group-mode"]').forEach(input => input.addEventListener("change", () => {
     document.getElementById("device-group-name-field").classList.toggle("hidden", input.value !== "combined");
   }));
@@ -1298,7 +1383,7 @@
   document.getElementById("btn-enable-useful").addEventListener("click", async () => {
     const filter = filters();
     for (const device of model.devices || []) for (const entity of device.entities || []) if (entityMatchesFilter(entity, device, filter) && isUseful(entity)) {
-      const settings = entityConfig(entity.entity_id); settings.enabled = true; settings.name ||= suggestedName(entity, device); settings.display_category ||= suggestedCategory(entity);
+      const settings = entityConfig(entity.entity_id); settings.enabled = true; settings.name ||= suggestedName(entity, device); settings.display_category ||= suggestedCategory(entity, device);
     }
     await saveConfig(); await load(false);
   });

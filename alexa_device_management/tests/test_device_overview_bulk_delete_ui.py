@@ -29,14 +29,20 @@ class AlexaBulkDeleteUiTests(unittest.TestCase):
         self.assertIn('name="device-group-mode" value="separate"', HTML)
         self.assertIn('data-group-name=', SCRIPT)
         self.assertIn('request("/api/native-export/group"', SCRIPT)
+        self.assertIn('value="standard"', SCRIPT)
+        self.assertIn('value="custom"', SCRIPT)
+        self.assertIn("data-group-capability=", SCRIPT)
+        self.assertIn("Heizventil-Relais werden als Ein/Aus-Schalter exportiert", SCRIPT)
+        self.assertIn("Helligkeit / Dimmer-Slider", SCRIPT)
         self.assertIn("Abgewählte Entitäten werden aus dem Alexa-Export entfernt", HTML)
+        self.assertIn("Standardprofile: Dimmer erhalten Ein/Aus und Helligkeits-Slider", HTML)
 
 
     def test_failed_bulk_delete_targets_remain_selected_and_versioned_assets_refresh(self):
         self.assertIn("Fehlgeschlagene Geräte bleiben in der Auswahl.", SCRIPT)
         self.assertIn("selectedAlexaKeys.delete(item.key)", SCRIPT)
-        self.assertIn("device_overview.js?v=3.7.0", HTML)
-        self.assertIn("device_overview.css?v=3.7.0", HTML)
+        self.assertIn("device_overview.js?v=3.8.0", HTML)
+        self.assertIn("device_overview.css?v=3.8.0", HTML)
 
     def test_summary_counters_filter_and_expand_their_matching_entities(self):
         self.assertIn('data-summary-filter="${status}"', SCRIPT)

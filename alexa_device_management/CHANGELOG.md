@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.8.0
+
+- Neue Alexa-Exporte erhalten standardmäßig ein domainbasiertes Funktionsprofil: Dimmbare Lichter bekommen Ein/Aus und Helligkeit, Rollläden nur die Position, Thermostate Modus, Sollwert und Ist-Temperatur. Das Gruppenfenster kann ausdrücklich auf eigene Funktionen umgestellt werden.
+- Relaisnamen und Geräteklasse schlagen die Alexa-Kategorie Licht, Steckdose oder Schalter vor. Ein Heizventil bleibt ein Ein/Aus-Schalter; ein echtes Thermostat braucht weiterhin eine `climate`-Entität.
+- Alexa-Thermostatstatus enthält jetzt, wenn Home Assistant ihn liefert, auch die gemessene Raumtemperatur.
+- Nutzerdefinierte Controller und optionale Stoppfunktion für Rollläden werden in der v6-Konfiguration gespeichert; ungewählte Optionen bleiben deaktiviert.
+
 ## 3.7.0
 
 - Die geöffnete Entitätenauswahl bleibt bei Bestandsaktualisierungen geöffnet. Im Lesemodus sind Auswahlfelder und Aktionen geschützt; „Bearbeiten“ pausiert den regelmäßigen Alexa-Abgleich, wartet den laufenden Durchlauf ab und gibt dann die Eingaben frei. „Fertig“ speichert und gibt den Abgleich wieder frei.

@@ -28,18 +28,31 @@ def entity_settings(native):
         for capability in device.get("capabilities", []):
             entity_id = capability["entity_id"]
             capability_names = capability.get("capability_names") or []
+            interface = capability.get("interface")
+            # A combined relay uses ToggleController on the wire. In the
+            # editor it remains the same user-facing "switch" function.
+            editor_interface = ("Alexa.PowerController" if interface == "Alexa.ToggleController"
+                                and str(capability.get("instance", "")).startswith("power_")
+                                else interface)
             name = (capability_names[0] if device.get("group_mode") == "combined" and capability_names
                     else device.get("name", key))
             settings = result.setdefault(entity_id, {
                 "enabled": False, "name": name,
                 "description": device.get("description", ""),
                 "display_category": device.get("display_category", "OTHER"),
+                "display_category_mode": device.get("display_category_mode", "standard"),
                 "alexa_group": device.get("alexa_group", ""),
                 "native_endpoint_ids": [],
                 "group_mode": device.get("group_mode", "separate"),
                 "logical_device_name": device.get("name", key),
+                "capability_mode": "standard",
+                "capabilities": [],
             })
             settings["enabled"] |= bool(device.get("enabled", True) and capability.get("enabled", True))
+            if capability.get("capability_mode") == "custom":
+                settings["capability_mode"] = "custom"
+            if capability.get("enabled", True) and editor_interface not in settings["capabilities"]:
+                settings["capabilities"].append(editor_interface)
             if device.get("group_mode") == "combined":
                 settings["group_mode"] = "combined"
                 settings["logical_device_name"] = device.get("name", key)
@@ -75,17 +88,127 @@ def _ensure_brightness_capability(device, entity_id, entity):
     return True
 
 
+def _switch_display_category(entity):
+    """Infer whether a relay is presented as a light, outlet, or generic switch."""
+    if entity.get("device_class") == "outlet":
+        return "SMARTPLUG"
+    text = " ".join(str(entity.get(key) or "") for key in
+                     ("entity_id", "name", "original_name", "_device_name")).casefold()
+    if any(word in text for word in ("steckdose", "stecker", "smart plug", "socket", "outlet", "plug")):
+        return "SMARTPLUG"
+    if any(word in text for word in ("lampe", "licht", "light", "beleuchtung", "bulb")):
+        return "LIGHT"
+    # A simple relay used for a heating valve still has on/off semantics. A
+    # real setpoint and measured temperature require a climate entity.
+    return "SWITCH"
+
+
+def _display_category(entity_id, entity, requested, mode="standard"):
+    if mode == "custom" and requested and str(requested).upper() != "OTHER":
+        return str(requested).upper()
+    domain = entity_id.split(".", 1)[0]
+    if domain == "switch":
+        return _switch_display_category(entity)
+    if domain == "cover":
+        return "GARAGE_DOOR" if entity.get("device_class") == "garage" else "INTERIOR_BLIND"
+    if domain == "climate":
+        return "THERMOSTAT"
+    if domain == "light":
+        return "LIGHT"
+    if domain == "binary_sensor":
+        device_class = entity.get("device_class")
+        if device_class in ("door", "window", "opening", "garage_door", "lock"):
+            return "CONTACT_SENSOR"
+        if device_class in ("motion", "occupancy", "presence"):
+            return "MOTION_SENSOR"
+    if domain == "sensor" and entity.get("device_class") == "temperature":
+        return "TEMPERATURE_SENSOR"
+    return str(entity.get("category_suggestion") or "OTHER").upper()
+
+
+def _entity_capabilities(entity_id, settings, entity, *, mode="standard", selected=None):
+    """Build Alexa functions from the standard profile or an explicit custom selection."""
+    if mode not in ("standard", "custom"):
+        raise ValueError("Funktionsprofil muss Standard oder eigene Funktionen sein.")
+    values = {**settings, "enabled": True,
+              "display_category": _display_category(
+                  entity_id, entity, settings.get("display_category"),
+                  settings.get("display_category_mode", "standard"))}
+    draft = candidate(entity_id, values)
+    if draft is None:
+        raise ValueError(f"Für {entity_id} gibt es kein passendes Alexa-Standardprofil.")
+    catalog_device = {"capabilities": copy.deepcopy(draft["capabilities"])}
+    _ensure_brightness_capability(catalog_device, entity_id, entity)
+    defaults = catalog_device["capabilities"]
+    if entity_id.startswith("climate."):
+        modes = {"heat": "HEAT", "cool": "COOL", "auto": "AUTO",
+                 "heat_cool": "AUTO", "off": "OFF", "eco": "ECO"}
+        supported = sorted({modes[item] for item in entity.get("hvac_modes", []) if item in modes})
+        if not set(supported) & {"HEAT", "COOL"}:
+            raise ValueError(f"Keine unterstützten Thermostatmodi: {entity_id}")
+        defaults[0]["supported_modes"] = supported
+    if mode == "standard":
+        return defaults
+
+    catalog = copy.deepcopy(defaults)
+    if entity_id.startswith("cover."):
+        # Stopping is an optional custom function; the standard is only the
+        # position RangeController/slider requested for roller shutters.
+        catalog.append({"interface": "Alexa.PlaybackController", "entity_id": entity_id,
+                        "supported_operations": ["Stop"], "enabled": False})
+    selected = selected if isinstance(selected, list) else [
+        cap["interface"] for cap in defaults
+    ]
+    supported_interfaces = {cap["interface"] for cap in catalog}
+    if any(not isinstance(interface, str) or interface not in supported_interfaces
+           for interface in selected):
+        raise ValueError(f"Nicht unterstützte eigene Alexa-Funktion für {entity_id}.")
+    selected_interfaces = set(selected)
+    if not selected_interfaces:
+        raise ValueError(f"Mindestens eine Alexa-Funktion für {entity_id} auswählen.")
+    for capability in catalog:
+        capability["enabled"] = capability["interface"] in selected_interfaces
+        capability["capability_mode"] = "custom"
+    return catalog
+
+
+def _normalize_combined_power_controllers(devices):
+    """Use unique ToggleController instances for multiple combined relays."""
+    for device in devices.values():
+        if device.get("group_mode") != "combined":
+            continue
+        powers = [cap for cap in device.get("capabilities", [])
+                  if cap.get("interface") == "Alexa.PowerController"]
+        toggles = [cap for cap in device.get("capabilities", [])
+                   if cap.get("interface") == "Alexa.ToggleController"
+                   and str(cap.get("instance", "")).startswith("power_")]
+        if len(powers) + len(toggles) <= 1:
+            continue
+        controls = powers + toggles
+        unsupported = [cap["entity_id"] for cap in controls
+                       if not cap["entity_id"].startswith(("switch.", "input_boolean."))]
+        if unsupported:
+            raise ValueError("Mehrere Alexa-Schaltfunktionen lassen sich nur bei Relais zusammenfassen. "
+                             "Verwende einzelne Alexa-Geräte für: " + ", ".join(unsupported))
+        for capability in powers:
+            capability["interface"] = "Alexa.ToggleController"
+            capability["instance"] = "power_" + hashlib.sha256(
+                capability["entity_id"].encode("utf-8")).hexdigest()[:12]
+            capability.setdefault("capability_names", [capability["entity_id"]])
+
+
 def apply_entities(native, requested, inventory):
     """Change existing logical devices in place; create only explicitly selected ones."""
     proposed = copy.deepcopy(native)
     baseline = entity_settings(native)
-    actual = {entity["entity_id"]: entity
+    actual = {entity["entity_id"]: {**entity, "_device_name": device.get("name", "")}
               for device in inventory.get("devices", []) for entity in device.get("entities", [])}
     for entity_id, settings in requested.items():
         if not isinstance(settings, dict) or type(settings.get("enabled", False)) is not bool:
             raise ValueError("Entitätsauswahl muss ein boolescher Wert sein.")
         old = baseline.get(entity_id, {})
-        fields = ("enabled", "name", "description", "display_category", "alexa_group")
+        fields = ("enabled", "name", "description", "display_category",
+                  "display_category_mode", "alexa_group")
         changes = {key: settings[key] for key in fields
                    if key in settings and settings[key] != old.get(key, False if key == "enabled" else "")}
         owners = [key for key, device in proposed["devices"].items()
@@ -97,35 +220,56 @@ def apply_entities(native, requested, inventory):
                 brightness_added = _ensure_brightness_capability(
                     proposed["devices"][owner], entity_id, entity
                 ) or brightness_added
-        if not changes and not brightness_added:
+        requested_profile = settings.get("capability_mode", old.get("capability_mode", "standard"))
+        requested_capabilities = settings.get("capabilities", old.get("capabilities", []))
+        apply_profile = (
+            settings.get("apply_capability_profile") is True
+            or requested_profile != old.get("capability_mode", "standard")
+            or requested_capabilities != old.get("capabilities", [])
+        )
+        if not changes and not brightness_added and not apply_profile:
             continue
         if not owners:
             if not settings.get("enabled"):
                 continue
             if not entity:
                 raise ValueError(f"HA-Entität nicht verfügbar: {entity_id}")
-            category = settings.get("display_category") or entity.get("category_suggestion")
-            if entity.get("device_class") in ("door", "window", "opening", "garage_door"):
-                category = "CONTACT_SENSOR"
-            elif entity.get("device_class") in ("motion", "occupancy", "presence"):
-                category = "MOTION_SENSOR"
-            elif entity.get("device_class") == "temperature":
-                category = "TEMPERATURE_SENSOR"
+            category = _display_category(
+                entity_id, entity, settings.get("display_category"),
+                settings.get("display_category_mode", "standard"))
             draft = candidate(entity_id, {**settings, "display_category": category})
             if draft is None:
                 raise ValueError(f"Gerätetyp wird von v6 noch nicht unterstützt: {entity_id}")
-            if entity_id.startswith("cover.") and int(entity.get("supported_features", 0)) & 12 != 12:
-                raise ValueError(f"Positions- und Stoppunterstützung fehlen: {entity_id}")
-            _ensure_brightness_capability(draft, entity_id, entity)
-            if entity_id.startswith("climate."):
-                modes = {"heat": "HEAT", "cool": "COOL", "auto": "AUTO", "heat_cool": "AUTO", "off": "OFF", "eco": "ECO"}
-                supported = sorted({modes[m] for m in entity.get("hvac_modes", []) if m in modes})
-                if not set(supported) & {"HEAT", "COOL"}:
-                    raise ValueError(f"Keine unterstützten Thermostatmodi: {entity_id}")
-                draft["capabilities"][0]["supported_modes"] = supported
+            mode = settings.get("capability_mode", "standard")
+            selected_interfaces = settings.get("capabilities")
+            needs_position = (mode == "standard" or not isinstance(selected_interfaces, list)
+                              or "Alexa.RangeController" in selected_interfaces)
+            if (entity_id.startswith("cover.") and needs_position
+                    and int(entity.get("supported_features", 0)) & 4 != 4):
+                raise ValueError(f"Positionsunterstützung fehlt: {entity_id}")
+            draft["capabilities"] = _entity_capabilities(
+                entity_id, {**settings, "display_category": category}, entity,
+                mode=mode, selected=settings.get("capabilities"))
             key = "ha:" + entity_id
             proposed["devices"][key] = draft
             owners = [key]
+        elif apply_profile:
+            if not entity:
+                raise ValueError(f"HA-Entität für Standardprofil nicht verfügbar: {entity_id}")
+            mode = settings.get("capability_mode", "standard")
+            capabilities = _entity_capabilities(
+                entity_id, settings, entity, mode=mode,
+                selected=settings.get("capabilities"))
+            for owner in owners:
+                device = proposed["devices"][owner]
+                if device.get("group_mode") == "combined":
+                    member_name = str(settings.get("name") or entity_id)
+                    for capability in capabilities:
+                        capability.setdefault("capability_names", [member_name])
+                device["capabilities"] = [
+                    capability for capability in device.get("capabilities", [])
+                    if capability.get("entity_id") != entity_id
+                ] + copy.deepcopy(capabilities)
         for key in owners:
             device = proposed["devices"][key]
             if "enabled" in changes:
@@ -140,6 +284,10 @@ def apply_entities(native, requested, inventory):
                     # disabling either tank value disables the entire tank).
                     device["enabled"] = changes["enabled"]
             device_changes = {key: value for key, value in changes.items() if key != "enabled"}
+            if (entity and device_changes.get("display_category_mode",
+                                              device.get("display_category_mode", "standard")) != "custom"
+                    and ("display_category" in device_changes or "display_category_mode" in device_changes)):
+                device_changes["display_category"] = _display_category(entity_id, entity, None)
             if device.get("group_mode") == "combined" and "name" in device_changes:
                 # The endpoint name belongs to the group editor. A row name is
                 # the member control's accessible name (used by ToggleController).
@@ -148,10 +296,12 @@ def apply_entities(native, requested, inventory):
                         capability["capability_names"] = [device_changes["name"]]
                 device_changes.pop("name")
             device.update(device_changes)
+    _normalize_combined_power_controllers(proposed["devices"])
     return NativeSkillConfigStore.validate(proposed)
 
 
-def apply_device_group(native, device_id, entity_ids, mode, group_name, inventory, names=None):
+def apply_device_group(native, device_id, entity_ids, mode, group_name, inventory, names=None,
+                       profiles=None):
     """Group selected entities into one Alexa endpoint or restore one per entity."""
     if mode not in {"combined", "separate"}:
         raise ValueError("Exportform muss Gesamtgerät oder einzelne Alexa-Geräte sein.")
@@ -170,12 +320,31 @@ def apply_device_group(native, device_id, entity_ids, mode, group_name, inventor
     if not set(selected) <= available:
         raise ValueError("Alle ausgewählten Entitäten müssen zum selben Home-Assistant-Gerät gehören.")
     names = names if isinstance(names, dict) else {}
+    profiles = profiles if isinstance(profiles, dict) else {}
     selected_settings = {}
     for entity_id in selected:
         selected_settings[entity_id] = {"enabled": True}
         member_name = str(names.get(entity_id) or "").strip()
         if member_name:
             selected_settings[entity_id]["name"] = member_name
+        profile = profiles.get(entity_id)
+        if profile is not None:
+            if not isinstance(profile, dict):
+                raise ValueError(f"Ungültiges Funktionsprofil für {entity_id}.")
+            mode_value = profile.get("mode", "standard")
+            interfaces = profile.get("capabilities", [])
+            if mode_value not in ("standard", "custom") or not isinstance(interfaces, list):
+                raise ValueError(f"Ungültiges Funktionsprofil für {entity_id}.")
+            selected_settings[entity_id].update({
+                "capability_mode": mode_value,
+                "capabilities": interfaces,
+                "apply_capability_profile": True,
+            })
+            category = profile.get("display_category")
+            if category:
+                selected_settings[entity_id]["display_category"] = category
+                selected_settings[entity_id]["display_category_mode"] = profile.get(
+                    "display_category_mode", "standard")
     # First materialize newly selected entities and apply their member labels.
     # Then rebuild only this physical HA device's selected capabilities. This
     # also removes unchecked members from an old combined endpoint instead of
@@ -224,8 +393,12 @@ def apply_device_group(native, device_id, entity_ids, mode, group_name, inventor
             raise ValueError("Der Alexa-Gesamtname muss 1 bis 128 Zeichen enthalten.")
         powers = [cap for values in capabilities_by_entity.values() for cap in values
                   if cap["interface"] == "Alexa.PowerController"]
-        if len(powers) > 1:
-            unsupported = [cap["entity_id"] for cap in powers
+        toggles = [cap for values in capabilities_by_entity.values() for cap in values
+                   if cap["interface"] == "Alexa.ToggleController"
+                   and str(cap.get("instance", "")).startswith("power_")]
+        if len(powers) + len(toggles) > 1:
+            controls = powers + toggles
+            unsupported = [cap["entity_id"] for cap in controls
                            if not cap["entity_id"].startswith(("switch.", "input_boolean."))]
             if unsupported:
                 raise ValueError("Mehrere PowerController können nur für Schalter als Alexa-Gesamtgerät kombiniert werden. Verwende einzelne Alexa-Geräte für: " + ", ".join(unsupported))
@@ -244,8 +417,12 @@ def apply_device_group(native, device_id, entity_ids, mode, group_name, inventor
         combined = [cap for values in capabilities_by_entity.values() for cap in values]
         aliases = list(dict.fromkeys(str(names.get(eid) or eid) for eid in selected))
         description = (old_group or {}).get("description", "")
-        category = ((old_group or {}).get("display_category")
-                    or member_templates[selected[0]].get("display_category", "OTHER"))
+        member_categories = {member_templates[entity_id].get("display_category", "OTHER")
+                             for entity_id in selected}
+        category = (next(iter(member_categories)) if len(member_categories) == 1
+                    else "SWITCH" if all(entity_id.startswith(("switch.", "input_boolean."))
+                                         for entity_id in selected)
+                    else (old_group or {}).get("display_category", "OTHER"))
         proposed["devices"][group_key] = {
             "name": group_name,
             "description": description,
@@ -322,9 +499,20 @@ async def autosave(request):
         entities = body.get("entities", {})
         if not isinstance(entities, dict):
             raise ValueError("entities muss eine Zuordnung sein.")
+        baseline = entity_settings(current)
         inventory = await ha_export._inventory() if any(
-            v.get("enabled") and not entity_settings(current).get(key, {}).get("enabled")
-            for key, v in entities.items() if isinstance(v, dict)) else {"devices": []}
+            isinstance(v, dict) and (
+                (v.get("enabled") and not baseline.get(key, {}).get("enabled"))
+                or v.get("capability_mode", "standard") != baseline.get(
+                    key, {}).get("capability_mode", "standard")
+                or v.get("capabilities", baseline.get(key, {}).get(
+                    "capabilities", [])) != baseline.get(key, {}).get("capabilities", [])
+                or v.get("display_category_mode", baseline.get(key, {}).get(
+                    "display_category_mode", "standard")) != baseline.get(key, {}).get(
+                        "display_category_mode", "standard")
+                or v.get("display_category", baseline.get(key, {}).get(
+                    "display_category", "")) != baseline.get(key, {}).get("display_category", "")
+            ) for key, v in entities.items()) else {"devices": []}
         proposed = apply_entities(current, entities, inventory)
         if "native_enabled" in body:
             if type(body["native_enabled"]) is not bool:
@@ -371,6 +559,7 @@ async def configure_group(request):
             body.get("name"),
             inventory,
             body.get("names"),
+            body.get("profiles"),
         )
     except (ValueError, TypeError) as exc:
         return web.json_response({"error": str(exc)}, status=400)
