@@ -9,11 +9,18 @@
   let overviewPollCount = 0;
   const expandedAreas = new Set();
   const expandedDevices = new Set();
+  const expandedSimpleDevices = new Set();
+  const editingSimpleDevices = new Set();
+  const pendingEditDevices = new Set();
   const selectedAlexaKeys = new Set();
   const visibleAreaCounts = new Map();
   const renderedAreaItems = new Map();
   const AREA_PAGE_SIZE = 25;
   let alexaDeletePollTimer = null;
+  let syncPauseClientId = null;
+  let syncPausePromise = null;
+  let syncPauseHeartbeatTimer = null;
+  let lifecyclePausedElsewhere = false;
 
   const BUTTON_TOOLTIPS = {
     "btn-login": "Verbindet die App mit deinem Amazon-Alexa-Konto.",
@@ -39,6 +46,7 @@
     "prepare-device": "Aktiviert automatisch eine geeignete Entität dieses Geräts. Weitere Entitäten können danach manuell ergänzt werden.",
     "disable-device-export": "Deaktiviert alle Entitäten dieses Geräts für Alexa.",
     "toggle-simple-device": "Öffnet oder schließt die manuelle Entitäts- und Namensauswahl.",
+    "edit-simple-device": "Pausiert den Alexa-Hintergrundabgleich und schaltet die Entitätsauswahl frei.",
     "hide-device": "Blendet das Gerät in dieser Verwaltung aus, ohne es aus Home Assistant zu löschen.",
     "show-device": "Blendet das Gerät in dieser Verwaltung wieder ein.",
     "hide-entity": "Blendet diese Entität in der Verwaltung aus.",
@@ -93,6 +101,40 @@
     const element = document.getElementById("message");
     element.textContent = text;
     element.className = `message ${type}`;
+  }
+  function hasEditorSession() {
+    return editingSimpleDevices.size > 0 || pendingEditDevices.size > 0;
+  }
+  function editPauseClientId() {
+    if (!syncPauseClientId) {
+      syncPauseClientId = window.crypto?.randomUUID?.()
+        || `adm-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
+    return syncPauseClientId;
+  }
+  function updateSyncEditStatus() {
+    const status = document.getElementById("sync-edit-status");
+    if (!status) return;
+    const paused = hasEditorSession() || lifecyclePausedElsewhere;
+    status.classList.toggle("hidden", !paused);
+    status.textContent = pendingEditDevices.size && !editingSimpleDevices.size
+      ? "Warte auf den Abschluss eines laufenden Abgleichs. Danach werden die Eingaben freigeschaltet."
+      : hasEditorSession()
+        ? "Bearbeitungsmodus aktiv: Der Alexa-Hintergrundabgleich ist pausiert. Die Eingaben werden nach „Fertig“ gespeichert."
+        : lifecyclePausedElsewhere
+          ? "Der Alexa-Hintergrundabgleich ist pausiert, weil eine andere Ansicht gerade Geräte bearbeitet."
+          : "";
+    for (const id of [
+      "btn-refresh", "btn-event-sync", "btn-group-sync", "btn-enable-useful", "btn-disable-visible",
+      "btn-hide-technical", "btn-unhide-visible", "btn-preview", "btn-settings", "btn-restart", "btn-logout",
+      "search", "status-filter", "area-filter", "domain-filter"
+    ]) {
+      const button = document.getElementById(id);
+      if (button) {
+        const busy = button.dataset.oldText && button.textContent !== button.dataset.oldText;
+        button.disabled = paused || Boolean(busy);
+      }
+    }
   }
   function clearMessage() { document.getElementById("message").className = "message hidden"; }
   function setBusy(button, busy, text) {
@@ -261,6 +303,51 @@
     return true;
   }
 
+  async function acquireSyncPause() {
+    if (syncPausePromise) return syncPausePromise;
+    const clientId = editPauseClientId();
+    syncPausePromise = request("/api/native-export/lifecycle/pause", {
+      method: "POST", body: JSON.stringify({client_id: clientId})
+    }).then(() => {
+      clearInterval(syncPauseHeartbeatTimer);
+      syncPauseHeartbeatTimer = setInterval(async () => {
+        if (!hasEditorSession() || !syncPauseClientId) return;
+        try {
+          await request("/api/native-export/lifecycle/pause", {
+            method: "POST", body: JSON.stringify({client_id: syncPauseClientId})
+          });
+        } catch (error) {
+          message(`Alexa-Abgleich konnte nicht weiter pausiert werden: ${error.message}`, "err");
+        }
+      }, 60_000);
+    }).catch(error => {
+      syncPausePromise = null;
+      throw error;
+    });
+    return syncPausePromise;
+  }
+
+  async function releaseSyncPause() {
+    if (!syncPauseClientId) return;
+    await request("/api/native-export/lifecycle/resume", {
+      method: "POST", body: JSON.stringify({client_id: syncPauseClientId})
+    });
+    clearInterval(syncPauseHeartbeatTimer);
+    syncPauseHeartbeatTimer = null;
+    syncPauseClientId = null;
+    syncPausePromise = null;
+  }
+
+  window.addEventListener("pagehide", () => {
+    if (!syncPauseClientId) return;
+    clearInterval(syncPauseHeartbeatTimer);
+    const url = `${BASE}/api/native-export/lifecycle/resume`;
+    const body = new Blob([JSON.stringify({client_id: syncPauseClientId})], {type: "application/json"});
+    if (!navigator.sendBeacon?.(url, body)) {
+      fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body, keepalive: true}).catch(() => {});
+    }
+  });
+
   function renderSummary() {
     const s = model.summary || {};
     const cards = [["HA-Geräte", s.ha_devices || 0], ["HA-Entitäten", s.ha_entities || 0], ["v6-Endpunkte", s.selected || 0], ["In Alexa zugeordnet", s.synced || 0], ["Ausstehend", s.pending || 0], ["Alte v5-Geräte", s.only_alexa || 0], ["Duplikate", s.duplicates || 0], ["Nur Alexa", s.alexa_only || 0], ["Ausgeblendet", s.hidden || 0]];
@@ -377,13 +464,17 @@
     for (const item of items.slice(0, visibleCount)) {
       const row = document.createElement("div");
       row.className = "simple-device-row";
-      row.dataset.deviceRow = String(item.device.device_id || "");
+      const deviceId = String(item.device.device_id || "");
+      const isOpen = expandedSimpleDevices.has(deviceId);
+      const isEditing = editingSimpleDevices.has(deviceId);
+      const isWaiting = pendingEditDevices.has(deviceId);
+      row.dataset.deviceRow = deviceId;
       const info = document.createElement("div");
       const name = document.createElement("strong");
       name.textContent = String(item.device.name || item.device.device_id || "Unbekanntes Gerät");
       const detail = document.createElement("span");
       detail.className = "muted";
-      const selected = item.entities.filter(entity => entity.export?.enabled || entity.native?.enabled).length;
+      const selected = item.entities.filter(entity => entityConfig(entity.entity_id).enabled || entity.native?.enabled).length;
       detail.textContent = `${item.entities.length} Entität${item.entities.length === 1 ? "" : "en"} • ${selected} für Alexa`;
       info.append(name, detail);
       const actions = document.createElement("div");
@@ -396,11 +487,22 @@
         const control = document.createElement("button");
         control.className = `button ${cls} small`;
         control.dataset.action = action;
-        control.dataset.device = String(item.device.device_id || "");
-        control.textContent = text;
+        control.dataset.device = deviceId;
+        control.textContent = action === "toggle-simple-device" && isOpen ? "Entitäten schließen" : text;
+        control.disabled = action === "toggle-simple-device" ? isEditing || isWaiting : !isEditing;
+        if (action === "toggle-simple-device") control.setAttribute("aria-expanded", String(isOpen));
         actions.append(control);
       }
+      const edit = document.createElement("button");
+      edit.className = "button secondary small";
+      edit.dataset.action = "edit-simple-device";
+      edit.dataset.device = deviceId;
+      edit.textContent = isWaiting ? "Sync pausiert…" : isEditing ? "Fertig" : "Bearbeiten";
+      edit.disabled = isWaiting || !isOpen;
+      edit.title = "Pausiert den Alexa-Abgleich und schaltet die Entitätsliste frei";
+      actions.append(edit);
       row.append(info, actions);
+      if (isOpen) renderSimpleEntityList(row, item.device, isEditing);
       list.append(row);
     }
     container.append(list);
@@ -412,6 +514,61 @@
       more.textContent = `Weitere ${Math.min(AREA_PAGE_SIZE, items.length - visibleCount)} Geräte anzeigen`;
       container.append(more);
     }
+  }
+
+  function renderSimpleEntityList(row, device, isEditing) {
+    const list = document.createElement("div");
+    list.className = `simple-entity-list${isEditing ? " editing" : ""}`;
+    for (const entity of device.entities || []) {
+      const entityRow = document.createElement("div");
+      entityRow.className = "simple-entity-row";
+      const settings = entityConfig(entity.entity_id);
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.className = "export-toggle";
+      checkbox.dataset.entity = String(entity.entity_id || "");
+      checkbox.checked = Boolean(settings.enabled ?? entity.export?.enabled);
+      checkbox.disabled = !isEditing;
+      checkbox.setAttribute("aria-label", `${entity.name || entity.entity_id} für Alexa exportieren`);
+      const text = document.createElement("label");
+      text.className = "simple-entity-identity";
+      text.htmlFor = `export-${String(entity.entity_id || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+      checkbox.id = text.htmlFor;
+      text.textContent = `${entity.name || entity.entity_id} (${entity.entity_id})`;
+      const nameField = document.createElement("div");
+      nameField.className = "simple-alexa-name";
+      const nameCaption = document.createElement("label");
+      nameCaption.textContent = "Name bei Alexa";
+      const nameInput = document.createElement("input");
+      nameInput.className = "export-name";
+      nameInput.dataset.entity = String(entity.entity_id || "");
+      nameInput.id = `alexa-name-${String(entity.entity_id || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+      nameCaption.htmlFor = nameInput.id;
+      nameInput.value = String(settings.name || entity.export?.name || "");
+      nameInput.placeholder = suggestedName(entity, device);
+      nameInput.disabled = !isEditing;
+      nameInput.setAttribute("aria-label", `Alexa-Name für ${entity.name || entity.entity_id}`);
+      const saveName = document.createElement("button");
+      saveName.type = "button";
+      saveName.className = "button secondary small save-entity-name";
+      saveName.dataset.action = "save-entity-name";
+      saveName.dataset.entity = String(entity.entity_id || "");
+      saveName.textContent = "Speichern";
+      saveName.disabled = !isEditing;
+      saveName.title = "Alexa-Namen jetzt dauerhaft speichern";
+      const suggestion = document.createElement("button");
+      suggestion.type = "button";
+      suggestion.className = "button secondary small simple-name-suggestion";
+      suggestion.dataset.action = "suggest-simple-name";
+      suggestion.dataset.entity = String(entity.entity_id || "");
+      suggestion.dataset.suggestion = suggestedName(entity, device);
+      suggestion.textContent = "Vorschlag";
+      suggestion.disabled = !isEditing;
+      nameField.append(nameCaption, nameInput, saveName, suggestion);
+      entityRow.append(checkbox, text, nameField);
+      list.append(entityRow);
+    }
+    row.append(list);
   }
 
   function alexaOnlyHtml(item) {
@@ -525,9 +682,13 @@
     document.getElementById("btn-logout").classList.toggle("hidden", !model.alexa_connected);
     document.getElementById("v5-disabled").classList.toggle("hidden", config.native_enabled);
     updateAlexaSelectionUi(alexaOnly);
+    updateSyncEditStatus();
   }
 
   async function load(force = false) {
+    if (hasEditorSession()) {
+      return;
+    }
     const button = document.getElementById("btn-refresh");
     if (force) {
       clearTimeout(overviewPollTimer);
@@ -694,59 +855,65 @@
     await saveConfig(); await load(false); message(`v6-Export für „${device.name}“ deaktiviert. Der Alexa-Abgleich entfernt bisher veröffentlichte Endpunkte.`, "warn");
   }
 
+  function renderSimpleDeviceRowFrom(button) {
+    const section = button.closest("section.area");
+    const areaToggle = section?.querySelector('button[data-action="toggle-area"]');
+    if (areaToggle) renderArea(areaToggle, areaToggle.dataset.area);
+  }
+
   function toggleSimpleDevice(button, deviceId) {
-    const row = button.closest(".simple-device-row");
-    if (!row) return;
-    const existing = row.querySelector(".simple-entity-list");
-    if (existing) { existing.remove(); button.textContent = "Entitäten wählen"; return; }
-    const device = (model.devices || []).find(item => item.device_id === deviceId); if (!device) return;
-    const list = document.createElement("div");
-    list.className = "simple-entity-list";
-    for (const entity of device.entities || []) {
-      const entityRow = document.createElement("div");
-      entityRow.className = "simple-entity-row";
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.className = "export-toggle";
-      checkbox.dataset.entity = String(entity.entity_id || "");
-      checkbox.checked = Boolean(entity.export?.enabled);
-      checkbox.setAttribute("aria-label", `${entity.name || entity.entity_id} für Alexa exportieren`);
-      const text = document.createElement("label");
-      text.className = "simple-entity-identity";
-      text.htmlFor = `export-${String(entity.entity_id || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-      checkbox.id = text.htmlFor;
-      text.textContent = `${entity.name || entity.entity_id} (${entity.entity_id})`;
-      const nameField = document.createElement("div");
-      nameField.className = "simple-alexa-name";
-      const nameCaption = document.createElement("label");
-      nameCaption.textContent = "Name bei Alexa";
-      const nameInput = document.createElement("input");
-      nameInput.className = "export-name";
-      nameInput.dataset.entity = String(entity.entity_id || "");
-      nameInput.id = `alexa-name-${String(entity.entity_id || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-      nameCaption.htmlFor = nameInput.id;
-      nameInput.value = String(entity.export?.name || "");
-      nameInput.placeholder = suggestedName(entity, device);
-      nameInput.setAttribute("aria-label", `Alexa-Name für ${entity.name || entity.entity_id}`);
-      const saveName = document.createElement("button");
-      saveName.type = "button";
-      saveName.className = "button secondary small save-entity-name";
-      saveName.dataset.action = "save-entity-name";
-      saveName.dataset.entity = String(entity.entity_id || "");
-      saveName.textContent = "Speichern";
-      saveName.title = "Alexa-Namen jetzt dauerhaft speichern";
-      const suggestion = document.createElement("button");
-      suggestion.type = "button";
-      suggestion.className = "button secondary small simple-name-suggestion";
-      suggestion.dataset.action = "suggest-simple-name";
-      suggestion.dataset.entity = String(entity.entity_id || "");
-      suggestion.dataset.suggestion = suggestedName(entity, device);
-      suggestion.textContent = "Vorschlag";
-      nameField.append(nameCaption, nameInput, saveName, suggestion);
-      entityRow.append(checkbox, text, nameField);
-      list.append(entityRow);
+    if (editingSimpleDevices.has(deviceId) || pendingEditDevices.has(deviceId)) {
+      message("Beende zuerst die Bearbeitung, bevor du die Entitätenliste schließt.", "warn");
+      return;
     }
-    row.append(list); button.textContent = "Entitäten schließen";
+    if (expandedSimpleDevices.has(deviceId)) expandedSimpleDevices.delete(deviceId);
+    else expandedSimpleDevices.add(deviceId);
+    renderSimpleDeviceRowFrom(button);
+  }
+
+  async function editSimpleDevice(button, deviceId) {
+    if (editingSimpleDevices.has(deviceId)) {
+      button.disabled = true;
+      button.textContent = "Speichere…";
+      try {
+        await saveConfig();
+        const isLastEditor = editingSimpleDevices.size === 1 && pendingEditDevices.size === 0;
+        if (isLastEditor) await releaseSyncPause();
+        editingSimpleDevices.delete(deviceId);
+        updateSyncEditStatus();
+        render();
+        if (!hasEditorSession()) {
+          await load(false);
+          message("Änderungen gespeichert. Der Alexa-Hintergrundabgleich läuft weiter.", "ok");
+        }
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = "Fertig";
+        message(`Bearbeitung konnte nicht beendet werden: ${error.message}`, "err");
+      }
+      return;
+    }
+
+    if (!expandedSimpleDevices.has(deviceId)) return;
+    pendingEditDevices.add(deviceId);
+    clearTimeout(overviewPollTimer);
+    updateSyncEditStatus();
+    render();
+    try {
+      await acquireSyncPause();
+      pendingEditDevices.delete(deviceId);
+      editingSimpleDevices.add(deviceId);
+      updateSyncEditStatus();
+      render();
+    } catch (error) {
+      pendingEditDevices.delete(deviceId);
+      updateSyncEditStatus();
+      render();
+      message(`Bearbeitungsmodus konnte nicht gestartet werden: ${error.message}`, "err");
+      if (!hasEditorSession() && syncPauseClientId) {
+        try { await releaseSyncPause(); } catch (_) {}
+      }
+    }
   }
 
   async function fillEntity(entityId) {
@@ -791,6 +958,7 @@
   }
 
   async function eventSync() {
+    if (hasEditorSession()) return message("Beende zuerst die Gerätebearbeitung, bevor du synchronisierst.", "warn");
     const button = document.getElementById("btn-event-sync"); setBusy(button, true, "Synchronisiere…");
     try {
       // A name edit may still be saving after its input blur. Persist all queued
@@ -807,6 +975,7 @@
   }
 
   async function groupSync() {
+    if (hasEditorSession()) return message("Beende zuerst die Gerätebearbeitung, bevor du Gruppen synchronisierst.", "warn");
     const button = document.getElementById("btn-group-sync"); setBusy(button, true, "Ordne zu…");
     try {
       await saveConfig();
@@ -930,6 +1099,10 @@
     try {
       if (action === "toggle-area") {
         const id = button.dataset.area;
+        if (expandedAreas.has(id) && (renderedAreaItems.get(id) || []).some(({device}) => editingSimpleDevices.has(device.device_id) || pendingEditDevices.has(device.device_id))) {
+          message("Beende zuerst die Bearbeitung in diesem Raum.", "warn");
+          return;
+        }
         if (expandedAreas.has(id)) { expandedAreas.delete(id); visibleAreaCounts.delete(id); }
         else { expandedAreas.add(id); visibleAreaCounts.set(id, AREA_PAGE_SIZE); }
         renderArea(button, id);
@@ -956,6 +1129,7 @@
       else if (action === "configure-device-group") openDeviceGroup(button.dataset.device);
       else if (action === "disable-device-export") await disableDeviceExport(button.dataset.device);
       else if (action === "toggle-simple-device") toggleSimpleDevice(button, button.dataset.device);
+      else if (action === "edit-simple-device") await editSimpleDevice(button, button.dataset.device);
       else if (action === "suggest-simple-name") {
         const entityId = button.dataset.entity;
         const value = button.dataset.suggestion || "";
@@ -1107,8 +1281,14 @@
     if (document.hidden) return;
     try {
       const status = await request("/api/native-export/lifecycle");
+      lifecyclePausedElsewhere = Boolean(status.sync_paused) && !hasEditorSession();
+      updateSyncEditStatus();
       if (status.running) reconciliationRunning = true;
       else if (reconciliationRunning) {
+        if (hasEditorSession()) {
+          reconciliationRunning = false;
+          return;
+        }
         if (document.activeElement?.matches("input, select, textarea") || document.getElementById("settings-dialog").open || document.getElementById("yaml-dialog").open || document.getElementById("device-group-dialog").open) return;
         reconciliationRunning = false;
         const errors = [status.publish_error, status.legacy_error, status.background_error].filter(Boolean);

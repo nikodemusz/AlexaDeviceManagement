@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import asyncio
 from pathlib import Path
 import sys
 import tempfile
@@ -35,10 +36,11 @@ class PrimaryAPITests(unittest.IsolatedAsyncioTestCase):
             self.preferences = copy.deepcopy(value)
             return copy.deepcopy(value)
         self.prefs.save.side_effect = save
+        self.reconcile = AsyncMock(return_value={})
         self.patches = [patch.object(native_export, "STORE", self.store),
                         patch.object(ha_export, "CONFIG_STORE", self.prefs),
                         patch.object(ha_export, "_inventory", AsyncMock(return_value={"devices": []})),
-                        patch.object(native_lifecycle, "reconcile", AsyncMock(return_value={})),
+                        patch.object(native_lifecycle, "reconcile", self.reconcile),
                         patch.object(server_clean, "_on_startup", AsyncMock()),
                         patch.object(server_clean, "_on_cleanup", AsyncMock())]
         for item in self.patches:
@@ -80,6 +82,63 @@ class PrimaryAPITests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["reconciliation_queued"])
         self.assertFalse(self.store.load()["devices"]["desk"].get("enabled", True))
         trigger.assert_called_once_with(force=True)
+
+    async def test_entity_edit_pause_defers_reconciliation_until_all_editors_finish(self):
+        # The periodic startup pass may already have completed; settle it before
+        # measuring any work queued by the pause/resume requests.
+        await asyncio.sleep(0.01)
+        app = self.client.server.app
+
+        first = await self.client.post("/api/native-export/lifecycle/pause", json={"client_id": "browser-a"})
+        second = await self.client.post("/api/native-export/lifecycle/pause", json={"client_id": "browser-b"})
+        self.assertEqual(first.status, 200)
+        self.assertEqual(second.status, 200)
+        self.assertTrue((await first.json())["paused"])
+        self.assertTrue((await second.json())["paused"])
+        before = self.reconcile.await_count
+
+        app["native_reconcile_trigger"](force=True)
+        await asyncio.sleep(0)
+        self.assertEqual(self.reconcile.await_count, before)
+
+        first_resume = await self.client.post("/api/native-export/lifecycle/resume", json={"client_id": "browser-a"})
+        first_result = await first_resume.json()
+        self.assertTrue(first_result["paused"])
+        self.assertFalse(first_result["queued"])
+        await asyncio.sleep(0)
+        self.assertEqual(self.reconcile.await_count, before)
+
+        last_resume = await self.client.post("/api/native-export/lifecycle/resume", json={"client_id": "browser-b"})
+        last_result = await last_resume.json()
+        self.assertFalse(last_result["paused"])
+        self.assertTrue(last_result["queued"])
+        for _ in range(5):
+            await asyncio.sleep(0)
+        self.assertEqual(self.reconcile.await_count, before + 1)
+
+    async def test_edit_pause_waits_until_the_current_reconciliation_finishes(self):
+        await asyncio.sleep(0.01)
+        started = asyncio.Event()
+        finish = asyncio.Event()
+
+        async def blocked_reconcile(*_args, **_kwargs):
+            started.set()
+            await finish.wait()
+            return {}
+
+        self.reconcile.side_effect = blocked_reconcile
+        self.client.server.app["native_reconcile_trigger"](force=True)
+        await asyncio.wait_for(started.wait(), timeout=1)
+
+        pause = asyncio.create_task(self.client.post(
+            "/api/native-export/lifecycle/pause", json={"client_id": "browser-edit"}
+        ))
+        await asyncio.sleep(0)
+        self.assertFalse(pause.done())
+        finish.set()
+        response = await asyncio.wait_for(pause, timeout=1)
+        self.assertEqual(response.status, 200)
+        self.assertFalse((await response.json())["running"])
 
     async def test_group_api_saves_named_combined_endpoint_and_queues_reconciliation(self):
         inventory = {"devices": [{

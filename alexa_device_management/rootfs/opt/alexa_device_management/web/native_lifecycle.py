@@ -24,6 +24,7 @@ STATUS_PATH = Path("/data/alexa_device_management/native_lifecycle.json")
 _ENTITY = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$", re.IGNORECASE)
 _REPORT_LOCK = asyncio.Lock()
 _CLEANUP_LOCK = asyncio.Lock()
+EDIT_PAUSE_LEASE_SECONDS = 30 * 60
 
 
 def read_status():
@@ -38,6 +39,16 @@ def write_status(**values):
     data = {**read_status(), **values, "updated_at": int(time.time())}
     support._atomic_write_bytes(STATUS_PATH, json.dumps(data, ensure_ascii=False).encode())
     return data
+
+
+def _active_edit_pauses(state, *, now=None):
+    """Return active UI edit leases, pruning abandoned browser sessions."""
+    current_time = time.time() if now is None else now
+    pauses = state.setdefault("edit_pauses", {})
+    for client_id, expires_at in list(pauses.items()):
+        if not isinstance(expires_at, (int, float)) or expires_at <= current_time:
+            pauses.pop(client_id, None)
+    return pauses
 
 
 def identifiers(device):
@@ -334,21 +345,78 @@ async def reconcile(server, force=False):
 
 
 def install(app, server):
-    state = {"job": None, "rerun": False}
+    state = {"job": None, "rerun": False, "pending_force": False, "edit_pauses": {}}
     def start_job(force=False):
+        if _active_edit_pauses(state):
+            if force:
+                state["pending_force"] = True
+            return
+        next_force = bool(force or state["pending_force"])
         task = state["job"]
         if task and not task.done():
-            state["rerun"] = state["rerun"] or bool(force)
+            state["rerun"] = state["rerun"] or next_force
+            state["pending_force"] = False
             return
+        state["pending_force"] = False
         async def run():
-            next_force = force
+            run_force = next_force
             while True:
-                await reconcile(server, next_force)
+                await reconcile(server, run_force)
+                if _active_edit_pauses(state):
+                    if state["rerun"]:
+                        state["pending_force"] = True
+                    state["rerun"] = False
+                    break
                 if not state["rerun"]:
                     break
                 state["rerun"] = False
-                next_force = True
+                run_force = True
         state["job"] = asyncio.create_task(run())
+
+    async def pause_for_edit(request):
+        """Pause periodic reconciliation while a device's entities are edited."""
+        try:
+            body = await request.json()
+        except (ValueError, TypeError):
+            return web.json_response({"error": "Ungültige JSON-Daten."}, status=400)
+        client_id = body.get("client_id") if isinstance(body, dict) else None
+        if not isinstance(client_id, str) or not client_id.strip() or len(client_id) > 120:
+            return web.json_response({"error": "Ungültige Bearbeitungssitzung."}, status=400)
+
+        pauses = _active_edit_pauses(state)
+        already_paused = client_id in pauses
+        pauses[client_id] = time.time() + EDIT_PAUSE_LEASE_SECONDS
+        task = state["job"]
+        if not already_paused and task and not task.done():
+            # Finish the current request cycle before enabling edits. The run
+            # loop observes the lease and will not start a queued second pass.
+            while not task.done():
+                pauses[client_id] = time.time() + EDIT_PAUSE_LEASE_SECONDS
+                await asyncio.wait({task}, timeout=60)
+            await asyncio.gather(asyncio.shield(task), return_exceptions=True)
+        return web.json_response({
+            "paused": bool(_active_edit_pauses(state)),
+            "running": bool((task := state["job"]) and not task.done()),
+        })
+
+    async def resume_after_edit(request):
+        """Release one browser's edit lease and run any deferred explicit sync."""
+        try:
+            body = await request.json()
+        except (ValueError, TypeError):
+            return web.json_response({"error": "Ungültige JSON-Daten."}, status=400)
+        client_id = body.get("client_id") if isinstance(body, dict) else None
+        if not isinstance(client_id, str) or not client_id.strip() or len(client_id) > 120:
+            return web.json_response({"error": "Ungültige Bearbeitungssitzung."}, status=400)
+
+        pauses = _active_edit_pauses(state)
+        pauses.pop(client_id, None)
+        queued = not pauses and state["pending_force"]
+        if queued:
+            state["pending_force"] = False
+            start_job(force=True)
+        return web.json_response({"paused": bool(pauses), "queued": bool(queued)})
+
     # Let selection-save routes queue reconciliation immediately. The regular
     # timer remains a fallback for retries and external Alexa changes.
     app["native_reconcile_trigger"] = start_job
@@ -377,6 +445,7 @@ def install(app, server):
         job = state["job"]
         failed = bool(job and job.done() and not job.cancelled() and job.exception())
         return web.json_response({"ok": True, **read_status(), "running": bool(job and not job.done()),
+                                 "sync_paused": bool(_active_edit_pauses(state)),
                                  "background_error": "Alexa-Abgleich konnte nicht abgeschlossen werden." if failed else None})
     async def sync(request):
         start_job(force=True)
@@ -385,4 +454,6 @@ def install(app, server):
     app.on_startup.append(startup)
     app.on_cleanup.append(shutdown)
     app.router.add_get("/api/native-export/lifecycle", status)
+    app.router.add_post("/api/native-export/lifecycle/pause", pause_for_edit)
+    app.router.add_post("/api/native-export/lifecycle/resume", resume_after_edit)
     app.router.add_post("/api/native-export/sync", sync)

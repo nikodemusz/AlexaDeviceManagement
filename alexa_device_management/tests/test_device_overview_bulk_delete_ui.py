@@ -35,5 +35,18 @@ class AlexaBulkDeleteUiTests(unittest.TestCase):
     def test_failed_bulk_delete_targets_remain_selected_and_versioned_assets_refresh(self):
         self.assertIn("Fehlgeschlagene Geräte bleiben in der Auswahl.", SCRIPT)
         self.assertIn("selectedAlexaKeys.delete(item.key)", SCRIPT)
-        self.assertIn("device_overview.js?v=3.6.3", HTML)
-        self.assertIn("device_overview.css?v=3.6.3", HTML)
+        self.assertIn("device_overview.js?v=3.7.0", HTML)
+        self.assertIn("device_overview.css?v=3.7.0", HTML)
+
+    def test_entity_list_stays_open_and_is_read_only_until_sync_is_paused(self):
+        self.assertIn("const expandedSimpleDevices = new Set();", SCRIPT)
+        self.assertIn("if (isOpen) renderSimpleEntityList(row, item.device, isEditing)", SCRIPT)
+        self.assertIn('edit.dataset.action = "edit-simple-device"', SCRIPT)
+        self.assertIn("checkbox.disabled = !isEditing", SCRIPT)
+        self.assertIn("nameInput.disabled = !isEditing", SCRIPT)
+        self.assertIn("saveName.disabled = !isEditing", SCRIPT)
+        self.assertIn("await acquireSyncPause();", SCRIPT)
+        self.assertIn("await saveConfig();", SCRIPT)
+        self.assertIn("await releaseSyncPause();", SCRIPT)
+        self.assertIn('request("/api/native-export/lifecycle/pause"', SCRIPT)
+        self.assertIn("if (hasEditorSession()) {", SCRIPT)
