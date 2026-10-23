@@ -15,6 +15,7 @@
   const selectedAlexaKeys = new Set();
   const visibleAreaCounts = new Map();
   const renderedAreaItems = new Map();
+  let includeHiddenSummaryMatches = false;
   const AREA_PAGE_SIZE = 25;
   let alexaDeletePollTimer = null;
   let syncPauseClientId = null;
@@ -267,20 +268,22 @@
       query: document.getElementById("search").value.trim().toLowerCase(),
       status: document.getElementById("status-filter").value,
       area: document.getElementById("area-filter").value,
-      domain: document.getElementById("domain-filter").value
+      domain: document.getElementById("domain-filter").value,
+      includeHidden: includeHiddenSummaryMatches
     };
   }
 
   function entityMatchesFilter(entity, device, filter) {
     const hidden = entity.hidden || device.hidden;
     if (filter.status === "hidden") { if (!hidden) return false; }
-    else if (hidden) return false;
+    else if (hidden && !filter.includeHidden) return false;
     if (filter.area && device.area_id !== filter.area) return false;
     if (filter.domain && entity.domain !== filter.domain) return false;
     if (filter.status === "selected" && !entity.export.enabled && !entity.native?.enabled) return false;
     if (filter.status === "synced" && entity.status !== "synced") return false;
     if (filter.status === "pending" && entity.status !== "pending") return false;
     if (filter.status === "only_alexa" && entity.status !== "only_alexa") return false;
+    if (filter.status === "duplicates" && entity.status !== "duplicate") return false;
     if (filter.status === "problems" && !["only_alexa", "duplicate"].includes(entity.status)) return false;
     if (filter.status === "alexa_only") return false;
     if (filter.query) {
@@ -293,7 +296,7 @@
 
   function alexaOnlyMatchesFilter(item, filter) {
     if (filter.status === "hidden") { if (!item.hidden) return false; }
-    else if (item.hidden) return false;
+    else if (item.hidden && !filter.includeHidden) return false;
     if (!["all", "alexa_only", "problems", "hidden"].includes(filter.status)) return false;
     if (filter.status === "problems" && !["orphaned", "unmatched"].includes(item.status)) return false;
     if (filter.query) {
@@ -350,8 +353,39 @@
 
   function renderSummary() {
     const s = model.summary || {};
-    const cards = [["HA-Geräte", s.ha_devices || 0], ["HA-Entitäten", s.ha_entities || 0], ["v6-Endpunkte", s.selected || 0], ["In Alexa zugeordnet", s.synced || 0], ["Ausstehend", s.pending || 0], ["Alte v5-Geräte", s.only_alexa || 0], ["Duplikate", s.duplicates || 0], ["Nur Alexa", s.alexa_only || 0], ["Ausgeblendet", s.hidden || 0]];
-    document.getElementById("summary").innerHTML = cards.map(([label, value]) => `<div class="summary-card"><strong>${value}</strong>${esc(label)}</div>`).join("");
+    const cards = [
+      ["HA-Geräte", s.ha_devices || 0, "ha_devices"],
+      ["HA-Entitäten", s.ha_entities || 0, "ha_entities"],
+      ["v6-Endpunkte", s.selected || 0, "selected"],
+      ["In Alexa zugeordnet", s.synced || 0, "synced"],
+      ["Ausstehend", s.pending || 0, "pending"],
+      ["Alte v5-Geräte", s.only_alexa || 0, "only_alexa"],
+      ["Duplikate", s.duplicates || 0, "duplicates"],
+      ["Nur Alexa", s.alexa_only || 0, "alexa_only"],
+      ["Ausgeblendet", s.hidden || 0, "hidden"]
+    ];
+    const currentStatus = filters().status;
+    document.getElementById("summary").innerHTML = cards.map(([label, value, status]) => {
+      const active = currentStatus === status;
+      return `<button type="button" class="summary-card${active ? " active" : ""}" data-summary-filter="${status}" aria-pressed="${active}" aria-label="${value} ${esc(label)} anzeigen"><strong>${value}</strong>${esc(label)}</button>`;
+    }).join("");
+  }
+
+  function expandSummaryMatches() {
+    expandedAreas.clear();
+    expandedSimpleDevices.clear();
+    visibleAreaCounts.clear();
+    if (filters().status === "alexa_only") return;
+    const deviceCountsByArea = new Map();
+    for (const device of model.devices || []) {
+      const entities = (device.entities || []).filter(entity => entityMatchesFilter(entity, device, filters()));
+      if (!entities.length) continue;
+      const areaKey = device.area_id || device.area_name || "Ohne Bereich";
+      expandedAreas.add(areaKey);
+      if (filters().status !== "ha_devices") expandedSimpleDevices.add(device.device_id);
+      deviceCountsByArea.set(areaKey, (deviceCountsByArea.get(areaKey) || 0) + 1);
+    }
+    for (const [areaKey, count] of deviceCountsByArea) visibleAreaCounts.set(areaKey, count);
   }
 
   function renderFilters() {
@@ -481,7 +515,7 @@
       actions.className = "device-actions";
       for (const [action, text, cls] of [
         ["prepare-device", "Gerät exportieren", "primary"],
-        ["toggle-simple-device", "Entitäten wählen", "secondary"],
+        ["toggle-simple-device", expandedSimpleDevices.has(item.device.device_id) ? "Entitäten schließen" : "Entitäten wählen", "secondary"],
         ["disable-device-export", "Export deaktivieren", "secondary"],
       ]) {
         const control = document.createElement("button");
@@ -1223,7 +1257,22 @@
     scheduleSave();
   });
 
-  for (const id of ["search", "status-filter", "area-filter", "domain-filter"]) document.getElementById(id).addEventListener(id === "search" ? "input" : "change", render);
+  for (const id of ["search", "status-filter", "area-filter", "domain-filter"]) document.getElementById(id).addEventListener(id === "search" ? "input" : "change", () => {
+    if (id === "status-filter") includeHiddenSummaryMatches = false;
+    render();
+  });
+  document.getElementById("summary").addEventListener("click", event => {
+    const card = event.target.closest("[data-summary-filter]");
+    if (!card) return;
+    document.getElementById("status-filter").value = card.dataset.summaryFilter;
+    document.getElementById("search").value = "";
+    document.getElementById("area-filter").value = "";
+    document.getElementById("domain-filter").value = "";
+    includeHiddenSummaryMatches = true;
+    expandSummaryMatches();
+    render();
+    document.getElementById("content").scrollIntoView({behavior: "smooth", block: "start"});
+  });
   document.getElementById("btn-refresh").addEventListener("click", () => load(true));
   document.getElementById("btn-restart").addEventListener("click", restart);
   document.getElementById("btn-event-sync").addEventListener("click", eventSync);

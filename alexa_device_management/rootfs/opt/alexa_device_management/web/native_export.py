@@ -56,6 +56,25 @@ def configuration(native, preferences):
             "native_revision": revision(native), "entities": entity_settings(native)}
 
 
+def _ensure_brightness_capability(device, entity_id, entity):
+    """Add brightness control only when Home Assistant reports a dimmable light."""
+    if not entity_id.startswith("light.") or not isinstance(entity, dict):
+        return False
+    modes = entity.get("supported_color_modes") or []
+    try:
+        dimmable = bool(set(modes) - {"onoff", "unknown"})
+    except TypeError:
+        dimmable = False
+    if not dimmable:
+        return False
+    capabilities = device.setdefault("capabilities", [])
+    if any(cap.get("interface") == "Alexa.BrightnessController"
+           and cap.get("entity_id") == entity_id for cap in capabilities):
+        return False
+    capabilities.append({"interface": "Alexa.BrightnessController", "entity_id": entity_id})
+    return True
+
+
 def apply_entities(native, requested, inventory):
     """Change existing logical devices in place; create only explicitly selected ones."""
     proposed = copy.deepcopy(native)
@@ -69,14 +88,20 @@ def apply_entities(native, requested, inventory):
         fields = ("enabled", "name", "description", "display_category", "alexa_group")
         changes = {key: settings[key] for key in fields
                    if key in settings and settings[key] != old.get(key, False if key == "enabled" else "")}
-        if not changes:
-            continue
         owners = [key for key, device in proposed["devices"].items()
                   if any(cap["entity_id"] == entity_id for cap in device.get("capabilities", []))]
+        entity = actual.get(entity_id)
+        brightness_added = False
+        if owners and entity and settings.get("enabled", old.get("enabled", False)):
+            for owner in owners:
+                brightness_added = _ensure_brightness_capability(
+                    proposed["devices"][owner], entity_id, entity
+                ) or brightness_added
+        if not changes and not brightness_added:
+            continue
         if not owners:
             if not settings.get("enabled"):
                 continue
-            entity = actual.get(entity_id)
             if not entity:
                 raise ValueError(f"HA-Entität nicht verfügbar: {entity_id}")
             category = settings.get("display_category") or entity.get("category_suggestion")
@@ -91,8 +116,7 @@ def apply_entities(native, requested, inventory):
                 raise ValueError(f"Gerätetyp wird von v6 noch nicht unterstützt: {entity_id}")
             if entity_id.startswith("cover.") and int(entity.get("supported_features", 0)) & 12 != 12:
                 raise ValueError(f"Positions- und Stoppunterstützung fehlen: {entity_id}")
-            if entity_id.startswith("light.") and set(entity.get("supported_color_modes", [])) - {"onoff", "unknown"}:
-                draft["capabilities"].append({"interface": "Alexa.BrightnessController", "entity_id": entity_id})
+            _ensure_brightness_capability(draft, entity_id, entity)
             if entity_id.startswith("climate."):
                 modes = {"heat": "HEAT", "cool": "COOL", "auto": "AUTO", "heat_cool": "AUTO", "off": "OFF", "eco": "ECO"}
                 supported = sorted({modes[m] for m in entity.get("hvac_modes", []) if m in modes})

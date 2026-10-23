@@ -38,6 +38,16 @@ class AlexaBulkDeleteUiTests(unittest.TestCase):
         self.assertIn("device_overview.js?v=3.7.0", HTML)
         self.assertIn("device_overview.css?v=3.7.0", HTML)
 
+    def test_summary_counters_filter_and_expand_their_matching_entities(self):
+        self.assertIn('data-summary-filter="${status}"', SCRIPT)
+        self.assertIn('if (filter.status === "duplicates" && entity.status !== "duplicate") return false;', SCRIPT)
+        self.assertIn('option value="duplicates"', HTML)
+        self.assertIn('option value="ha_devices"', HTML)
+        self.assertIn('option value="ha_entities"', HTML)
+        self.assertIn("includeHiddenSummaryMatches = true", SCRIPT)
+        self.assertIn("expandSummaryMatches();", SCRIPT)
+        self.assertIn('if (isOpen) renderSimpleEntityList(row, item.device, isEditing)', SCRIPT)
+
     def test_entity_list_stays_open_and_is_read_only_until_sync_is_paused(self):
         self.assertIn("const expandedSimpleDevices = new Set();", SCRIPT)
         self.assertIn("if (isOpen) renderSimpleEntityList(row, item.device, isEditing)", SCRIPT)

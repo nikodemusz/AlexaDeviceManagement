@@ -62,6 +62,24 @@ class NativePrimaryTests(unittest.TestCase):
                          ["Alexa.PowerController", "Alexa.BrightnessController"])
         self.assertEqual(endpoints(updated)[1]["endpointId"], "native:ha:light.new")
 
+    def test_existing_selected_dimmer_gets_missing_brightness_controller(self):
+        original = config()
+        requested = native_export.entity_settings(original)
+        inventory = {"devices": [{"entities": [{"entity_id": "light.desk", "supported_color_modes": ["brightness"]}]}]}
+        updated = native_export.apply_entities(original, requested, inventory)
+        self.assertEqual([c["interface"] for c in updated["devices"]["desk"]["capabilities"]],
+                         ["Alexa.PowerController", "Alexa.BrightnessController"])
+        self.assertEqual([c["interface"] for c in original["devices"]["desk"]["capabilities"]],
+                         ["Alexa.PowerController"])
+
+    def test_existing_on_off_light_does_not_get_brightness_controller(self):
+        original = config()
+        requested = native_export.entity_settings(original)
+        inventory = {"devices": [{"entities": [{"entity_id": "light.desk", "supported_color_modes": ["onoff"]}]}]}
+        updated = native_export.apply_entities(original, requested, inventory)
+        self.assertEqual([c["interface"] for c in updated["devices"]["desk"]["capabilities"]],
+                         ["Alexa.PowerController"])
+
     def test_unsupported_new_devices_do_not_partially_change_configuration(self):
         original = config()
         with self.assertRaises(ValueError):
