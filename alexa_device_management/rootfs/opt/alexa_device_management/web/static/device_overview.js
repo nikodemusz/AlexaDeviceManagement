@@ -30,7 +30,7 @@
     "btn-settings": "Öffnet Einstellungen für Alexa-Abgleich, Alexa-Gruppen und Export.",
     "btn-preview": "Zeigt die v6-Hauptkonfiguration; sie kann im YAML-Editor geändert werden.",
     "btn-restart": "Startet Home Assistant neu, um einen neu eingerichteten oder aktualisierten Alexa-Abgleichsdienst zu laden.",
-    "btn-event-sync": "Übernimmt bei alten, noch nicht gruppierten v6-Geräten den Standard, fasst bereits ausgewählte Entities desselben HA-Geräts zusammen und sendet danach per AddOrUpdateReport die Änderungen an Alexa. Deaktivierte Entities bleiben deaktiviert; ausdrücklich getrennte oder angepasste Geräte bleiben erhalten.",
+    "btn-event-sync": "Übernimmt bei alten, noch nicht gruppierten v6-Geräten den Standard, fasst bereits ausgewählte Entities desselben HA-Geräts zusammen und sendet danach per AddOrUpdateReport die Änderungen an Alexa. Entfernte Endpunkte werden per DeleteReport bereinigt. Deaktivierte Entities bleiben deaktiviert; ausdrücklich getrennte oder angepasste Geräte bleiben erhalten. Schreibt keine alexa.yaml.",
     "btn-group-sync": "Ordnet bereits vorhandene Alexa-Endpunkte den konfigurierten Alexa-Gruppen zu.",
     "btn-enable-useful": "Exportiert für jedes sichtbare Home-Assistant-Gerät automatisch alle unterstützten Standardfunktionen und zeigt sie als Alexa-Gerät oder nötigenfalls als einzelne Endpunkte an.",
     "btn-disable-visible": "Deaktiviert den Alexa-Export für alle aktuell sichtbaren Entitäten.",
