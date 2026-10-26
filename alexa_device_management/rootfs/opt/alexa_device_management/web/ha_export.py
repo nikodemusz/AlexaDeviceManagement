@@ -134,6 +134,10 @@ async def _inventory() -> dict[str, Any]:
             "supported_color_modes": attributes.get("supported_color_modes", []),
             "hvac_modes": attributes.get("hvac_modes", []),
             "current_temperature": attributes.get("current_temperature"),
+            "unit_of_measurement": attributes.get("unit_of_measurement", ""),
+            "minimum": attributes.get("min", attributes.get("minimum")),
+            "maximum": attributes.get("max", attributes.get("maximum")),
+            "step": attributes.get("step"),
             "entity_category": entity.get("entity_category"),
         })
 

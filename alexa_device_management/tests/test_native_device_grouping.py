@@ -9,8 +9,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "rootfs/opt/alexa_device_management/web"))
 
 from native_export import (
-    apply_device_group, entity_settings, normalize_active_device_groups,
-    standard_device_group,
+    apply_device_group, apply_virtual_device_group, entity_settings,
+    normalize_active_device_groups, standard_device_group,
 )
 from native_skill_config import NativeSkillConfigStore
 
@@ -247,6 +247,88 @@ class NativeDeviceGroupingTests(unittest.TestCase):
                                       "separate", "", current_inventory)
 
         self.assertEqual(set(separate["devices"]), {"ha:switch.relay_a"})
+
+    def test_virtual_group_combines_entities_from_different_ha_devices(self):
+        native = NativeSkillConfigStore.default()
+        native["enabled"] = True
+        native["devices"] = {"ha:relay-group": {
+            "name": "Doppelrelais", "enabled": True, "group_mode": "combined",
+            "ha_device_id": "relay-device", "members": ["switch.relay_a", "switch.relay_b"],
+            "capabilities": [
+                {"interface": "Alexa.ToggleController", "instance": "power_a",
+                 "entity_id": "switch.relay_a", "capability_names": ["Relais A"]},
+                {"interface": "Alexa.ToggleController", "instance": "power_b",
+                 "entity_id": "switch.relay_b", "capability_names": ["Relais B"]},
+            ],
+        }}
+        inventory = relay_inventory()
+        inventory["devices"][1]["entities"].append({
+            "entity_id": "sensor.tank_liters", "domain": "sensor", "name": "Zisterne Liter",
+            "unit_of_measurement": "L", "state": "2500",
+        })
+
+        grouped = apply_virtual_device_group(
+            native, "virtual:tank", ["switch.relay_a", "sensor.tank_liters"],
+            "Zisterne", inventory,
+            {"switch.relay_a": "Pumpe", "sensor.tank_liters": "Wassermenge"},
+            {"sensor.tank_liters": {"mode": "read_only_range", "unit": "Alexa.Unit.Liters",
+                                     "instance": "value_liters", "minimum": 0,
+                                     "maximum": 4000, "precision": 1}},
+        )
+
+        virtual = grouped["devices"]["virtual:tank"]
+        self.assertTrue(virtual["virtual_device"])
+        self.assertEqual(virtual["ha_device_id"], "virtual:tank")
+        self.assertEqual(set(virtual["members"]), {"switch.relay_a", "sensor.tank_liters"})
+        self.assertEqual({cap["interface"] for cap in virtual["capabilities"]},
+                         {"Alexa.PowerController", "Alexa.RangeController"})
+        self.assertEqual(grouped["devices"]["ha:relay-group"]["members"], ["switch.relay_b"])
+
+    def test_virtual_group_edit_restores_unchecked_members_as_individual_endpoints(self):
+        inventory = relay_inventory()
+        inventory["devices"][1]["entities"].append({
+            "entity_id": "sensor.tank_liters", "domain": "sensor", "name": "Zisterne Liter",
+            "unit_of_measurement": "L", "state": "2500",
+        })
+        initial = apply_virtual_device_group(
+            self.native, "virtual:tank", ["switch.relay_a", "sensor.tank_liters"],
+            "Zisterne", inventory,
+            {"switch.relay_a": "Pumpe", "sensor.tank_liters": "Wassermenge"},
+            {"sensor.tank_liters": {"mode": "read_only_range", "unit": "Alexa.Unit.Liters",
+                                     "instance": "value_liters", "minimum": 0,
+                                     "maximum": 4000, "precision": 1}},
+        )
+        updated = apply_virtual_device_group(
+            initial, "virtual:tank", ["sensor.tank_liters"], "Zisterne", inventory,
+            {"sensor.tank_liters": "Wassermenge"},
+            {"sensor.tank_liters": {"mode": "preserve"}},
+        )
+
+        self.assertEqual(updated["devices"]["virtual:tank"]["members"], ["sensor.tank_liters"])
+        self.assertEqual(updated["devices"]["ha:switch.relay_a"]["capabilities"][0]["interface"],
+                         "Alexa.PowerController")
+
+    def test_dissolving_virtual_group_restores_members_as_individual_endpoints(self):
+        from native_export import _dissolve_virtual_group
+
+        inventory = relay_inventory()
+        inventory["devices"][1]["entities"].append({
+            "entity_id": "sensor.tank_liters", "domain": "sensor", "name": "Zisterne Liter",
+            "unit_of_measurement": "L", "state": "2500",
+        })
+        grouped = apply_virtual_device_group(
+            self.native, "virtual:tank", ["switch.relay_a", "sensor.tank_liters"],
+            "Zisterne", inventory,
+            {"switch.relay_a": "Pumpe", "sensor.tank_liters": "Wassermenge"},
+            {"sensor.tank_liters": {"mode": "read_only_range", "unit": "Alexa.Unit.Liters",
+                                     "instance": "value_liters", "minimum": 0,
+                                     "maximum": 4000, "precision": 1}},
+        )
+        dissolved = _dissolve_virtual_group(grouped, "virtual:tank")
+
+        self.assertNotIn("virtual:tank", dissolved["devices"])
+        self.assertIn("ha:switch.relay_a", dissolved["devices"])
+        self.assertIn("ha:sensor.tank_liters", dissolved["devices"])
 
 
 if __name__ == "__main__":
