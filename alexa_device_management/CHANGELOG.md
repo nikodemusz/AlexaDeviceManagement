@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.8.1
+
+- Die Gruppierungsansicht lädt gespeicherten Modus und Alexa-Gesamtnamen wieder korrekt. Für ein Thermostat mit zusätzlichen Temperatur-Sensor-Entities schlägt sie standardmäßig nur das `climate`-Entity mit Ist- und Sollwert vor; der separate Export bleibt wählbar.
+- Eine ausdrücklich gewählte Einzelgeräte-Exportform bleibt gespeichert und wird beim nächsten Öffnen nicht wieder auf den Thermostat-Standard zurückgesetzt.
+
 ## 3.8.0
 
 - Neue Alexa-Exporte erhalten standardmäßig ein domainbasiertes Funktionsprofil: Dimmbare Lichter bekommen Ein/Aus und Helligkeit, Rollläden nur die Position, Thermostate Modus, Sollwert und Ist-Temperatur. Das Gruppenfenster kann ausdrücklich auf eigene Funktionen umgestellt werden.

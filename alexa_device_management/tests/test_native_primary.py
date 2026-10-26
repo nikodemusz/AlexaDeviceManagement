@@ -125,6 +125,48 @@ class NativePrimaryTests(unittest.TestCase):
         capability = next(item for item in thermostat["capabilities"] if item["interface"] == "Alexa.ThermostatController")
         self.assertEqual(capability["configuration"]["supportedModes"], ["HEAT", "OFF"])
 
+    def test_thermostat_group_suggestion_uses_climate_and_retains_saved_mode(self):
+        inventory = {"devices": [{
+            "device_id": "thermostat-device", "name": "VTherm Bad OG", "entities": [
+                {"entity_id": "climate.room", "domain": "climate", "name": "Thermostat Bad",
+                 "hvac_modes": ["off", "heat"]},
+                {"entity_id": "sensor.room_temperature", "domain": "sensor",
+                 "device_class": "temperature", "name": "Temperatur Bad"},
+                {"entity_id": "sensor.room_target", "domain": "sensor",
+                 "device_class": "temperature", "name": "Wunschtemperatur Bad"},
+            ],
+        }]}
+        native = {"schema_version": 6, "enabled": True, "locale": "de-DE", "devices": {
+            "ha:climate.room": {"name": "Thermostat Bad", "enabled": True, "capabilities": [
+                {"interface": "Alexa.ThermostatController", "entity_id": "climate.room"}]},
+            "ha:sensor.room_temperature": {"name": "Temperatur Bad", "enabled": True, "capabilities": [
+                {"interface": "Alexa.TemperatureSensor", "entity_id": "sensor.room_temperature"}]},
+            "ha:sensor.room_target": {"name": "Wunschtemperatur Bad", "enabled": True, "capabilities": [
+                {"interface": "Alexa.TemperatureSensor", "entity_id": "sensor.room_target"}]},
+        }}
+
+        overview = build_overview(inventory, [], [], native_export.configuration(native, {}), native)
+        suggestion = overview["devices"][0]["grouping_suggestion"]
+        self.assertEqual(suggestion, {
+            "mode": "separate", "entity_ids": ["climate.room"],
+            "name": "Thermostat Bad", "reason": "thermostat",
+        })
+
+        grouped = native_export.apply_device_group(
+            native, "thermostat-device", ["climate.room"], "combined",
+            "Thermostat Bad", inventory,
+        )
+        grouped_overview = build_overview(
+            inventory, [], [], native_export.configuration(grouped, {}), grouped,
+        )
+        climate_export = next(entity["export"] for entity in grouped_overview["devices"][0]["entities"]
+                              if entity["entity_id"] == "climate.room")
+        self.assertEqual(climate_export["group_mode"], "combined")
+        self.assertEqual(climate_export["logical_device_name"], "Thermostat Bad")
+        self.assertEqual(len(climate_export["native_endpoint_ids"]), 1)
+        self.assertNotIn("sensor.room_temperature", native_export.entity_settings(grouped))
+        self.assertNotIn("sensor.room_target", native_export.entity_settings(grouped))
+
     def test_endpoint_summary_counts_tank_once_and_does_not_match_old_copy(self):
         native = config()
         preferences = native_export.configuration(native, {})

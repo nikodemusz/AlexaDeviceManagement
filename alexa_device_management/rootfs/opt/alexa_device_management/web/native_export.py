@@ -43,7 +43,10 @@ def entity_settings(native):
                 "display_category_mode": device.get("display_category_mode", "standard"),
                 "alexa_group": device.get("alexa_group", ""),
                 "native_endpoint_ids": [],
-                "group_mode": device.get("group_mode", "separate"),
+                # No stored mode means this device has not been configured in
+                # the grouping editor yet. Keep that distinct from an
+                # explicit choice to export separate Alexa endpoints.
+                "group_mode": device.get("group_mode", ""),
                 "logical_device_name": device.get("name", key),
                 "capability_mode": "standard",
                 "capabilities": [],
@@ -459,9 +462,12 @@ def apply_device_group(native, device_id, entity_ids, mode, group_name, inventor
                 "name": name,
                 "capabilities": capabilities,
                 "enabled": True,
+                # Persist the explicit separate choice so the editor does not
+                # silently suggest a combined thermostat again next time.
+                "ha_device_id": device_id,
+                "group_mode": "separate",
             }
-            for field in ("ha_device_id", "group_mode", "members"):
-                proposed["devices"][key].pop(field, None)
+            proposed["devices"][key].pop("members", None)
     try:
         return NativeSkillConfigStore.validate(proposed)
     except ValueError as exc:

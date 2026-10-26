@@ -1068,17 +1068,25 @@
   function openDeviceGroup(deviceId) {
     const device = (model.devices || []).find(item => String(item.device_id) === String(deviceId));
     if (!device) throw new Error("Home-Assistant-Gerät wurde nicht gefunden.");
-    const selectedEntities = (device.entities || []).filter(entity => entity.export?.enabled);
-    const combined = (device.entities || []).some(entity => entity.export?.group_mode === "combined");
-    const currentGroupName = (device.entities || []).find(entity => entity.export?.logical_device_name)?.export.logical_device_name;
+    const entities = device.entities || [];
+    const activeIds = entities.filter(entity => entity.export?.enabled).map(entity => entity.entity_id);
+    const explicitMode = entities.map(entity => entity.export?.group_mode)
+      .find(mode => mode === "combined" || mode === "separate");
+    const suggestion = device.grouping_suggestion || {};
+    const selectedIds = new Set(explicitMode
+      ? activeIds
+      : Array.isArray(suggestion.entity_ids) ? suggestion.entity_ids : activeIds);
+    const thermostatDefault = !explicitMode && suggestion.reason === "thermostat";
+    const combined = explicitMode ? explicitMode === "combined" : suggestion.mode === "combined";
+    const currentGroupName = entities.find(entity => entity.export?.logical_device_name)?.export.logical_device_name;
     document.getElementById("device-group-dialog").dataset.deviceId = String(deviceId);
     document.getElementById("device-group-title").textContent = `Alexa-Gerät konfigurieren: ${device.name}`;
-    document.getElementById("device-group-name").value = currentGroupName || device.name || "";
+    document.getElementById("device-group-name").value = currentGroupName || suggestion.name || device.name || "";
     document.querySelector('input[name="device-group-mode"][value="combined"]').checked = combined;
     document.querySelector('input[name="device-group-mode"][value="separate"]').checked = !combined;
-    document.getElementById("device-group-entities").innerHTML = (device.entities || []).map(entity => {
+    document.getElementById("device-group-entities").innerHTML = entities.map(entity => {
       const settings = entityConfig(entity.entity_id);
-      const enabled = entity.export?.enabled;
+      const enabled = selectedIds.has(entity.entity_id);
       const label = settings.name || suggestedName(entity, device);
       const options = capabilityOptions(entity);
       const profileMode = entity.export?.capability_mode === "custom" ? "custom" : "standard";
@@ -1092,7 +1100,10 @@
       const relayCategory = entity.domain === "switch"
         ? `<label>Relais-Rolle<select data-group-category="${attr(entity.entity_id)}" data-category-mode="${customCategory ? "custom" : "standard"}">${[["LIGHT", "Lichtschalter"], ["SMARTPLUG", "Steckdose"], ["SWITCH", "Schalter / Heizventil"]].map(([value, text]) => `<option value="${value}" ${displayCategory === value ? "selected" : ""}>${text}</option>`).join("")}</select></label>`
         : "";
-      const note = roleNote(entity);
+      const thermostatHelper = thermostatDefault && entity.domain === "sensor" && entity.device_class === "temperature";
+      const note = thermostatHelper
+        ? "Standard: Ist- und Wunschtemperatur kommen über das Thermostat. Dieses Sensor-Entity wird daher nicht als weiteres Alexa-Gerät angelegt. Für einen zusätzlichen Sensor bitte auswählen; für ein eigenes Alexa-Gerät oben „einzelne Geräte“ wählen."
+        : roleNote(entity);
       return `<div class="device-group-entity"><label class="device-group-selection"><input type="checkbox" data-group-entity="${attr(entity.entity_id)}" ${enabled ? "checked" : ""}><span><strong>${esc(entity.name || entity.entity_id)}</strong><small>${esc(entity.entity_id)}</small></span></label><div class="device-group-member-name">Alexa-Funktionsname<input data-group-name="${attr(entity.entity_id)}" value="${attr(label)}" maxlength="128" autocomplete="off">${relayCategory}<label>Funktionsprofil<select data-group-profile="${attr(entity.entity_id)}"><option value="standard" ${profileMode === "standard" ? "selected" : ""}>Standard (empfohlen)</option><option value="custom" ${profileMode === "custom" ? "selected" : ""}>Eigene Funktionen</option></select></label><div class="device-group-capabilities ${profileMode === "custom" ? "" : "hidden"}" data-group-capabilities="${attr(entity.entity_id)}">${capabilities}</div>${note ? `<small class="device-group-role-note">${esc(note)}</small>` : ""}</div></div>`;
     }).join("");
     document.getElementById("device-group-name-field").classList.toggle("hidden", !combined);

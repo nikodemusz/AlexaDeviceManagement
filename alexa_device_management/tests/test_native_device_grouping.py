@@ -79,7 +79,9 @@ class NativeDeviceGroupingTests(unittest.TestCase):
         self.assertEqual(set(separate["devices"]), {"ha:switch.relay_a", "ha:switch.relay_b"})
         self.assertEqual({device["capabilities"][0]["interface"]
                           for device in separate["devices"].values()}, {"Alexa.PowerController"})
-        self.assertNotIn("group_mode", separate["devices"]["ha:switch.relay_a"])
+        self.assertEqual({device["group_mode"] for device in separate["devices"].values()}, {"separate"})
+        self.assertEqual({device["ha_device_id"] for device in separate["devices"].values()}, {"relay-device"})
+        self.assertEqual(entity_settings(separate)["switch.relay_a"]["group_mode"], "separate")
 
     def test_entities_from_another_ha_device_cannot_be_mixed(self):
         with self.assertRaisesRegex(ValueError, "selben Home-Assistant-Gerät"):
