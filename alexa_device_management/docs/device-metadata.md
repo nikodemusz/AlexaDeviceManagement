@@ -12,15 +12,23 @@ Each key in native `devices` is a stable logical endpoint, externally prefixed
 with `native:`. Multiple HA values, such as cistern liters and percentage,
 remain capabilities of one device with distinct controller instances. The
 device overview can explicitly group selected entities belonging to one HA
-device into a named Alexa endpoint. The standard export action automatically
-groups supported functions from one HA device; the overview previews the Alexa
-name, endpoint count and functions. Multi-output relay modules can instead be
-configured as separate Alexa endpoints. Combined endpoints store
-`group_mode: combined`, `ha_device_id`, and `members`. An explicit
+device into a named Alexa endpoint. Virtual Alexa endpoints can also combine
+selected entities from different HA devices without changing Home Assistant's
+device registry. They store `virtual_device: true`, `group_mode: combined`, a
+synthetic `ha_device_id` beginning with `virtual:`, and `members`. The central
+editor stages their creation, changes, and dissolution until the owner clicks
+Finish; dissolution restores each member as an individual Alexa endpoint. The
+standard export action automatically groups supported functions from one HA
+device; the overview previews the Alexa name, endpoint count and functions.
+Multi-output relay modules can instead be configured as separate Alexa
+endpoints. Combined endpoints store `group_mode: combined`, `ha_device_id`, and
+`members`. An explicit
 `group_mode: separate` plus `ha_device_id` preserves a user's choice to keep
 one endpoint per entity. Capability-level `enabled` flags control individual
 exported functions, and `capability_names` provides friendly names for relay
-controls. Functions omitted from a saved group are removed from the native
+controls and multiple range controllers. Numeric sensor values can be added
+to a virtual endpoint as read-only RangeControllers with a chosen Alexa unit
+and explicit range. Functions omitted from a saved group are removed from the native
 export; reconciliation then retires endpoints no longer selected. Unchanged
 native configuration does not produce another Alexa report; failed reports
 and explicit manual sync remain retryable. On explicit manual sync only,

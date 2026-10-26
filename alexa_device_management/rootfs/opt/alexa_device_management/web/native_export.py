@@ -4,6 +4,8 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
+import re
 import time
 
 import yaml
@@ -69,7 +71,18 @@ def configuration(native, preferences):
                for key in ("ui", "event_gateway", "group_sync")},
             "schema_version": 6, "export_mode": "native", "legacy_export_enabled": False,
             "locale": native.get("locale", "de-DE"), "native_enabled": native["enabled"],
-            "native_revision": revision(native), "entities": entity_settings(native)}
+            "native_revision": revision(native), "entities": entity_settings(native),
+            "virtual_groups": [
+                {"group_id": key, "name": device.get("name", key),
+                 "display_category": device.get("display_category", "OTHER"),
+                 "enabled": device.get("enabled", True),
+                 "members": copy.deepcopy(device.get("members", [])),
+                 "member_names": copy.deepcopy(device.get("member_names", {})),
+                 "member_display_categories": copy.deepcopy(device.get("member_display_categories", {})),
+                 "capabilities": copy.deepcopy(device.get("capabilities", []))}
+                for key, device in native.get("devices", {}).items()
+                if device.get("virtual_device") is True
+            ]}
 
 
 def _ensure_brightness_capability(device, entity_id, entity):
@@ -599,6 +612,245 @@ def apply_device_group(native, device_id, entity_ids, mode, group_name, inventor
         raise
 
 
+def _restore_separate_capability(capability):
+    """Turn a member of a combined device back into its standalone control."""
+    restored = copy.deepcopy(capability)
+    if (restored.get("interface") == "Alexa.ToggleController"
+            and str(restored.get("instance", "")).startswith("power_")):
+        restored["interface"] = "Alexa.PowerController"
+        restored.pop("instance", None)
+        restored.pop("capability_names", None)
+    elif (restored.get("interface") == "Alexa.RangeController"
+          and restored.get("entity_id", "").startswith("cover.")):
+        restored["instance"] = "cover.position"
+        restored["capability_names"] = ["Position"]
+    return restored
+
+
+def _standalone_endpoint(entity_id, capabilities, name, display_category="OTHER"):
+    """Build a safe one-entity endpoint when a virtual group is dissolved."""
+    key = "ha:" + entity_id
+    return key, {
+        "name": str(name or entity_id)[:128],
+        "description": "",
+        "display_category": str(display_category or "OTHER"),
+        "aliases": [],
+        "capabilities": [_restore_separate_capability(cap) for cap in capabilities],
+        "enabled": any(cap.get("enabled", True) for cap in capabilities),
+        "replaces_legacy_endpoint": entity_id.replace(".", "#", 1),
+    }
+
+
+def _dissolve_virtual_group(native, group_id):
+    proposed = copy.deepcopy(native)
+    device = proposed["devices"].get(group_id)
+    if not device or not device.get("virtual_device"):
+        raise ValueError("Das virtuelle Alexa-Gerät wurde nicht gefunden.")
+    members = {}
+    for capability in device.get("capabilities", []):
+        members.setdefault(capability["entity_id"], []).append(copy.deepcopy(capability))
+    proposed["devices"].pop(group_id, None)
+    for entity_id, capabilities in members.items():
+        key, endpoint = _standalone_endpoint(
+            entity_id, capabilities,
+            device.get("member_names", {}).get(entity_id)
+            or next((name for cap in capabilities for name in cap.get("capability_names", [])), entity_id),
+            device.get("member_display_categories", {}).get(entity_id, device.get("display_category", "OTHER")),
+        )
+        existing = proposed["devices"].get(key)
+        if existing:
+            combined = existing.get("capabilities", []) + endpoint["capabilities"]
+            unique = {}
+            for cap in combined:
+                unique[(cap.get("interface"), cap.get("instance", ""))] = cap
+            endpoint = {**existing, **endpoint, "capabilities": list(unique.values())}
+        proposed["devices"][key] = endpoint
+    return NativeSkillConfigStore.validate(proposed)
+
+
+def apply_virtual_device_group(native, group_id, entity_ids, group_name, inventory,
+                               names=None, profiles=None, display_category="OTHER"):
+    """Combine selected entities from any HA devices into one Alexa endpoint."""
+    if (not isinstance(group_id, str)
+            or not re.fullmatch(r"virtual:[A-Za-z0-9_.:]{1,120}", group_id)):
+        raise ValueError("Ungültige Kennung des virtuellen Alexa-Geräts.")
+    if not isinstance(entity_ids, list) or not entity_ids or len(entity_ids) > 200:
+        raise ValueError("Mindestens eine und höchstens 200 Entitäten auswählen.")
+    if any(not isinstance(entity_id, str) or not entity_id.strip() for entity_id in entity_ids):
+        raise ValueError("Ungültige Entity-ID.")
+    selected = list(dict.fromkeys(entity_ids))
+    actual = {}
+    for ha_device in inventory.get("devices", []):
+        if not isinstance(ha_device, dict):
+            continue
+        for entity in ha_device.get("entities", []):
+            if isinstance(entity, dict) and isinstance(entity.get("entity_id"), str):
+                actual[entity["entity_id"]] = {
+                    **entity, "_device_name": ha_device.get("name", ""),
+                    "_device_id": ha_device.get("device_id", ""),
+                    "area_name": ha_device.get("area_name", ""),
+                }
+    if not set(selected) <= set(actual):
+        raise ValueError("Eine oder mehrere ausgewählte Home-Assistant-Entitäten sind nicht mehr verfügbar.")
+
+    group_name = str(group_name or "").strip()
+    if not group_name or len(group_name) > 128:
+        raise ValueError("Der Alexa-Gesamtname muss 1 bis 128 Zeichen enthalten.")
+    names = names if isinstance(names, dict) else {}
+    profiles = profiles if isinstance(profiles, dict) else {}
+    previous_group = native.get("devices", {}).get(group_id, {})
+    previous_caps = {}
+    if previous_group.get("virtual_device"):
+        for cap in previous_group.get("capabilities", []):
+            previous_caps.setdefault(cap["entity_id"], []).append(copy.deepcopy(cap))
+    elif group_id in native.get("devices", {}):
+        raise ValueError("Die Kennung wird bereits von einem Home-Assistant-Endpunkt verwendet.")
+
+    member_caps = {}
+    for entity_id in selected:
+        entity = actual[entity_id]
+        member_name = str(names.get(entity_id) or entity.get("name") or entity_id).strip()
+        if not member_name or len(member_name) > 128:
+            raise ValueError(f"Alexa-Funktionsname für {entity_id} muss 1 bis 128 Zeichen enthalten.")
+        profile = profiles.get(entity_id, {"mode": "standard"})
+        if not isinstance(profile, dict):
+            raise ValueError(f"Ungültiges Funktionsprofil für {entity_id}.")
+        mode = profile.get("mode", "standard")
+        if mode == "preserve":
+            if entity_id not in previous_caps:
+                raise ValueError(f"Für {entity_id} gibt es keine gespeicherte Alexa-Funktion zum Übernehmen.")
+            capabilities = copy.deepcopy(previous_caps[entity_id])
+        elif mode == "read_only_range":
+            if entity.get("domain") not in {"sensor", "number", "input_number"}:
+                raise ValueError(f"Ein lesbarer Zahlenwert wird für {entity_id} benötigt.")
+            try:
+                numeric_state = float(entity.get("state"))
+            except (TypeError, ValueError):
+                raise ValueError(f"{entity_id} hat aktuell keinen numerischen Wert.") from None
+            if not math.isfinite(numeric_state):
+                raise ValueError(f"{entity_id} hat aktuell keinen gültigen Zahlenwert.")
+            unit = str(profile.get("unit") or "").strip()
+            instance = str(profile.get("instance") or "").strip()
+            if not unit or len(unit) > 128 or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", instance):
+                raise ValueError(f"Alexa-Einheit oder Funktionskennung für {entity_id} ist ungültig.")
+            try:
+                minimum = float(profile.get("minimum", 0))
+                maximum = float(profile.get("maximum", 100))
+                precision = float(profile.get("precision", 1))
+            except (TypeError, ValueError):
+                raise ValueError(f"Wertebereich für {entity_id} muss numerisch sein.") from None
+            if (not all(math.isfinite(v) for v in (minimum, maximum, precision))
+                    or minimum >= maximum or precision <= 0):
+                raise ValueError(f"Wertebereich für {entity_id} ist ungültig.")
+            capabilities = [{
+                "interface": "Alexa.RangeController", "entity_id": entity_id,
+                "instance": instance, "unit": unit, "minimum": minimum,
+                "maximum": maximum, "precision": precision, "read_only": True,
+            }]
+        elif mode in ("standard", "custom"):
+            display_category_mode = profile.get("display_category_mode", "standard")
+            display_category = profile.get("display_category") or _display_category(entity_id, entity, None)
+            selected_interfaces = profile.get("capabilities") if mode == "custom" else None
+            capabilities = _entity_capabilities(
+                entity_id,
+                {"enabled": True, "display_category": display_category,
+                 "display_category_mode": display_category_mode},
+                entity, mode=mode, selected=selected_interfaces,
+            )
+        else:
+            raise ValueError(f"Unbekanntes Funktionsprofil für {entity_id}.")
+        if not capabilities:
+            raise ValueError(f"Für {entity_id} gibt es kein unterstütztes Alexa-Funktionsprofil.")
+        for capability in capabilities:
+            capability["enabled"] = True
+            if capability.get("interface") in {"Alexa.ToggleController", "Alexa.RangeController"}:
+                capability["capability_names"] = [member_name]
+        member_caps[entity_id] = capabilities
+
+    combined = [cap for entity_id in selected for cap in member_caps[entity_id]]
+    # Several switch outputs can share one Alexa endpoint as named toggles.
+    powers = [cap for cap in combined if cap.get("interface") == "Alexa.PowerController"]
+    if len(powers) > 1:
+        if not all(cap["entity_id"].startswith(("switch.", "input_boolean.")) for cap in powers):
+            raise ValueError("Mehrere Ein/Aus-Funktionen lassen sich nur für Relais als Alexa-Gesamtgerät gruppieren.")
+        for cap in powers:
+            cap["interface"] = "Alexa.ToggleController"
+            cap["instance"] = "power_" + hashlib.sha256(cap["entity_id"].encode("utf-8")).hexdigest()[:12]
+            cap["capability_names"] = [str(names.get(cap["entity_id"]) or cap["entity_id"])]
+    covers = [cap for cap in combined if cap.get("interface") == "Alexa.RangeController"
+              and cap.get("entity_id", "").startswith("cover.")]
+    if len(covers) > 1:
+        for cap in covers:
+            cap["instance"] = "cover.position_" + hashlib.sha256(
+                cap["entity_id"].encode("utf-8")).hexdigest()[:12]
+            cap["capability_names"] = [str(names.get(cap["entity_id"]) or cap["entity_id"])]
+
+    # When updating a virtual group, return unchecked old members to standalone
+    # endpoints. Selected entities are moved out of every previous owner while
+    # all unrelated members remain in their original Alexa groups.
+    proposed = copy.deepcopy(native)
+    old_members = set(previous_group.get("members", [])) if previous_group.get("virtual_device") else set()
+    for endpoint_id, device in list(proposed["devices"].items()):
+        if endpoint_id == group_id and device.get("virtual_device"):
+            proposed["devices"].pop(endpoint_id, None)
+            continue
+        keep = [cap for cap in device.get("capabilities", [])
+                if cap.get("entity_id") not in set(selected)]
+        if len(keep) == len(device.get("capabilities", [])):
+            continue
+        if keep:
+            device["capabilities"] = keep
+            device["enabled"] = any(cap.get("enabled", True) for cap in keep)
+            if device.get("group_mode") == "combined":
+                device["members"] = sorted({cap["entity_id"] for cap in keep})
+        else:
+            proposed["devices"].pop(endpoint_id, None)
+
+    for entity_id in sorted(old_members - set(selected)):
+        prior = previous_caps.get(entity_id, [])
+        if not prior:
+            continue
+        old_name = (previous_group.get("member_names", {}).get(entity_id)
+                    or next((name for cap in prior for name in cap.get("capability_names", [])), entity_id))
+        key, endpoint = _standalone_endpoint(entity_id, prior, old_name,
+                                             previous_group.get("member_display_categories", {}).get(
+                                                 entity_id, previous_group.get("display_category", "OTHER")))
+        existing = proposed["devices"].get(key)
+        if existing:
+            merged = existing.get("capabilities", []) + endpoint["capabilities"]
+            unique = {(cap.get("interface"), cap.get("instance", "")): cap for cap in merged}
+            endpoint = {**existing, **endpoint, "capabilities": list(unique.values())}
+        proposed["devices"][key] = endpoint
+
+    cats = {_display_category(entity_id, actual[entity_id], None) for entity_id in selected}
+    category = str(display_category or "OTHER").upper()
+    if category == "OTHER" and len(cats) == 1:
+        category = next(iter(cats))
+    proposed["devices"][group_id] = {
+        "name": group_name,
+        "description": "Virtuelles Alexa-Gerät aus ausgewählten Home-Assistant-Entitäten.",
+        "display_category": category,
+        "aliases": list(dict.fromkeys(str(names.get(eid) or actual[eid].get("name") or eid)
+                                       for eid in selected)),
+        "capabilities": combined,
+        "enabled": True,
+        "ha_device_id": group_id,
+        "group_mode": "combined",
+        "members": sorted(set(selected)),
+        "member_names": {entity_id: str(names.get(entity_id) or actual[entity_id].get("name") or entity_id)
+                         for entity_id in selected},
+        "member_display_categories": {
+            entity_id: _display_category(entity_id, actual[entity_id], None)
+            for entity_id in selected
+        },
+        "virtual_device": True,
+    }
+    try:
+        return NativeSkillConfigStore.validate(proposed)
+    except ValueError as exc:
+        raise ValueError(f"Diese Funktionen können nicht gemeinsam in einem Alexa-Gerät liegen: {exc}") from exc
+
+
 async def read_config(request):
     native = STORE.load()
     preferences = ha_export.CONFIG_STORE.load()
@@ -702,6 +954,40 @@ async def configure_group(request):
     trigger = request.app.get("native_reconcile_trigger")
     queued = callable(trigger) and changed
     if queued and changed:
+        trigger(force=True)
+    return web.json_response({"ok": True, "reconciliation_queued": queued,
+                              "configuration": configuration(proposed, ha_export.CONFIG_STORE.load())})
+
+
+async def configure_virtual_group(request):
+    """Create, update, or dissolve a cross-device Alexa endpoint."""
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise web.HTTPBadRequest(text="Ungültige JSON-Daten.") from exc
+    current = STORE.load()
+    if not isinstance(body, dict) or body.get("native_revision") != revision(current):
+        return web.json_response({"error": "v6-Konfiguration wurde geändert. Ansicht neu laden."}, status=409)
+    group_id = body.get("group_id")
+    try:
+        if body.get("remove") is True:
+            proposed = _dissolve_virtual_group(current, group_id)
+        else:
+            inventory = await ha_export._inventory()
+            proposed = apply_virtual_device_group(
+                current, group_id, body.get("entity_ids"), body.get("name"), inventory,
+                body.get("names"), body.get("profiles"), body.get("display_category", "OTHER"),
+            )
+    except (ValueError, TypeError) as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    if revision(STORE.load()) != body["native_revision"]:
+        return web.json_response({"error": "v6-Konfiguration wurde zwischenzeitlich geändert."}, status=409)
+    changed = revision(proposed) != body["native_revision"]
+    if changed:
+        STORE.save(proposed)
+    trigger = request.app.get("native_reconcile_trigger")
+    queued = callable(trigger) and changed
+    if queued:
         trigger(force=True)
     return web.json_response({"ok": True, "reconciliation_queued": queued,
                               "configuration": configuration(proposed, ha_export.CONFIG_STORE.load())})
@@ -900,6 +1186,7 @@ def register_routes(app):
     app.router.add_get("/api/native-export/config", read_config)
     app.router.add_post("/api/native-export/yaml", save_yaml)
     app.router.add_post("/api/native-export/group", configure_group)
+    app.router.add_post("/api/native-export/virtual-group", configure_virtual_group)
     app.router.add_post("/api/native-export/auto-group", auto_group)
     app.router.add_post("/api/native-export/setup", setup_sync_service)
 

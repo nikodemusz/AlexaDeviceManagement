@@ -186,6 +186,40 @@ class PrimaryAPITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 409)
         inventory.assert_not_awaited()
 
+    async def test_virtual_group_api_combines_cross_device_entities_and_dissolves_safely(self):
+        inventory = {"devices": [
+            {"device_id": "relay-device", "name": "Pumpenrelais", "entities": [
+                {"entity_id": "switch.pump", "domain": "switch", "name": "Pumpe"},
+            ]},
+            {"device_id": "tank-device", "name": "Zisternensensor", "entities": [
+                {"entity_id": "sensor.tank_liters", "domain": "sensor", "name": "Liter",
+                 "unit_of_measurement": "L", "state": "2500"},
+            ]},
+        ]}
+        with patch.object(ha_export, "_inventory", AsyncMock(return_value=inventory)):
+            body = (await (await self.client.get("/api/ha-export/config")).json())["configuration"]
+            response = await self.client.post("/api/native-export/virtual-group", json={
+                "native_revision": body["native_revision"], "group_id": "virtual:cistern",
+                "name": "Zisterne", "entity_ids": ["switch.pump", "sensor.tank_liters"],
+                "names": {"switch.pump": "Pumpe", "sensor.tank_liters": "Wassermenge"},
+                "profiles": {"sensor.tank_liters": {"mode": "read_only_range",
+                    "unit": "Alexa.Unit.Liters", "instance": "value_liters",
+                    "minimum": 0, "maximum": 4000, "precision": 1}},
+            })
+            created = await response.json()
+            self.assertEqual(response.status, 200, created)
+            self.assertEqual(created["configuration"]["virtual_groups"][0]["group_id"], "virtual:cistern")
+            response = await self.client.post("/api/native-export/virtual-group", json={
+                "native_revision": created["configuration"]["native_revision"],
+                "group_id": "virtual:cistern", "remove": True,
+            })
+            dissolved = await response.json()
+
+        self.assertEqual(response.status, 200, dissolved)
+        self.assertEqual(dissolved["configuration"]["virtual_groups"], [])
+        self.assertIn("ha:switch.pump", self.store.load()["devices"])
+        self.assertIn("ha:sensor.tank_liters", self.store.load()["devices"])
+
     async def test_auto_group_api_exports_all_supported_outputs_as_one_relay_device(self):
         inventory = {"devices": [{
             "device_id": "relay-device", "name": "Doppelrelais", "entities": [

@@ -1,5 +1,27 @@
 # Changelog
 
+## 3.11.2
+
+- Die zentrale Bearbeitungsleiste steht direkt über der gesamten Geräteauflistung. Sie erscheint genau einmal für alle Bereiche; Bereichszeilen dienen nur zum Auf- und Zuklappen.
+
+## 3.11.1
+
+- Der zentrale Button „Bearbeiten“ klappt beim Start alle aktuell sichtbaren Geräte und ihre Entity-Listen auf. Es ist kein Öffnen jeder einzelnen Liste mehr nötig, um die Auswahl zu bearbeiten.
+- Der zentrale Modus blendet pro Gerät die überflüssigen „Entitäten schließen“-Buttons aus. Beim Fortsetzen eines gespeicherten Entwurfs bleibt der vorherige Öffnungszustand erhalten.
+- Die Alexa-Gruppenliste nennt den Einstieg „Gruppe öffnen“ statt eines weiteren „Bearbeiten“-Buttons; alle Änderungen bleiben Teil des zentralen Entwurfs.
+
+## 3.11.0
+
+- Virtuelle Alexa-Gesamtgeräte können in der GUI aus Entities verschiedener Home-Assistant-Geräte zusammengestellt werden. Die Gruppen erscheinen in einer Vorschau und werden als Teil des zentralen Entwurfs erst mit „Fertig – alles speichern“ übernommen.
+- Lesbare numerische Entities ohne fertiges Standardprofil können als Alexa-RangeController mit Einheit, Funktionskennung, Wertebereich und Präzision aufgenommen werden. Prozent und Liter werden vorgeschlagen; die Werte bleiben nur lesbar.
+- Virtuelle Gruppen lassen sich im Bearbeitungsmodus umbenennen, erweitern, ändern oder auflösen. Beim Auflösen bleiben ihre bisherigen Entities als einzelne Endpunkte exportiert.
+
+## 3.10.0
+
+- Die Geräteübersicht hat jetzt einen zentralen Bearbeitungsmodus. Entity-Auswahl und Namen werden als Entwurf gesichert und erst mit „Fertig – alles speichern“ gemeinsam übernommen; der regelmäßige Alexa-Abgleich pausiert währenddessen.
+- Ein offener Entwurf stellt nach einem Seitenneuladen Auswahl, Namen, Filter, Scrollposition und geöffnete Gerätelisten wieder her. Der Abgleich wird beim Fortsetzen erneut pausiert; ein Entwurf kann ausdrücklich verworfen werden.
+- Die wiederholten Aktivieren-/Deaktivieren- und Speichern-Schaltflächen pro Gerätezeile entfallen. Standardprofile für sichtbare Geräte lassen sich im Bearbeitungsmodus vormerken und werden gemeinsam beim Abschluss gespeichert.
+
 ## 3.9.0
 
 - Der Standard fasst die unterstützten Funktionen eines Home-Assistant-Geräts automatisch zu einer Alexa-Gerätevorschau zusammen. Mehrere Relaisausgänge werden mit eigenen Funktionsnamen als getrennte Schalter im gemeinsamen Alexa-Gerät angelegt; die Gruppierungsansicht kann sie bei Bedarf auf einzelne Alexa-Geräte verteilen.

@@ -78,6 +78,11 @@ def validate_devices(devices: Any) -> dict[str, dict[str, Any]]:
         group_mode = raw.get("group_mode")
         if group_mode is not None and group_mode not in ("combined", "separate"):
             raise DeviceModelError(f"{endpoint_id}: group_mode must be combined or separate")
+        virtual_device = raw.get("virtual_device", False)
+        if type(virtual_device) is not bool:
+            raise DeviceModelError(f"{endpoint_id}: virtual_device must be true or false")
+        if virtual_device and group_mode != "combined":
+            raise DeviceModelError(f"{endpoint_id}: virtual_device requires group_mode: combined")
         if raw.get("display_category_mode") not in (None, "custom", "standard"):
             raise DeviceModelError(f"{endpoint_id}: display_category_mode must be custom or standard")
         ha_device_id = raw.get("ha_device_id")
@@ -89,6 +94,14 @@ def validate_devices(devices: Any) -> dict[str, dict[str, Any]]:
                        for member in members)
                 or len(set(members)) != len(members)):
             raise DeviceModelError(f"{endpoint_id}: members must be unique Home Assistant entity IDs")
+        for mapping_name in ("member_names", "member_display_categories"):
+            mapping = raw.get(mapping_name, {})
+            if (not isinstance(mapping, dict)
+                    or any(not isinstance(entity_id, str)
+                           or not re.fullmatch(r"[a-z_]+\.[A-Za-z0-9_]+", entity_id)
+                           or not isinstance(value, str) or not value.strip()
+                           for entity_id, value in mapping.items())):
+                raise DeviceModelError(f"{endpoint_id}: {mapping_name} must map entity IDs to non-empty strings")
         replaces = raw.get("replaces_legacy_endpoint")
         if replaces is not None and (not isinstance(replaces, str) or
                                      not LEGACY_ENDPOINT_RE.fullmatch(replaces) or

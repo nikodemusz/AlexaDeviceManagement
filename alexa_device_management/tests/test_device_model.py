@@ -57,6 +57,26 @@ class DeviceModelTests(unittest.TestCase):
         ]}}
         self.assertEqual(len(device_preview(devices)), 1)
 
+    def test_virtual_device_can_own_entities_without_a_shared_ha_device(self):
+        devices = {"virtual:tank": {
+            "name": "Zisterne", "virtual_device": True, "group_mode": "combined",
+            "ha_device_id": "virtual:tank", "members": ["sensor.tank_liters", "sensor.tank_percent"],
+            "capabilities": [
+                {"interface": "Alexa.RangeController", "instance": "liters",
+                 "entity_id": "sensor.tank_liters", "unit": "Alexa.Unit.Liters", "read_only": True},
+                {"interface": "Alexa.RangeController", "instance": "percent",
+                 "entity_id": "sensor.tank_percent", "unit": "Alexa.Unit.Percent", "read_only": True},
+            ],
+        }}
+
+        validated = validate_devices(devices)
+
+        self.assertTrue(validated["virtual:tank"]["virtual_device"])
+        self.assertEqual(len(device_preview(validated)), 1)
+        with self.assertRaises(DeviceModelError):
+            validate_devices({"virtual:bad": {"name": "Ungültig", "virtual_device": True,
+                                               "capabilities": []}})
+
     def test_disabled_capability_is_not_in_preview_and_all_disabled_endpoint_is_omitted(self):
         devices = {"combined": {"name": "Doppelrelais", "capabilities": [
             {"interface": "Alexa.ToggleController", "instance": "left", "entity_id": "switch.left"},

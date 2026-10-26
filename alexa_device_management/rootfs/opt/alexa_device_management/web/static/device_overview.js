@@ -10,13 +10,23 @@
   const expandedAreas = new Set();
   const expandedDevices = new Set();
   const expandedSimpleDevices = new Set();
-  const editingSimpleDevices = new Set();
-  const pendingEditDevices = new Set();
+  const stagedAutoGroupDeviceIds = new Set();
+  const pendingVirtualGroups = new Map();
   const selectedAlexaKeys = new Set();
   const visibleAreaCounts = new Map();
   const renderedAreaItems = new Map();
   let includeHiddenSummaryMatches = false;
   const AREA_PAGE_SIZE = 25;
+  const EDIT_DRAFT_KEY = "alexa_device_management_edit_draft_v1";
+  const EDITABLE_ENTITY_FIELDS = ["enabled", "name", "description", "display_category", "display_category_mode", "alexa_group", "capability_mode", "capabilities"];
+  let globalEditMode = false;
+  let pendingGlobalEdit = false;
+  let editBaseEntities = null;
+  let draftRestoreFilters = null;
+  let draftRestoreScrollY = null;
+  let draftRestoreActiveVirtualGroupId = null;
+  let activeVirtualGroupId = null;
+  let draftPersistenceTimer = null;
   let alexaDeletePollTimer = null;
   let syncPauseClientId = null;
   let syncPausePromise = null;
@@ -32,8 +42,11 @@
     "btn-restart": "Startet Home Assistant neu, um einen neu eingerichteten oder aktualisierten Alexa-Abgleichsdienst zu laden.",
     "btn-event-sync": "Übernimmt bei alten, noch nicht gruppierten v6-Geräten den Standard, fasst bereits ausgewählte Entities desselben HA-Geräts zusammen und sendet danach per AddOrUpdateReport die Änderungen an Alexa. Entfernte Endpunkte werden per DeleteReport bereinigt. Deaktivierte Entities bleiben deaktiviert; ausdrücklich getrennte oder angepasste Geräte bleiben erhalten. Schreibt keine alexa.yaml.",
     "btn-group-sync": "Ordnet bereits vorhandene Alexa-Endpunkte den konfigurierten Alexa-Gruppen zu.",
-    "btn-enable-useful": "Exportiert für jedes sichtbare Home-Assistant-Gerät automatisch alle unterstützten Standardfunktionen und zeigt sie als Alexa-Gerät oder nötigenfalls als einzelne Endpunkte an.",
-    "btn-disable-visible": "Deaktiviert den Alexa-Export für alle aktuell sichtbaren Entitäten.",
+    "btn-enable-useful": "Merkt für die aktuell sichtbaren Home-Assistant-Geräte die unterstützten Standardfunktionen vor. Erst „Fertig“ speichert sie gemeinsam mit den anderen Änderungen.",
+    "btn-start-edit": "Pausiert den Alexa-Abgleich und aktiviert die Eingaben für alle geöffneten Entitätenlisten.",
+    "btn-finish-edit": "Speichert alle Änderungen und vorgemerkten Standardprofile gemeinsam und setzt danach den Alexa-Abgleich fort.",
+    "btn-discard-edit": "Verwirft den ungespeicherten Entwurf und setzt den Alexa-Abgleich fort.",
+    "btn-create-virtual-group": "Stellt ein Alexa-Gesamtgerät aus Entitäten beliebiger Home-Assistant-Geräte zusammen. Es wird erst mit „Fertig“ gespeichert.",
     "btn-hide-technical": "Blendet aktuell sichtbare Diagnose-, Energie- und andere technische Entitäten aus.",
     "btn-unhide-visible": "Blendet die durch den aktuellen Filter gefundenen Einträge wieder ein.",
     "btn-save-settings": "Speichert die Einstellungen und richtet bei aktiviertem Alexa-Abgleich den benötigten HA-Dienst ein.",
@@ -44,10 +57,7 @@
     "toggle-area": "Öffnet oder schließt diesen Raum.",
     "more-area": "Zeigt den nächsten Block von Geräten in diesem Raum.",
     "toggle-device": "Öffnet oder schließt die Entitäten dieses Geräts.",
-    "prepare-device": "Exportiert automatisch alle unterstützten Standardfunktionen dieses Home-Assistant-Geräts und gruppiert sie passend für Alexa.",
-    "disable-device-export": "Deaktiviert alle Entitäten dieses Geräts für Alexa.",
-    "toggle-simple-device": "Öffnet oder schließt die manuelle Entitäts- und Namensauswahl.",
-    "edit-simple-device": "Pausiert den Alexa-Hintergrundabgleich und schaltet die Entitätsauswahl frei.",
+    "toggle-simple-device": "Öffnet oder schließt die Entitäten dieses Geräts.",
     "hide-device": "Blendet das Gerät in dieser Verwaltung aus, ohne es aus Home Assistant zu löschen.",
     "show-device": "Blendet das Gerät in dieser Verwaltung wieder ein.",
     "hide-entity": "Blendet diese Entität in der Verwaltung aus.",
@@ -60,6 +70,8 @@
     "delete-selected-alexa": "Löscht die ausgewählten Alexa-Geräte nach einer Sicherheitsabfrage nacheinander.",
     "assign-group": "Ordnet diesen Alexa-Endpunkt der angegebenen Alexa-Gruppe zu.",
     "configure-device-group": "Zeigt die Alexa-Vorschau und lässt Mehrfachausgänge bei Bedarf auf mehrere Alexa-Geräte aufteilen.",
+    "edit-virtual-group": "Öffnet das virtuelle Alexa-Gesamtgerät im zentralen Bearbeitungsentwurf.",
+    "remove-virtual-group": "Löst dieses virtuelle Gesamtgerät im Entwurf auf. Die Entities bleiben als einzelne Alexa-Geräte erhalten.",
     "fill-entity": "Übernimmt den automatisch ermittelten Alexa-Namen und die passende Kategorie.",
     "suggest-simple-name": "Übernimmt den vorgeschlagenen Alexa-Namen in das weiterhin editierbare Namensfeld."
   };
@@ -104,7 +116,7 @@
     element.className = `message ${type}`;
   }
   function hasEditorSession() {
-    return editingSimpleDevices.size > 0 || pendingEditDevices.size > 0;
+    return globalEditMode || pendingGlobalEdit;
   }
   function editPauseClientId() {
     if (!syncPauseClientId) {
@@ -118,17 +130,16 @@
     if (!status) return;
     const paused = hasEditorSession() || lifecyclePausedElsewhere;
     status.classList.toggle("hidden", !paused);
-    status.textContent = pendingEditDevices.size && !editingSimpleDevices.size
+    status.textContent = pendingGlobalEdit
       ? "Warte auf den Abschluss eines laufenden Abgleichs. Danach werden die Eingaben freigeschaltet."
-      : hasEditorSession()
-        ? "Bearbeitungsmodus aktiv: Der Alexa-Hintergrundabgleich ist pausiert. Die Eingaben werden nach „Fertig“ gespeichert."
+      : globalEditMode
+        ? "Bearbeitungsmodus aktiv: Der Alexa-Abgleich ist pausiert. Alle Änderungen werden als Entwurf gesichert und erst gemeinsam mit „Fertig“ übernommen."
         : lifecyclePausedElsewhere
           ? "Der Alexa-Hintergrundabgleich ist pausiert, weil eine andere Ansicht gerade Geräte bearbeitet."
           : "";
     for (const id of [
-      "btn-refresh", "btn-event-sync", "btn-group-sync", "btn-enable-useful", "btn-disable-visible",
-      "btn-hide-technical", "btn-unhide-visible", "btn-preview", "btn-settings", "btn-restart", "btn-logout",
-      "search", "status-filter", "area-filter", "domain-filter"
+      "btn-refresh", "btn-event-sync", "btn-group-sync",
+      "btn-hide-technical", "btn-unhide-visible", "btn-preview", "btn-settings", "btn-restart", "btn-logout"
     ]) {
       const button = document.getElementById(id);
       if (button) {
@@ -136,6 +147,31 @@
         button.disabled = paused || Boolean(busy);
       }
     }
+    const start = document.getElementById("btn-start-edit");
+    const finish = document.getElementById("btn-finish-edit");
+    const discard = document.getElementById("btn-discard-edit");
+    if (start) {
+      start.classList.toggle("hidden", globalEditMode || pendingGlobalEdit);
+      start.disabled = pendingGlobalEdit || lifecyclePausedElsewhere;
+      start.textContent = hasSavedEditDraft() ? "Entwurf fortsetzen" : "Bearbeiten";
+    }
+    const autoGroup = document.getElementById("btn-enable-useful");
+    if (autoGroup) autoGroup.disabled = !globalEditMode || pendingGlobalEdit;
+    const virtualGroup = document.getElementById("btn-create-virtual-group");
+    if (virtualGroup) virtualGroup.disabled = !globalEditMode || pendingGlobalEdit;
+    if (finish) {
+      finish.classList.toggle("hidden", !globalEditMode && !pendingGlobalEdit);
+      finish.disabled = !globalEditMode || pendingGlobalEdit;
+    }
+    if (discard) {
+      discard.classList.toggle("hidden", !globalEditMode && !pendingGlobalEdit && !hasSavedEditDraft());
+      discard.disabled = pendingGlobalEdit;
+    }
+    document.getElementById("device-edit-title")?.replaceChildren(document.createTextNode(globalEditMode
+      ? "Geräte zentral bearbeiten" : hasSavedEditDraft() ? "Offener Entwurf" : "Geräte zentral bearbeiten"));
+    document.getElementById("device-edit-description")?.replaceChildren(document.createTextNode(globalEditMode
+      ? "Eingaben und Auswahl werden automatisch als Entwurf gesichert. „Fertig“ übernimmt alles gemeinsam; ein Neuladen verwirft nichts." + (stagedAutoGroupDeviceIds.size ? " " + stagedAutoGroupDeviceIds.size + " Standardgeräte vorgemerkt." : "")
+      : "Einmal bearbeiten, dann alle Änderungen gemeinsam speichern. Ein offener Entwurf bleibt auch nach einem Neuladen erhalten."));
   }
   function clearMessage() { document.getElementById("message").className = "message hidden"; }
   function setBusy(button, busy, text) {
@@ -250,6 +286,29 @@
     }
     return [];
   }
+  function defaultAlexaRangeUnit(entity) {
+    const unit = String(entity.unit_of_measurement || "").trim().toLocaleLowerCase();
+    if (["%", "percent", "percentage"].includes(unit)) return "Alexa.Unit.Percent";
+    if (["l", "liter", "liters", "litre", "litres"].includes(unit)) return "Alexa.Unit.Liters";
+    if (["°c", "c", "celsius"].includes(unit)) return "Alexa.Unit.Temperature";
+    return "";
+  }
+  function canUseReadOnlyRange(entity) {
+    if (!entity || !["sensor", "number", "input_number"].includes(entity.domain)) return false;
+    return Number.isFinite(Number(entity.state)) && String(entity.state ?? "").trim() !== "";
+  }
+  function virtualProfileOptions(entity, keepExisting = false) {
+    const options = [];
+    if (capabilityOptions(entity).length) options.push({id: "standard", label: "Standardfunktionen"});
+    if (canUseReadOnlyRange(entity)) options.push({id: "read_only_range", label: "Zahlenwert (nur lesen, Alexa-Slider)"});
+    if (keepExisting) options.push({id: "preserve", label: "Bisherige Alexa-Funktion beibehalten"});
+    return options;
+  }
+  function virtualCapabilityLabels(entity, profile) {
+    if (profile?.mode === "read_only_range") return [`Messwert-Slider (${profile.unit || entity.unit_of_measurement || "Einheit festlegen"})`];
+    if (profile?.mode === "preserve") return ["bisherige Alexa-Funktion"];
+    return capabilityOptions(entity).map(option => option.label);
+  }
   function roleNote(entity) {
     const text = `${entity.entity_id || ""} ${entity.name || ""}`.toLocaleLowerCase();
     if (entity.domain === "switch" && /heiz|thermostat|radiator|heating|valve|ventil/.test(text)) {
@@ -302,7 +361,122 @@
     return `${label}: 1 Gerät „${name}“ · ${functions.slice(0, 4).join("; ")}${functions.length > 4 ? `; +${functions.length - 4}` : ""}`;
   }
 
+  function readEditDraft() {
+    try {
+      const value = localStorage.getItem(EDIT_DRAFT_KEY);
+      if (!value) return null;
+      const draft = JSON.parse(value);
+      return draft && draft.version === 1 && draft.entities && typeof draft.entities === "object" ? draft : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function hasSavedEditDraft() { return Boolean(readEditDraft()); }
+
+  function persistEditDraft() {
+    if ((!globalEditMode && !pendingGlobalEdit) || !config) return;
+    clearTimeout(draftPersistenceTimer);
+    draftPersistenceTimer = null;
+    const draft = {
+      version: 1,
+      client_id: syncPauseClientId,
+      base_revision: editBaseEntities?.revision || config.native_revision,
+      base_entities: editBaseEntities?.entities || {},
+      entities: config.entities || {},
+      ui: {
+        expanded_areas: [...expandedAreas],
+        expanded_devices: [...expandedDevices],
+        expanded_simple_devices: [...expandedSimpleDevices],
+        auto_group_device_ids: [...stagedAutoGroupDeviceIds],
+        pending_virtual_groups: [...pendingVirtualGroups.entries()],
+        active_virtual_group_id: activeVirtualGroupId,
+        visible_area_counts: [...visibleAreaCounts.entries()],
+        scroll_y: window.scrollY,
+        filters: {
+          query: document.getElementById("search")?.value || "",
+          status: document.getElementById("status-filter")?.value || "all",
+          area: document.getElementById("area-filter")?.value || "",
+          domain: document.getElementById("domain-filter")?.value || "",
+          include_hidden: includeHiddenSummaryMatches
+        }
+      }
+    };
+    try {
+      localStorage.setItem(EDIT_DRAFT_KEY, JSON.stringify(draft));
+    } catch (error) {
+      message(`Der Entwurf konnte nicht lokal gesichert werden: ${error.message}`, "err");
+    }
+  }
+
+  function scheduleEditDraftPersistence() {
+    if (!globalEditMode) return;
+    clearTimeout(draftPersistenceTimer);
+    draftPersistenceTimer = setTimeout(persistEditDraft, 100);
+  }
+
+  function syncEntityModelFromConfig() {
+    for (const device of model?.devices || []) for (const entity of device.entities || []) {
+      const settings = config.entities?.[entity.entity_id];
+      if (settings) entity.export = {...(entity.export || {}), ...settings};
+    }
+  }
+
+  function restoreEditDraft() {
+    const draft = readEditDraft();
+    if (!draft || !config) return false;
+    const baseEntities = draft.base_entities && typeof draft.base_entities === "object" ? draft.base_entities : {};
+    const draftEntities = draft.entities && typeof draft.entities === "object" ? draft.entities : {};
+    config.entities ||= {};
+    const defaults = {enabled: false, name: "", description: "", display_category: "", alexa_group: ""};
+    for (const [entityId, saved] of Object.entries(draftEntities)) {
+      if (!saved || typeof saved !== "object") continue;
+      const baseline = baseEntities[entityId] || defaults;
+      const current = config.entities[entityId] ||= {...defaults};
+      for (const field of EDITABLE_ENTITY_FIELDS) {
+        if (JSON.stringify(saved[field]) !== JSON.stringify(baseline[field]) && field in saved) current[field] = saved[field];
+      }
+    }
+    editBaseEntities = {revision: draft.base_revision, entities: baseEntities};
+    syncPauseClientId = typeof draft.client_id === "string" && draft.client_id ? draft.client_id : null;
+    const ui = draft.ui || {};
+    expandedAreas.clear();
+    for (const value of Array.isArray(ui.expanded_areas) ? ui.expanded_areas : []) expandedAreas.add(String(value));
+    expandedDevices.clear();
+    for (const value of Array.isArray(ui.expanded_devices) ? ui.expanded_devices : []) expandedDevices.add(String(value));
+    expandedSimpleDevices.clear();
+    for (const value of Array.isArray(ui.expanded_simple_devices) ? ui.expanded_simple_devices : []) expandedSimpleDevices.add(String(value));
+    stagedAutoGroupDeviceIds.clear();
+    for (const value of Array.isArray(ui.auto_group_device_ids) ? ui.auto_group_device_ids : []) stagedAutoGroupDeviceIds.add(String(value));
+    pendingVirtualGroups.clear();
+    for (const pair of Array.isArray(ui.pending_virtual_groups) ? ui.pending_virtual_groups : []) {
+      if (Array.isArray(pair) && pair.length === 2 && typeof pair[0] === "string") {
+        pendingVirtualGroups.set(pair[0], pair[1] === null ? null : pair[1]);
+      }
+    }
+    draftRestoreActiveVirtualGroupId = typeof ui.active_virtual_group_id === "string"
+      ? ui.active_virtual_group_id : null;
+    visibleAreaCounts.clear();
+    for (const pair of Array.isArray(ui.visible_area_counts) ? ui.visible_area_counts : []) {
+      if (Array.isArray(pair) && pair.length === 2) visibleAreaCounts.set(String(pair[0]), Number(pair[1]) || AREA_PAGE_SIZE);
+    }
+    draftRestoreFilters = ui.filters && typeof ui.filters === "object" ? ui.filters : null;
+    draftRestoreScrollY = Number.isFinite(Number(ui.scroll_y)) ? Number(ui.scroll_y) : null;
+    if (draftRestoreFilters) {
+      document.getElementById("search").value = String(draftRestoreFilters.query || "");
+      document.getElementById("status-filter").value = String(draftRestoreFilters.status || "all");
+      includeHiddenSummaryMatches = Boolean(draftRestoreFilters.include_hidden);
+    }
+    pendingGlobalEdit = true;
+    syncEntityModelFromConfig();
+    return true;
+  }
+
   function scheduleSave() {
+    if (globalEditMode || pendingGlobalEdit) {
+      scheduleEditDraftPersistence();
+      return;
+    }
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => { saveConfig().catch(() => {}); }, 500);
   }
@@ -421,12 +595,22 @@
   window.addEventListener("pagehide", () => {
     if (!syncPauseClientId) return;
     clearInterval(syncPauseHeartbeatTimer);
+    if (globalEditMode || pendingGlobalEdit || hasSavedEditDraft()) {
+      persistEditDraft();
+      return;
+    }
     const url = `${BASE}/api/native-export/lifecycle/resume`;
     const body = new Blob([JSON.stringify({client_id: syncPauseClientId})], {type: "application/json"});
     if (!navigator.sendBeacon?.(url, body)) {
       fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body, keepalive: true}).catch(() => {});
     }
   });
+  window.addEventListener("pageshow", event => {
+    if (!event.persisted || !globalEditMode || !syncPauseClientId) return;
+    syncPausePromise = null;
+    acquireSyncPause().catch(error => message(`Alexa-Abgleich konnte nach dem Zurückkehren nicht erneut pausiert werden: ${error.message}`, "err"));
+  });
+  window.addEventListener("scroll", scheduleEditDraftPersistence, {passive: true});
 
   function renderSummary() {
     const s = model.summary || {};
@@ -475,6 +659,11 @@
     const currentDomain = domainSelect.value;
     domainSelect.innerHTML = '<option value="">Alle Domains</option>' + domains.map(domain => `<option value="${attr(domain)}">${esc(domain)}</option>`).join("");
     domainSelect.value = currentDomain;
+    if (draftRestoreFilters) {
+      areaSelect.value = String(draftRestoreFilters.area || "");
+      domainSelect.value = String(draftRestoreFilters.domain || "");
+      draftRestoreFilters = null;
+    }
     document.getElementById("group-list").innerHTML = (model.groups || []).map(group => `<option value="${attr(group.name)}"></option>`).join("");
     document.getElementById("btn-unhide-visible").classList.toggle("hidden", document.getElementById("status-filter").value !== "hidden");
   }
@@ -567,7 +756,10 @@
     button.textContent = expanded ? "▾" : "▸";
     button.setAttribute("aria-expanded", String(expanded));
     container.replaceChildren();
-    if (!expanded) return;
+    if (!expanded) {
+      scheduleEditDraftPersistence();
+      return;
+    }
     const items = renderedAreaItems.get(areaKey) || [];
     const visibleCount = Math.min(visibleAreaCounts.get(areaKey) || AREA_PAGE_SIZE, items.length);
     const list = document.createElement("div");
@@ -577,8 +769,8 @@
       row.className = "simple-device-row";
       const deviceId = String(item.device.device_id || "");
       const isOpen = expandedSimpleDevices.has(deviceId);
-      const isEditing = editingSimpleDevices.has(deviceId);
-      const isWaiting = pendingEditDevices.has(deviceId);
+      const isEditing = globalEditMode;
+      const isWaiting = pendingGlobalEdit;
       row.dataset.deviceRow = deviceId;
       const info = document.createElement("div");
       const name = document.createElement("strong");
@@ -593,28 +785,14 @@
       info.append(name, detail, preview);
       const actions = document.createElement("div");
       actions.className = "device-actions";
-      for (const [action, text, cls] of [
-        ["prepare-device", "Gerät exportieren", "primary"],
-        ["toggle-simple-device", expandedSimpleDevices.has(item.device.device_id) ? "Entitäten schließen" : "Entitäten wählen", "secondary"],
-        ["disable-device-export", "Export deaktivieren", "secondary"],
-      ]) {
-        const control = document.createElement("button");
-        control.className = `button ${cls} small`;
-        control.dataset.action = action;
-        control.dataset.device = deviceId;
-        control.textContent = action === "toggle-simple-device" && isOpen ? "Entitäten schließen" : text;
-        control.disabled = action === "toggle-simple-device" ? isEditing || isWaiting : !isEditing;
-        if (action === "toggle-simple-device") control.setAttribute("aria-expanded", String(isOpen));
-        actions.append(control);
-      }
-      const edit = document.createElement("button");
-      edit.className = "button secondary small";
-      edit.dataset.action = "edit-simple-device";
-      edit.dataset.device = deviceId;
-      edit.textContent = isWaiting ? "Sync pausiert…" : isEditing ? "Fertig" : isOpen ? "Bearbeiten" : "Details";
-      edit.disabled = isWaiting || !isOpen;
-      edit.title = "Zeigt die einzelnen Home-Assistant-Entitäten; Bearbeiten pausiert den Alexa-Abgleich";
-      actions.append(edit);
+      const control = document.createElement("button");
+      control.className = "button secondary small";
+      control.dataset.action = "toggle-simple-device";
+      control.dataset.device = deviceId;
+      control.textContent = isOpen ? "Entitäten schließen" : "Entitäten anzeigen";
+      control.disabled = isWaiting;
+      control.setAttribute("aria-expanded", String(isOpen));
+      if (!isEditing || !isOpen) actions.append(control);
       row.append(info, actions);
       if (isOpen) renderSimpleEntityList(row, item.device, isEditing);
       list.append(row);
@@ -628,6 +806,7 @@
       more.textContent = `Weitere ${Math.min(AREA_PAGE_SIZE, items.length - visibleCount)} Geräte anzeigen`;
       container.append(more);
     }
+    scheduleEditDraftPersistence();
   }
 
   function renderSimpleEntityList(row, device, isEditing) {
@@ -662,14 +841,6 @@
       nameInput.placeholder = suggestedName(entity, device);
       nameInput.disabled = !isEditing;
       nameInput.setAttribute("aria-label", `Alexa-Name für ${entity.name || entity.entity_id}`);
-      const saveName = document.createElement("button");
-      saveName.type = "button";
-      saveName.className = "button secondary small save-entity-name";
-      saveName.dataset.action = "save-entity-name";
-      saveName.dataset.entity = String(entity.entity_id || "");
-      saveName.textContent = "Speichern";
-      saveName.disabled = !isEditing;
-      saveName.title = "Alexa-Namen jetzt dauerhaft speichern";
       const suggestion = document.createElement("button");
       suggestion.type = "button";
       suggestion.className = "button secondary small simple-name-suggestion";
@@ -678,7 +849,7 @@
       suggestion.dataset.suggestion = suggestedName(entity, device);
       suggestion.textContent = "Vorschlag";
       suggestion.disabled = !isEditing;
-      nameField.append(nameCaption, nameInput, saveName, suggestion);
+      nameField.append(nameCaption, nameInput, suggestion);
       entityRow.append(checkbox, text, nameField);
       list.append(entityRow);
     }
@@ -756,6 +927,230 @@
     }
   }
 
+  function entityLocation(entityId) {
+    for (const device of model?.devices || []) {
+      const entity = (device.entities || []).find(item => item.entity_id === entityId);
+      if (entity) return {device, entity};
+    }
+    return null;
+  }
+
+  function renderVirtualGroups() {
+    const section = document.getElementById("virtual-groups-section");
+    const container = document.getElementById("virtual-group-list");
+    if (!section || !container) return;
+    const groups = new Map((config?.virtual_groups || []).map(group => [group.group_id, group]));
+    for (const [groupId, draft] of pendingVirtualGroups) {
+      if (draft === null) groups.delete(groupId);
+      else groups.set(groupId, {
+        group_id: groupId, name: draft.name || "Unbenanntes Alexa-Gesamtgerät",
+        members: draft.entity_ids || [], pending: true, complete: draft.complete !== false,
+      });
+    }
+    section.classList.toggle("hidden", groups.size === 0);
+    container.innerHTML = [...groups.values()].map(group => {
+      const memberNames = (group.members || []).map(entityId => {
+        const location = entityLocation(entityId);
+        const capName = group.capabilities?.find(cap => cap.entity_id === entityId)?.capability_names?.[0];
+        return group.member_names?.[entityId] || capName || location?.entity.name || entityId;
+      });
+      const places = new Set((group.members || []).map(entityId => entityLocation(entityId)?.device?.name).filter(Boolean));
+      const summary = `${group.members?.length || 0} Entity${group.members?.length === 1 ? "" : "s"} aus ${places.size || "unbekannten"} HA-Gerät${places.size === 1 ? "" : "en"}${memberNames.length ? ` · ${memberNames.slice(0, 4).join(", ")}${memberNames.length > 4 ? `, +${memberNames.length - 4}` : ""}` : ""}`;
+      const draftLabel = group.pending ? (group.complete ? " · ungespeichert" : " · offener Entwurf") : "";
+      const actions = globalEditMode
+        ? `<button class="button secondary small" data-virtual-action="edit" data-group-id="${attr(group.group_id)}">${group.complete === false ? "Entwurf öffnen" : "Gruppe öffnen"}</button><button class="button danger small" data-virtual-action="remove" data-group-id="${attr(group.group_id)}">In Entwurf auflösen</button>`
+        : "";
+      return `<article class="virtual-group-card"><div><strong>${esc(group.name)}${esc(draftLabel)}</strong><span class="muted">${esc(summary)}</span></div><div class="device-actions">${actions}</div></article>`;
+    }).join("");
+  }
+
+  function renderVirtualGroupEntities(spec) {
+    const container = document.getElementById("virtual-group-entities");
+    if (!container) return;
+    const selected = new Set(spec.entity_ids || []);
+    const memberNames = spec.names || {};
+    const profiles = spec.profiles || {};
+    const existing = (config?.virtual_groups || []).find(group => group.group_id === spec.group_id);
+    const rows = [];
+    for (const device of model?.devices || []) {
+      for (const entity of device.entities || []) {
+        const keepExisting = existing?.members?.includes(entity.entity_id) || selected.has(entity.entity_id);
+        const options = virtualProfileOptions(entity, keepExisting);
+        if (!options.length) continue;
+        let profile = profiles[entity.entity_id];
+        if (!profile) {
+          profile = keepExisting ? {mode: "preserve"}
+            : capabilityOptions(entity).length ? {mode: "standard"} : {mode: "read_only_range"};
+        }
+        const supportedModes = new Set(options.map(option => option.id));
+        if (!supportedModes.has(profile.mode)) profile = {mode: options[0].id};
+        const defaultName = existing?.capabilities?.find(cap => cap.entity_id === entity.entity_id)?.capability_names?.[0]
+          || entityConfig(entity.entity_id).name || entity.name || entity.entity_id;
+        const name = memberNames[entity.entity_id] || defaultName;
+        const unit = profile.unit || defaultAlexaRangeUnit(entity);
+        const percent = unit === "Alexa.Unit.Percent";
+        const minimum = profile.minimum ?? entity.minimum ?? 0;
+        const maximum = profile.maximum ?? entity.maximum ?? (percent ? 100 : 10000);
+        const precision = profile.precision ?? entity.step ?? 1;
+        const profileOptions = options.map(option => `<option value="${attr(option.id)}" ${profile.mode === option.id ? "selected" : ""}>${esc(option.label)}</option>`).join("");
+        const numericSettings = canUseReadOnlyRange(entity) ? `<div data-vrange-fields class="${profile.mode === "read_only_range" ? "" : "hidden"}"><div class="virtual-range-fields">
+          <label>Alexa-Einheit<input data-vrange-unit value="${attr(unit)}" placeholder="Alexa.Unit.Liters"></label>
+          <label>Funktionskennung<input data-vrange-instance value="${attr(profile.instance || ("value_" + entity.entity_id.split(".").pop().replace(/[^A-Za-z0-9_]/g, "_")))}" maxlength="64"></label>
+          <label>Minimum<input type="number" data-vrange-min value="${attr(minimum)}" step="any"></label>
+          <label>Maximum<input type="number" data-vrange-max value="${attr(maximum)}" step="any"></label>
+          <label>Schrittweite / Präzision<input type="number" data-vrange-precision value="${attr(precision)}" min="0.000001" step="any"></label>
+          <span class="virtual-range-help">Nur lesender Alexa-RangeController. Die Einheit muss zum HA-Wert passen; Prozent und Liter werden automatisch vorgeschlagen.</span>
+        </div></div>` : profile.mode === "preserve"
+          ? '<span class="virtual-range-help">Die gespeicherte Alexa-Funktion und Einheit bleiben unverändert.</span>' : "";
+        const deviceName = device.name || device.device_id || "HA-Gerät";
+        const place = [device.area_name, deviceName].filter(Boolean).join(" · ");
+        rows.push(`<article class="virtual-group-entity" data-virtual-entity-row="${attr(entity.entity_id)}">
+          <label class="virtual-group-identity"><input type="checkbox" data-vgroup-entity="${attr(entity.entity_id)}" ${selected.has(entity.entity_id) ? "checked" : ""}>
+            <span><strong>${esc(entity.name || entity.entity_id)}</strong><small>${esc(entity.entity_id)} · ${esc(place)}${entity.unit_of_measurement ? ` · ${esc(entity.unit_of_measurement)}` : ""}</small></span></label>
+          <div class="virtual-member-settings"><label class="virtual-member-name">Name dieser Funktion<input data-vgroup-name="${attr(entity.entity_id)}" value="${attr(name)}" maxlength="128"></label>
+            <select class="virtual-profile-select" data-vgroup-profile="${attr(entity.entity_id)}" aria-label="Alexa-Funktion für ${attr(entity.name || entity.entity_id)}">${profileOptions}</select>${numericSettings}</div>
+        </article>`);
+      }
+    }
+    container.innerHTML = rows.length ? rows.join("") : '<div class="empty">Keine unterstützten oder numerischen Entities gefunden.</div>';
+    filterVirtualGroupEntities();
+  }
+
+  function filterVirtualGroupEntities() {
+    const query = document.getElementById("virtual-group-search")?.value.trim().toLocaleLowerCase() || "";
+    for (const row of document.querySelectorAll("[data-virtual-entity-row]")) {
+      row.classList.toggle("hidden", Boolean(query && !row.textContent.toLocaleLowerCase().includes(query)));
+    }
+  }
+
+  function virtualGroupDialogSpec(complete = false) {
+    const dialog = document.getElementById("virtual-group-dialog");
+    const entityIds = [...dialog.querySelectorAll("input[data-vgroup-entity]:checked")].map(input => input.dataset.vgroupEntity);
+    const names = {};
+    const profiles = {};
+    for (const entityId of entityIds) {
+      names[entityId] = String(dialog.querySelector(`input[data-vgroup-name="${CSS.escape(entityId)}"]`)?.value || "").trim();
+      const mode = dialog.querySelector(`select[data-vgroup-profile="${CSS.escape(entityId)}"]`)?.value || "standard";
+      if (mode === "read_only_range") {
+        profiles[entityId] = {
+          mode,
+          unit: String(dialog.querySelector(`[data-vgroup-entity="${CSS.escape(entityId)}"]`)?.closest(".virtual-group-entity")?.querySelector("[data-vrange-unit]")?.value || "").trim(),
+          instance: String(dialog.querySelector(`[data-vgroup-entity="${CSS.escape(entityId)}"]`)?.closest(".virtual-group-entity")?.querySelector("[data-vrange-instance]")?.value || "").trim(),
+          minimum: Number(dialog.querySelector(`[data-vgroup-entity="${CSS.escape(entityId)}"]`)?.closest(".virtual-group-entity")?.querySelector("[data-vrange-min]")?.value),
+          maximum: Number(dialog.querySelector(`[data-vgroup-entity="${CSS.escape(entityId)}"]`)?.closest(".virtual-group-entity")?.querySelector("[data-vrange-max]")?.value),
+          precision: Number(dialog.querySelector(`[data-vgroup-entity="${CSS.escape(entityId)}"]`)?.closest(".virtual-group-entity")?.querySelector("[data-vrange-precision]")?.value),
+        };
+      } else profiles[entityId] = {mode};
+    }
+    return {
+      group_id: dialog.dataset.groupId,
+      name: String(document.getElementById("virtual-group-name").value || "").trim(),
+      entity_ids: entityIds,
+      names,
+      profiles,
+      display_category: "OTHER",
+      complete,
+    };
+  }
+
+  function persistVirtualGroupDialog(complete = false) {
+    if (!activeVirtualGroupId) return null;
+    const spec = virtualGroupDialogSpec(complete);
+    pendingVirtualGroups.set(activeVirtualGroupId, spec);
+    persistEditDraft();
+    updateVirtualGroupPreview(spec);
+    renderVirtualGroups();
+    return spec;
+  }
+
+  function updateVirtualGroupPreview(spec = virtualGroupDialogSpec(false)) {
+    const preview = document.getElementById("virtual-group-preview");
+    if (!preview) return;
+    if (!spec.entity_ids.length) {
+      preview.textContent = "Wähle mindestens eine Entity. Unterstützte Funktionen werden automatisch vorgeschlagen; Zahlenwerte lassen sich als lesende Slider hinzufügen.";
+      return;
+    }
+    const lines = spec.entity_ids.map(entityId => {
+      const location = entityLocation(entityId);
+      const entity = location?.entity;
+      if (!entity) return `• ${spec.names[entityId] || entityId}: nicht mehr in HA gefunden`;
+      const labels = virtualCapabilityLabels(entity, spec.profiles[entityId]);
+      const label = labels.join(" + ") || "keine Alexa-Funktion";
+      const profile = spec.profiles[entityId];
+      const bounds = profile?.mode === "read_only_range" ? ` (${profile.minimum}–${profile.maximum} ${profile.unit || "Einheit fehlt"})` : "";
+      return `• ${spec.names[entityId] || entity.name || entityId}: ${label}${bounds}`;
+    });
+    preview.textContent = `1 Alexa-Gesamtgerät „${spec.name || "Name festlegen"}“ mit ${spec.entity_ids.length} Entity(s)\n${lines.join("\n")}`;
+  }
+
+  function openVirtualGroupDialog(groupId = null) {
+    if (!globalEditMode) return message("Bitte zuerst den zentralen Bearbeitungsmodus starten.", "warn");
+    const existing = groupId ? (config?.virtual_groups || []).find(group => group.group_id === groupId) : null;
+    let spec = groupId ? pendingVirtualGroups.get(groupId) : null;
+    if (spec === null) return message("Diese Gruppe ist bereits zur Auflösung vorgemerkt.", "warn");
+    if (!spec && existing) {
+      spec = {group_id: groupId, name: existing.name, entity_ids: [...(existing.members || [])],
+        names: {}, profiles: Object.fromEntries((existing.members || []).map(entityId => [entityId, {mode: "preserve"}])),
+        display_category: existing.display_category || "OTHER", complete: false};
+      for (const entityId of spec.entity_ids) {
+        spec.names[entityId] = existing.member_names?.[entityId]
+          || existing.capabilities?.find(cap => cap.entity_id === entityId)?.capability_names?.[0]
+          || entityLocation(entityId)?.entity?.name || entityId;
+      }
+    }
+    if (!spec) {
+      const randomId = window.crypto?.randomUUID?.().replace(/-/g, "") || `${Date.now()}${Math.random().toString(36).slice(2)}`;
+      spec = {group_id: `virtual:${randomId}`, name: "", entity_ids: [], names: {}, profiles: {}, display_category: "OTHER", complete: false};
+    }
+    activeVirtualGroupId = spec.group_id;
+    document.getElementById("virtual-group-title").textContent = existing ? `Alexa-Gesamtgerät bearbeiten: ${existing.name}` : "Virtuelles Alexa-Gesamtgerät erstellen";
+    document.getElementById("virtual-group-name").value = spec.name || "";
+    document.getElementById("virtual-group-search").value = "";
+    document.getElementById("virtual-group-dialog").dataset.groupId = spec.group_id;
+    pendingVirtualGroups.set(spec.group_id, {...spec, complete: false});
+    renderVirtualGroupEntities(spec);
+    updateVirtualGroupPreview(spec);
+    document.getElementById("virtual-group-dialog").showModal();
+    persistEditDraft();
+  }
+
+  function stageVirtualGroupFromDialog() {
+    const spec = virtualGroupDialogSpec(true);
+    if (!spec.entity_ids.length) return message("Wähle mindestens eine Entity für das Alexa-Gesamtgerät.", "warn");
+    if (!spec.name || spec.name.length > 128) return message("Der Name muss 1 bis 128 Zeichen enthalten.", "warn");
+    for (const entityId of spec.entity_ids) {
+      const profile = spec.profiles[entityId];
+      if (!spec.names[entityId]) return message(`Bitte einen Funktionsnamen für ${entityId} angeben.`, "warn");
+      if (profile.mode === "read_only_range"
+          && (!profile.unit || !profile.instance || !Number.isFinite(profile.minimum)
+            || !Number.isFinite(profile.maximum) || !Number.isFinite(profile.precision)
+            || profile.minimum >= profile.maximum || profile.precision <= 0)) {
+        return message(`Bitte Einheit, Funktionskennung und gültigen Wertebereich für ${entityId} ergänzen.`, "warn");
+      }
+    }
+    spec.complete = true;
+    pendingVirtualGroups.set(spec.group_id, spec);
+    activeVirtualGroupId = null;
+    document.getElementById("virtual-group-dialog").close();
+    persistEditDraft();
+    renderVirtualGroups();
+    updateSyncEditStatus();
+    message(`„${spec.name}“ ist im zentralen Entwurf vorgemerkt und wird erst mit „Fertig – alles speichern“ angelegt.`, "warn");
+  }
+
+  function stageVirtualGroupRemoval(groupId) {
+    if (!globalEditMode) return;
+    const persisted = (config?.virtual_groups || []).some(group => group.group_id === groupId);
+    if (persisted) pendingVirtualGroups.set(groupId, null);
+    else pendingVirtualGroups.delete(groupId);
+    if (activeVirtualGroupId === groupId) activeVirtualGroupId = null;
+    persistEditDraft();
+    renderVirtualGroups();
+    message(persisted
+      ? "Das virtuelle Alexa-Gerät wird beim zentralen Speichern aufgelöst; seine Entities bleiben als einzelne Endpunkte erhalten."
+      : "Der neue Alexa-Gruppenentwurf wurde aus der Liste entfernt; es wurde noch nichts gespeichert.", "warn");
+  }
+
   function render() {
     if (!model) return;
     renderSummary(); renderFilters();
@@ -796,7 +1191,9 @@
     document.getElementById("btn-logout").classList.toggle("hidden", !model.alexa_connected);
     document.getElementById("v5-disabled").classList.toggle("hidden", config.native_enabled);
     updateAlexaSelectionUi(alexaOnly);
+    renderVirtualGroups();
     updateSyncEditStatus();
+    if (globalEditMode || pendingGlobalEdit) persistEditDraft();
   }
 
   async function load(force = false) {
@@ -816,9 +1213,33 @@
         throw new Error("Die Geräteübersicht-API liefert keine v6-Konfiguration. Add-on und Oberfläche haben unterschiedliche Versionen; Add-on aktualisieren und Seite neu laden.");
       }
       config = model.configuration;
+      if (!globalEditMode && !pendingGlobalEdit && restoreEditDraft()) {
+        updateSyncEditStatus();
+        try {
+          await acquireSyncPause();
+          pendingGlobalEdit = false;
+          globalEditMode = true;
+          syncEntityModelFromConfig();
+          message("Offener Entwurf und geöffnete Listen wurden wiederhergestellt. Der Alexa-Abgleich ist pausiert.", "warn");
+        } catch (error) {
+          pendingGlobalEdit = false;
+          globalEditMode = false;
+          message(`Der Entwurf ist erhalten, aber der Alexa-Abgleich konnte nicht pausiert werden. Klicke „Entwurf fortsetzen“ und versuche es erneut: ${error.message}`, "err");
+        }
+      }
       const availableAlexaKeys = new Set((model.alexa_only || []).map(item => item.key));
       for (const key of selectedAlexaKeys) if (!availableAlexaKeys.has(key)) selectedAlexaKeys.delete(key);
       render();
+      if (draftRestoreScrollY !== null) {
+        const scrollY = draftRestoreScrollY;
+        draftRestoreScrollY = null;
+        requestAnimationFrame(() => window.scrollTo(0, scrollY));
+      }
+      if (globalEditMode && draftRestoreActiveVirtualGroupId) {
+        const groupId = draftRestoreActiveVirtualGroupId;
+        draftRestoreActiveVirtualGroupId = null;
+        requestAnimationFrame(() => openVirtualGroupDialog(groupId));
+      }
       if (model.source_cache_loading || model.source_cache_refreshing) {
         if (overviewPollCount < 40) {
           overviewPollCount += 1;
@@ -954,24 +1375,12 @@
 
   async function autoExportDevices(deviceIds, button = null) {
     if (!deviceIds.length) return message("Keine sichtbaren Home-Assistant-Geräte zum Exportieren gefunden.", "warn");
-    if (button) setBusy(button, true, "Gruppiere…");
-    try {
-      await saveConfig();
-      const result = await request("/api/native-export/auto-group", {
-        method: "POST",
-        body: JSON.stringify({native_revision: config.native_revision, device_ids: deviceIds}),
-      });
-      if (result.configuration) config = result.configuration;
-      await load(false);
-      const count = result.configured?.length || 0;
-      const skipped = result.skipped || [];
-      const firstReason = skipped[0]?.reason ? ` Erster Hinweis: ${skipped[0].reason}` : "";
-      message(`${count} Home-Assistant-Gerät${count === 1 ? "" : "e"} nach Standard gruppiert; ${skipped.length} ausgelassen.${firstReason}`, skipped.length ? "warn" : "ok");
-    } catch (error) {
-      message(`Automatischer Alexa-Export fehlgeschlagen: ${error.message}`, "err");
-    } finally {
-      if (button) setBusy(button, false);
-    }
+    if (!globalEditMode) await startGlobalEditMode();
+    if (!globalEditMode) return;
+    for (const deviceId of deviceIds) stagedAutoGroupDeviceIds.add(String(deviceId));
+    persistEditDraft();
+    updateSyncEditStatus();
+    message(`${deviceIds.length} Gerät${deviceIds.length === 1 ? "" : "e"} für das automatische Standardprofil vorgemerkt. „Fertig“ speichert sie zusammen mit dem restlichen Entwurf.`, "warn");
   }
 
   async function prepareDevice(deviceId, button = null) {
@@ -993,58 +1402,128 @@
   }
 
   function toggleSimpleDevice(button, deviceId) {
-    if (editingSimpleDevices.has(deviceId) || pendingEditDevices.has(deviceId)) {
-      message("Beende zuerst die Bearbeitung, bevor du die Entitätenliste schließt.", "warn");
-      return;
-    }
     if (expandedSimpleDevices.has(deviceId)) expandedSimpleDevices.delete(deviceId);
     else expandedSimpleDevices.add(deviceId);
     renderSimpleDeviceRowFrom(button);
+    scheduleEditDraftPersistence();
   }
 
-  async function editSimpleDevice(button, deviceId) {
-    if (editingSimpleDevices.has(deviceId)) {
-      button.disabled = true;
-      button.textContent = "Speichere…";
-      try {
-        await saveConfig();
-        const isLastEditor = editingSimpleDevices.size === 1 && pendingEditDevices.size === 0;
-        if (isLastEditor) await releaseSyncPause();
-        editingSimpleDevices.delete(deviceId);
-        updateSyncEditStatus();
-        render();
-        if (!hasEditorSession()) {
-          await load(false);
-          message("Änderungen gespeichert. Der Alexa-Hintergrundabgleich läuft weiter.", "ok");
-        }
-      } catch (error) {
-        button.disabled = false;
-        button.textContent = "Fertig";
-        message(`Bearbeitung konnte nicht beendet werden: ${error.message}`, "err");
-      }
-      return;
+  function expandVisibleDeviceLists() {
+    for (const [areaKey, items] of renderedAreaItems) {
+      const visibleCount = Math.min(visibleAreaCounts.get(areaKey) || AREA_PAGE_SIZE, items.length);
+      expandedAreas.add(areaKey);
+      visibleAreaCounts.set(areaKey, visibleCount);
+      for (const {device} of items.slice(0, visibleCount)) expandedSimpleDevices.add(String(device.device_id));
     }
+  }
 
-    if (!expandedSimpleDevices.has(deviceId)) return;
-    pendingEditDevices.add(deviceId);
+  async function startGlobalEditMode() {
+    if (globalEditMode || pendingGlobalEdit) return;
+    const resumeSavedDraft = hasSavedEditDraft();
+    if (resumeSavedDraft) {
+      if (!restoreEditDraft()) throw new Error("Der gespeicherte Entwurf konnte nicht gelesen werden.");
+    } else {
+      editBaseEntities = {revision: config.native_revision, entities: JSON.parse(JSON.stringify(config.entities || {}))};
+      pendingGlobalEdit = true;
+      editPauseClientId();
+    }
     clearTimeout(overviewPollTimer);
     updateSyncEditStatus();
-    render();
+    persistEditDraft();
     try {
       await acquireSyncPause();
-      pendingEditDevices.delete(deviceId);
-      editingSimpleDevices.add(deviceId);
+      pendingGlobalEdit = false;
+      globalEditMode = true;
+      if (!resumeSavedDraft) expandVisibleDeviceLists();
+      syncEntityModelFromConfig();
+      persistEditDraft();
       updateSyncEditStatus();
       render();
     } catch (error) {
-      pendingEditDevices.delete(deviceId);
+      pendingGlobalEdit = false;
+      globalEditMode = false;
       updateSyncEditStatus();
       render();
-      message(`Bearbeitungsmodus konnte nicht gestartet werden: ${error.message}`, "err");
-      if (!hasEditorSession() && syncPauseClientId) {
-        try { await releaseSyncPause(); } catch (_) {}
-      }
+      message(`Bearbeitungsmodus konnte nicht gestartet werden. Der Entwurf bleibt erhalten: ${error.message}`, "err");
     }
+  }
+
+  async function finishGlobalEditMode(button) {
+    if (!globalEditMode) return;
+    if (activeVirtualGroupId || [...pendingVirtualGroups.values()].some(draft => draft && draft.complete === false)) {
+      return message("Bitte den offenen Entitäten-Gruppenentwurf zuerst fertigstellen oder schließen und danach erneut öffnen. Der Entwurf bleibt erhalten.", "warn");
+    }
+    setBusy(button, true, "Speichere alles…");
+    try {
+      await saveConfig();
+      let grouped = null;
+      if (stagedAutoGroupDeviceIds.size) {
+        grouped = await request("/api/native-export/auto-group", {
+          method: "POST",
+          body: JSON.stringify({native_revision: config.native_revision, device_ids: [...stagedAutoGroupDeviceIds]}),
+        });
+        if (grouped.configuration) {
+          config = grouped.configuration;
+          model.configuration = config;
+          syncEntityModelFromConfig();
+        }
+      }
+      let virtualChanges = 0;
+      for (const [groupId, draft] of pendingVirtualGroups) {
+        const body = draft === null
+          ? {native_revision: config.native_revision, group_id: groupId, remove: true}
+          : {native_revision: config.native_revision, group_id: groupId, name: draft.name,
+             entity_ids: draft.entity_ids, names: draft.names, profiles: draft.profiles,
+             display_category: draft.display_category};
+        const result = await request("/api/native-export/virtual-group", {
+          method: "POST", body: JSON.stringify(body),
+        });
+        if (result.configuration) {
+          config = result.configuration;
+          model.configuration = config;
+          syncEntityModelFromConfig();
+        }
+        virtualChanges += 1;
+      }
+      await releaseSyncPause();
+      localStorage.removeItem(EDIT_DRAFT_KEY);
+      clearTimeout(draftPersistenceTimer);
+      pendingVirtualGroups.clear();
+      activeVirtualGroupId = null;
+      globalEditMode = false;
+      pendingGlobalEdit = false;
+      editBaseEntities = null;
+      render();
+      await load(false);
+      const configured = grouped?.configured?.length || 0;
+      const skipped = grouped?.skipped?.length || 0;
+      message(`Alle Änderungen wurden gemeinsam gespeichert${grouped ? `; ${configured} Standardgerät${configured === 1 ? "" : "e"} eingerichtet${skipped ? `, ${skipped} ausgelassen` : ""}` : ""}${virtualChanges ? `; ${virtualChanges} virtuelles Alexa-Gesamtgerät(er) übernommen` : ""}. Der Alexa-Abgleich läuft weiter.`, skipped ? "warn" : "ok");
+    } catch (error) {
+      message(`Änderungen konnten nicht vollständig abgeschlossen werden. Der Entwurf bleibt erhalten und kann erneut gespeichert werden: ${error.message}`, "err");
+    } finally {
+      setBusy(button, false);
+      updateSyncEditStatus();
+    }
+  }
+
+  async function discardGlobalEditDraft() {
+    if (!hasSavedEditDraft() && !globalEditMode && !pendingGlobalEdit) return;
+    if (!confirm("Den ungespeicherten Alexa-Entwurf verwerfen?")) return;
+    try {
+      if (syncPauseClientId) await releaseSyncPause();
+    } catch (error) {
+      message(`Der Alexa-Abgleich konnte nicht freigegeben werden. Der Entwurf bleibt erhalten: ${error.message}`, "err");
+      return;
+    }
+    localStorage.removeItem(EDIT_DRAFT_KEY);
+    clearTimeout(draftPersistenceTimer);
+    pendingVirtualGroups.clear();
+    activeVirtualGroupId = null;
+    globalEditMode = false;
+    pendingGlobalEdit = false;
+    editBaseEntities = null;
+    await load(false);
+    message("Ungespeicherter Entwurf verworfen.", "warn");
   }
 
   async function fillEntity(entityId) {
@@ -1053,31 +1532,6 @@
       const settings = entityConfig(entityId);
       settings.name = suggestedName(entity, device); settings.display_category = suggestedCategory(entity, device); settings.alexa_group ||= device.area_name || ""; settings.enabled = true;
       await saveConfig(); await load(false); return;
-    }
-  }
-
-  async function saveEntityName(button) {
-    const entityId = String(button.dataset.entity || "");
-    const input = [...document.querySelectorAll(".export-name")]
-      .find(item => item.dataset.entity === entityId);
-    if (!entityId || !input) throw new Error("Alexa-Namensfeld wurde nicht gefunden.");
-    const name = input.value;
-    entityConfig(entityId).name = name;
-    button.disabled = true;
-    button.textContent = "Speichert…";
-    try {
-      const result = await saveConfig();
-      if (result.configuration?.entities?.[entityId]?.name !== name) {
-        throw new Error("Der gespeicherte Name stimmt nicht mit der Eingabe überein.");
-      }
-      button.textContent = "Gespeichert";
-      message(`Alexa-Name für ${entityId} wurde dauerhaft gespeichert.`, "ok");
-      setTimeout(() => { if (button.isConnected) button.textContent = "Speichern"; }, 1800);
-    } catch (error) {
-      button.textContent = "Erneut speichern";
-      throw error;
-    } finally {
-      button.disabled = false;
     }
   }
 
@@ -1314,17 +1768,20 @@
     try {
       if (action === "toggle-area") {
         const id = button.dataset.area;
-        if (expandedAreas.has(id) && (renderedAreaItems.get(id) || []).some(({device}) => editingSimpleDevices.has(device.device_id) || pendingEditDevices.has(device.device_id))) {
-          message("Beende zuerst die Bearbeitung in diesem Raum.", "warn");
-          return;
-        }
         if (expandedAreas.has(id)) { expandedAreas.delete(id); visibleAreaCounts.delete(id); }
         else { expandedAreas.add(id); visibleAreaCounts.set(id, AREA_PAGE_SIZE); }
         renderArea(button, id);
       }
       else if (action === "more-area") {
         const id = button.dataset.area;
-        visibleAreaCounts.set(id, (visibleAreaCounts.get(id) || AREA_PAGE_SIZE) + AREA_PAGE_SIZE);
+        const count = Math.min((visibleAreaCounts.get(id) || AREA_PAGE_SIZE) + AREA_PAGE_SIZE,
+          renderedAreaItems.get(id)?.length || 0);
+        visibleAreaCounts.set(id, count);
+        if (globalEditMode) {
+          for (const {device} of (renderedAreaItems.get(id) || []).slice(0, count)) {
+            expandedSimpleDevices.add(String(device.device_id));
+          }
+        }
         const areaToggle = button.closest("section.area")?.querySelector('button[data-action="toggle-area"]');
         if (areaToggle) renderArea(areaToggle, id);
       }
@@ -1344,16 +1801,16 @@
       else if (action === "configure-device-group") openDeviceGroup(button.dataset.device);
       else if (action === "disable-device-export") await disableDeviceExport(button.dataset.device);
       else if (action === "toggle-simple-device") toggleSimpleDevice(button, button.dataset.device);
-      else if (action === "edit-simple-device") await editSimpleDevice(button, button.dataset.device);
       else if (action === "suggest-simple-name") {
         const entityId = button.dataset.entity;
         const value = button.dataset.suggestion || "";
         entityConfig(entityId).name = value;
         const input = button.closest(".simple-alexa-name")?.querySelector(".export-name");
         if (input) input.value = value;
-        await saveConfig(); message(`Alexa-Name für ${entityId} wurde übernommen.`);
+        syncEntityModelFromConfig();
+        persistEditDraft();
+        message(`Alexa-Name für ${entityId} wurde in den Entwurf übernommen.`);
       }
-      else if (action === "save-entity-name") await saveEntityName(button);
       else if (action === "fill-entity") await fillEntity(button.dataset.entity);
     } catch (error) { message(error.message, "err"); }
   }
@@ -1396,6 +1853,7 @@
     const target = event.target, entityId = target.dataset.entity; if (!entityId) return;
     const settings = entityConfig(entityId);
     if (target.classList.contains("export-toggle")) {
+      if (!globalEditMode) return;
       settings.enabled = target.checked;
       for (const device of model.devices || []) {
         const entity = (device.entities || []).find(item => item.entity_id === entityId);
@@ -1411,34 +1869,29 @@
           if (nameInput && !nameInput.value) nameInput.value = settings.name;
         }
       }
-      await saveConfig(); await load(false); message(`${entityId} wurde ${target.checked ? "für v6 aktiviert" : "für v6 deaktiviert"}. Der Alexa-Abgleich übernimmt die gespeicherte Auswahl.`, "warn");
+      syncEntityModelFromConfig();
+      persistEditDraft();
+      message(`${entityId} wurde im Entwurf ${target.checked ? "für Alexa ausgewählt" : "abgewählt"}. Klicke „Fertig – alles speichern“, um die Auswahl zu übernehmen.`, "warn");
     } else if (target.classList.contains("export-category")) {
+      if (!globalEditMode) return;
       settings.display_category = target.value;
       settings.display_category_mode = target.value ? "custom" : "standard";
       scheduleSave();
     }
     else if (target.classList.contains("export-name")) {
+      if (!globalEditMode) return;
       settings.name = target.value;
-      const saveButton = target.closest(".field, .simple-alexa-name")?.querySelector('.save-entity-name');
-      // Clicking the explicit save button fires change first; let its handler
-      // perform the single confirmed write in that case.
-      if (event.relatedTarget === saveButton || document.activeElement === saveButton) return;
-      try {
-        const result = await saveConfig();
-        if (result.configuration?.entities?.[entityId]?.name !== target.value) {
-          throw new Error("Gespeicherter Name weicht von der Eingabe ab.");
-        }
-        message(`Alexa-Name für ${entityId} wurde gespeichert.`, "ok");
-      } catch (error) {
-        message(`Alexa-Name konnte nicht gespeichert werden: ${error.message}`, "err");
-      }
+      syncEntityModelFromConfig();
+      persistEditDraft();
     }
   });
   document.getElementById("content").addEventListener("input", event => {
     const target = event.target, entityId = target.dataset.entity; if (!entityId) return;
+    if (!globalEditMode) return;
     const settings = entityConfig(entityId);
     if (target.classList.contains("export-name")) settings.name = target.value;
     if (target.classList.contains("export-group")) settings.alexa_group = target.value;
+    syncEntityModelFromConfig();
     scheduleSave();
   });
 
@@ -1459,6 +1912,42 @@
     document.getElementById("content").scrollIntoView({behavior: "smooth", block: "start"});
   });
   document.getElementById("btn-refresh").addEventListener("click", () => load(true));
+  document.getElementById("btn-create-virtual-group").addEventListener("click", () => openVirtualGroupDialog());
+  document.getElementById("virtual-group-list").addEventListener("click", event => {
+    const button = event.target.closest("button[data-virtual-action]");
+    if (!button) return;
+    const groupId = button.dataset.groupId;
+    if (button.dataset.virtualAction === "edit") openVirtualGroupDialog(groupId);
+    else if (button.dataset.virtualAction === "remove") stageVirtualGroupRemoval(groupId);
+  });
+  document.getElementById("btn-stage-virtual-group").addEventListener("click", stageVirtualGroupFromDialog);
+  document.getElementById("btn-close-virtual-group").addEventListener("click", () => {
+    persistVirtualGroupDialog(false);
+    activeVirtualGroupId = null;
+    persistEditDraft();
+    document.getElementById("virtual-group-dialog").close();
+    renderVirtualGroups();
+  });
+  document.getElementById("virtual-group-dialog").addEventListener("input", event => {
+    if (event.target.id === "virtual-group-search") return filterVirtualGroupEntities();
+    persistVirtualGroupDialog(false);
+  });
+  document.getElementById("virtual-group-dialog").addEventListener("change", event => {
+    const row = event.target.closest(".virtual-group-entity");
+    if (event.target.matches("select[data-vgroup-profile]")) {
+      row?.querySelector("[data-vrange-fields]")?.classList.toggle("hidden", event.target.value !== "read_only_range");
+    }
+    persistVirtualGroupDialog(false);
+  });
+  document.getElementById("virtual-group-dialog").addEventListener("close", () => {
+    if (!activeVirtualGroupId) return;
+    persistVirtualGroupDialog(false);
+    activeVirtualGroupId = null;
+    persistEditDraft();
+  });
+  document.getElementById("btn-start-edit").addEventListener("click", () => startGlobalEditMode());
+  document.getElementById("btn-finish-edit").addEventListener("click", event => finishGlobalEditMode(event.currentTarget));
+  document.getElementById("btn-discard-edit").addEventListener("click", () => discardGlobalEditDraft());
   document.getElementById("btn-restart").addEventListener("click", restart);
   document.getElementById("btn-event-sync").addEventListener("click", eventSync);
   document.getElementById("btn-group-sync").addEventListener("click", groupSync);
@@ -1501,11 +1990,6 @@
       (device.entities || []).some(entity => entityMatchesFilter(entity, device, filter))
     ).map(device => device.device_id);
     await autoExportDevices(deviceIds, document.getElementById("btn-enable-useful"));
-  });
-  document.getElementById("btn-disable-visible").addEventListener("click", async () => {
-    const filter = filters();
-    for (const device of model.devices || []) for (const entity of device.entities || []) if (entityMatchesFilter(entity, device, filter)) entityConfig(entity.entity_id).enabled = false;
-    await saveConfig(); await load(false);
   });
   document.getElementById("btn-hide-technical").addEventListener("click", async () => {
     const filter = filters(), ids = [];
