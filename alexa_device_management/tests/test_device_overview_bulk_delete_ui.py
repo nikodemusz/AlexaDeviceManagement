@@ -23,7 +23,7 @@ class AlexaBulkDeleteUiTests(unittest.TestCase):
         self.assertIn('appliance_id: item.appliance_id || ""', SCRIPT)
         self.assertIn('request("/api/devices/delete-job")', SCRIPT)
 
-    def test_device_group_editor_is_present_and_posts_the_explicit_entity_selection(self):
+    def test_device_group_editor_previews_automatic_defaults_and_allows_output_overrides(self):
         self.assertIn('id="device-group-dialog"', HTML)
         self.assertIn('name="device-group-mode" value="combined"', HTML)
         self.assertIn('name="device-group-mode" value="separate"', HTML)
@@ -32,17 +32,20 @@ class AlexaBulkDeleteUiTests(unittest.TestCase):
         self.assertIn('value="standard"', SCRIPT)
         self.assertIn('value="custom"', SCRIPT)
         self.assertIn("data-group-capability=", SCRIPT)
+        self.assertIn('id="device-group-preview"', HTML)
+        self.assertIn("renderDeviceGroupPreview();", SCRIPT)
+        self.assertIn('request("/api/native-export/auto-group"', SCRIPT)
         self.assertIn("Heizventil-Relais werden als Ein/Aus-Schalter exportiert", SCRIPT)
         self.assertIn("Helligkeit / Dimmer-Slider", SCRIPT)
-        self.assertIn("Abgewählte Entitäten werden aus dem Alexa-Export entfernt", HTML)
+        self.assertIn("Die einzelnen Entitäten musst du normalerweise nicht auswählen", HTML)
         self.assertIn("Standardprofile: Dimmer erhalten Ein/Aus und Helligkeits-Slider", HTML)
 
 
     def test_failed_bulk_delete_targets_remain_selected_and_versioned_assets_refresh(self):
         self.assertIn("Fehlgeschlagene Geräte bleiben in der Auswahl.", SCRIPT)
         self.assertIn("selectedAlexaKeys.delete(item.key)", SCRIPT)
-        self.assertIn("device_overview.js?v=3.8.1", HTML)
-        self.assertIn("device_overview.css?v=3.8.1", HTML)
+        self.assertIn("device_overview.js?v=3.9.0", HTML)
+        self.assertIn("device_overview.css?v=3.9.0", HTML)
 
     def test_summary_counters_filter_and_expand_their_matching_entities(self):
         self.assertIn('data-summary-filter="${status}"', SCRIPT)

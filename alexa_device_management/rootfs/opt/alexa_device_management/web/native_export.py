@@ -200,6 +200,110 @@ def _normalize_combined_power_controllers(devices):
             capability.setdefault("capability_names", [capability["entity_id"]])
 
 
+def standard_device_group(ha_device):
+    """Return the safe standard export for one physical HA device.
+
+    The default keeps useful controls together where Alexa can address them
+    unambiguously. Multiple relay switches can be represented as named toggle
+    instances; repeated non-instance controllers stay separate endpoints.
+    """
+    device_name = str(ha_device.get("name") or ha_device.get("device_id") or "Gerät")
+    entities = [entity for entity in ha_device.get("entities", [])
+                if isinstance(entity, dict) and isinstance(entity.get("entity_id"), str)]
+    climate_ids = [entity["entity_id"] for entity in entities
+                   if entity["entity_id"].startswith("climate.")]
+    selected = []
+    capabilities = {}
+    for entity in entities:
+        entity_id = entity["entity_id"]
+        domain = str(entity.get("domain") or entity_id.split(".", 1)[0])
+        if entity.get("entity_category") or domain not in {
+            "light", "switch", "fan", "cover", "climate", "binary_sensor", "sensor"
+        }:
+            continue
+        if domain == "sensor" and (entity.get("device_class") != "temperature" or climate_ids):
+            continue
+        category = _display_category(entity_id, entity, None)
+        try:
+            standard = _entity_capabilities(
+                entity_id, {"enabled": True, "display_category": category}, entity
+            )
+        except ValueError:
+            continue
+        if (domain == "cover"
+                and int(entity.get("supported_features", 0) or 0) & 4 != 4):
+            continue
+        if standard:
+            selected.append(entity)
+            capabilities[entity_id] = standard
+
+    if not selected:
+        return {"mode": "combined", "entity_ids": [], "name": device_name,
+                "reason": "unsupported", "endpoint_count": 0, "functions": []}
+
+    interface_entities = {}
+    for entity in selected:
+        entity_id = entity["entity_id"]
+        for capability in capabilities[entity_id]:
+            interface_entities.setdefault(capability["interface"], []).append(entity)
+
+    mode = "combined"
+    reason = "standard"
+    for interface, members in interface_entities.items():
+        if len(members) <= 1:
+            continue
+        if interface == "Alexa.PowerController" and all(
+            entity["entity_id"].startswith(("switch.", "input_boolean."))
+            for entity in members
+        ):
+            reason = "relay_outputs"
+        elif interface == "Alexa.RangeController" and all(
+            entity["entity_id"].startswith("cover.") for entity in members
+        ):
+            reason = "multiple_positions"
+        else:
+            mode = "separate"
+            reason = "separate_controls"
+            break
+
+    function_rows = [
+        {"entity_id": entity["entity_id"],
+         "entity_name": str(entity.get("name") or entity["entity_id"]),
+         "interfaces": [capability["interface"] for capability in capabilities[entity["entity_id"]]]}
+        for entity in selected
+    ]
+    return {
+        "mode": mode,
+        "entity_ids": [entity["entity_id"] for entity in selected],
+        "name": device_name,
+        "reason": reason,
+        "endpoint_count": 1 if mode == "combined" else len(selected),
+        "functions": function_rows,
+    }
+
+
+def _standard_group_inputs(ha_device, current):
+    defaults = standard_device_group(ha_device)
+    names_by_entity = entity_settings(current)
+    names = {}
+    profiles = {}
+    raw_by_id = {entity["entity_id"]: entity for entity in ha_device.get("entities", [])
+                 if isinstance(entity, dict) and isinstance(entity.get("entity_id"), str)}
+    for entity_id in defaults["entity_ids"]:
+        entity = raw_by_id[entity_id]
+        names[entity_id] = str(names_by_entity.get(entity_id, {}).get("name")
+                               or entity.get("name") or entity_id)
+        category = _display_category(entity_id, entity, None)
+        caps = _entity_capabilities(entity_id, {"enabled": True, "display_category": category}, entity)
+        profiles[entity_id] = {
+            "mode": "standard",
+            "capabilities": [cap["interface"] for cap in caps],
+            "display_category": category,
+            "display_category_mode": "standard",
+        }
+    return defaults, names, profiles
+
+
 def apply_entities(native, requested, inventory):
     """Change existing logical devices in place; create only explicitly selected ones."""
     proposed = copy.deepcopy(native)
@@ -357,7 +461,12 @@ def apply_device_group(native, device_id, entity_ids, mode, group_name, inventor
                          if isinstance(entity, dict) and isinstance(entity.get("entity_id"), str)}
     capabilities_by_entity = {entity_id: [] for entity_id in selected}
     member_templates = {}
-    group_key = "ha:group:" + hashlib.sha256(device_id.encode("utf-8")).hexdigest()[:16]
+    existing_group_key = next((key for key, device in proposed["devices"].items()
+                               if device.get("group_mode") == "combined"
+                               and device.get("ha_device_id") == device_id), None)
+    group_key = (existing_group_key or
+                 ("ha:" + selected[0] if len(selected) == 1 else
+                  "ha:group:" + hashlib.sha256(device_id.encode("utf-8")).hexdigest()[:16]))
     old_group = copy.deepcopy(proposed["devices"].get(group_key))
     for endpoint_id, device in list(proposed["devices"].items()):
         keep = []
@@ -412,6 +521,16 @@ def apply_device_group(native, device_id, entity_ids, mode, group_name, inventor
                 capability["capability_names"] = [
                     str(names.get(capability["entity_id"]) or capability["entity_id"])
                 ]
+        positions = [cap for values in capabilities_by_entity.values() for cap in values
+                     if cap["interface"] == "Alexa.RangeController"
+                     and cap["entity_id"].startswith("cover.")]
+        if len(positions) > 1:
+            for capability in positions:
+                capability["instance"] = "cover.position_" + hashlib.sha256(
+                    capability["entity_id"].encode("utf-8")).hexdigest()[:12]
+                capability["capability_names"] = [
+                    str(names.get(capability["entity_id"]) or capability["entity_id"])
+                ]
         for entity_id, capabilities in capabilities_by_entity.items():
             label = str(names.get(entity_id) or entity_id)
             for capability in capabilities:
@@ -455,6 +574,10 @@ def apply_device_group(native, device_id, entity_ids, mode, group_name, inventor
                     capability["interface"] = "Alexa.PowerController"
                     capability.pop("instance", None)
                     capability.pop("capability_names", None)
+                if (capability.get("interface") == "Alexa.RangeController"
+                        and entity_id.startswith("cover.")):
+                    capability["instance"] = "cover.position"
+                    capability["capability_names"] = ["Position"]
             if existing:
                 capabilities = [*existing.get("capabilities", []), *capabilities]
             proposed["devices"][key] = {
@@ -528,10 +651,12 @@ async def autosave(request):
         STORE.validate(proposed)
     except (ValueError, TypeError) as exc:
         return web.json_response({"error": str(exc)}, status=400)
+    changed = revision(proposed) != body["native_revision"]
     # No await between revision check, final recheck and atomic native save.
     if revision(STORE.load()) != body["native_revision"]:
         return web.json_response({"error": "v6-Konfiguration wurde zwischenzeitlich geändert."}, status=409)
-    STORE.save(proposed)
+    if changed:
+        STORE.save(proposed)
     preferences = ha_export.CONFIG_STORE.load()
     # Preserve historical entity data; only UI/connection preferences go into JSON.
     for key in ("ui", "event_gateway", "group_sync"):
@@ -540,7 +665,7 @@ async def autosave(request):
     preferences["legacy_export_enabled"] = False
     preferences = ha_export.CONFIG_STORE.save(preferences)
     trigger = request.app.get("native_reconcile_trigger")
-    queued = callable(trigger)
+    queued = callable(trigger) and changed
     if queued:
         trigger(force=True)
     return web.json_response({"ok": True, "reconciliation_queued": queued,
@@ -571,13 +696,176 @@ async def configure_group(request):
         return web.json_response({"error": str(exc)}, status=400)
     if revision(STORE.load()) != body["native_revision"]:
         return web.json_response({"error": "v6-Konfiguration wurde zwischenzeitlich geändert."}, status=409)
-    STORE.save(proposed)
+    changed = revision(proposed) != body["native_revision"]
+    if changed:
+        STORE.save(proposed)
     trigger = request.app.get("native_reconcile_trigger")
-    queued = callable(trigger)
-    if queued:
+    queued = callable(trigger) and changed
+    if queued and changed:
         trigger(force=True)
     return web.json_response({"ok": True, "reconciliation_queued": queued,
                               "configuration": configuration(proposed, ha_export.CONFIG_STORE.load())})
+
+
+async def auto_group(request):
+    """Apply standard profiles to the requested physical HA devices in one save."""
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise web.HTTPBadRequest(text="Ungültige JSON-Daten.") from exc
+    current = STORE.load()
+    if not isinstance(body, dict) or body.get("native_revision") != revision(current):
+        return web.json_response({"error": "v6-Konfiguration wurde geändert. Ansicht neu laden."}, status=409)
+    device_ids = body.get("device_ids")
+    if (not isinstance(device_ids, list) or not device_ids or len(device_ids) > 500
+            or any(not isinstance(device_id, str) or not device_id.strip() for device_id in device_ids)):
+        return web.json_response({"error": "Mindestens ein gültiges Home-Assistant-Gerät auswählen."}, status=400)
+    inventory = await ha_export._inventory()
+    available = {str(item.get("device_id") or ""): item
+                 for item in inventory.get("devices", []) if isinstance(item, dict)}
+    proposed = copy.deepcopy(current)
+    configured = []
+    skipped = []
+    for device_id in dict.fromkeys(device_ids):
+        ha_device = available.get(device_id)
+        if not ha_device:
+            skipped.append({"device_id": device_id, "reason": "Home-Assistant-Gerät nicht mehr verfügbar."})
+            continue
+        defaults, names, profiles = _standard_group_inputs(ha_device, proposed)
+        if not defaults["entity_ids"]:
+            skipped.append({"device_id": device_id, "reason": "Keine unterstützte Standardfunktion gefunden."})
+            continue
+        try:
+            candidate = apply_device_group(
+                proposed, device_id, defaults["entity_ids"], defaults["mode"],
+                defaults["name"], inventory, names, profiles,
+            )
+            candidate = STORE.validate(candidate)
+        except (ValueError, TypeError) as exc:
+            skipped.append({"device_id": device_id, "reason": str(exc)})
+            continue
+        proposed = candidate
+        configured.append({"device_id": device_id, "name": defaults["name"],
+                           "endpoint_count": defaults["endpoint_count"],
+                           "entity_count": len(defaults["entity_ids"]),
+                           "mode": defaults["mode"]})
+    changed = revision(proposed) != body["native_revision"]
+    if changed:
+        if revision(STORE.load()) != body["native_revision"]:
+            return web.json_response({"error": "v6-Konfiguration wurde zwischenzeitlich geändert."}, status=409)
+        STORE.save(proposed)
+    trigger = request.app.get("native_reconcile_trigger")
+    queued = callable(trigger) and changed
+    if queued and changed:
+        trigger(force=True)
+    return web.json_response({"ok": True, "configured": configured, "skipped": skipped,
+                              "reconciliation_queued": queued,
+                              "configuration": configuration(proposed, ha_export.CONFIG_STORE.load())})
+
+
+def normalize_active_device_groups(native, inventory):
+    """Apply standard grouping to already-enabled legacy v6 endpoints.
+
+    This runs only from the owner's explicit "send changes to Alexa" action.
+    It never enables an unselected entity, and it preserves groups/capability
+    profiles that were explicitly configured in the grouping editor. The one
+    automatic cleanup is a temperature helper on the same physical device as
+    an active climate entity: the thermostat endpoint already reports both
+    values, so Alexa should not show another device for that sensor.
+    """
+    proposed = copy.deepcopy(native)
+    changed_groups = []
+    devices = [item for item in inventory.get("devices", []) if isinstance(item, dict)]
+
+    for ha_device in devices:
+        device_id = str(ha_device.get("device_id") or "")
+        physical_ids = {entity.get("entity_id") for entity in ha_device.get("entities", [])
+                        if isinstance(entity, dict) and isinstance(entity.get("entity_id"), str)}
+        if not device_id or not physical_ids:
+            continue
+
+        owners = [device for device in proposed.get("devices", {}).values()
+                  if any(capability.get("entity_id") in physical_ids
+                         for capability in device.get("capabilities", []))]
+        # An explicit combined/separate choice, custom profile, or custom
+        # category is the user's override to the standard.
+        if any(device.get("group_mode") in ("combined", "separate")
+               or device.get("display_category_mode") == "custom"
+               or any(capability.get("capability_mode") == "custom"
+                      for capability in device.get("capabilities", []))
+               or any(capability.get("enabled", True) is False
+                      for capability in device.get("capabilities", []))
+               for device in owners):
+            continue
+
+        active_ids = {
+            capability["entity_id"]
+            for device in owners
+            if device.get("enabled", True)
+            for capability in device.get("capabilities", [])
+            if capability.get("enabled", True)
+            and capability.get("entity_id") in physical_ids
+        }
+        if not active_ids:
+            continue
+
+        defaults, names, profiles = _standard_group_inputs(ha_device, proposed)
+        selected = [entity_id for entity_id in defaults["entity_ids"] if entity_id in active_ids]
+        if not selected:
+            continue
+
+        removed_ids = active_ids - set(selected)
+        active_climates = {entity_id for entity_id in selected if entity_id.startswith("climate.")}
+        # Only remove a deliberately redundant temperature sensor. Other
+        # nonstandard active controls need explicit review in the editor.
+        redundant_temperature_helpers = {
+            entity.get("entity_id") for entity in ha_device.get("entities", [])
+            if isinstance(entity, dict)
+            and entity.get("entity_id") in removed_ids
+            and entity.get("domain") in {"sensor", "number", "input_number"}
+            and (
+                (entity.get("domain") == "sensor"
+                 and entity.get("device_class") == "temperature")
+                or any(token in " ".join(str(entity.get(key) or "").casefold()
+                                         for key in ("entity_id", "name", "original_name"))
+                       for token in ("wunschtemperatur", "solltemperatur", "sollwert",
+                                     "target temperature", "target_temperature", "setpoint"))
+            )
+        } if active_climates else set()
+        if removed_ids != redundant_temperature_helpers:
+            continue
+
+        needs_regrouping = len(selected) > 1 or bool(removed_ids)
+        if not needs_regrouping:
+            continue
+
+        # Keep a safe standard separate layout where Alexa cannot disambiguate
+        # repeated controllers. The group editor can combine or customize it.
+        try:
+            candidate = apply_device_group(
+                proposed, device_id, selected, defaults["mode"], defaults["name"],
+                inventory, names, profiles,
+            )
+            candidate = NativeSkillConfigStore.validate(candidate)
+        except (ValueError, TypeError):
+            continue
+        if revision(candidate) == revision(proposed):
+            continue
+        old_endpoint_count = len({key for key, device in proposed["devices"].items()
+                                  if any(capability.get("entity_id") in active_ids
+                                         for capability in device.get("capabilities", []))})
+        proposed = candidate
+        changed_groups.append({
+            "device_id": device_id,
+            "name": defaults["name"],
+            "entity_count": len(selected),
+            "endpoint_count": 1 if defaults["mode"] == "combined" else len(selected),
+            "old_endpoint_count": old_endpoint_count,
+            "removed_helpers": len(removed_ids),
+            "mode": defaults["mode"],
+        })
+
+    return NativeSkillConfigStore.validate(proposed), changed_groups
 
 
 async def preview(request):
@@ -595,9 +883,13 @@ async def save_yaml(request):
         proposed = STORE.validate(yaml.safe_load(body["yaml"]))
     except (ValueError, TypeError, yaml.YAMLError) as exc:
         return web.json_response({"error": str(exc)}, status=400)
-    STORE.save(proposed)
+    changed = revision(proposed) != body["native_revision"]
+    if revision(STORE.load()) != body["native_revision"]:
+        return web.json_response({"error": "v6-Konfiguration wurde zwischenzeitlich geändert."}, status=409)
+    if changed:
+        STORE.save(proposed)
     trigger = request.app.get("native_reconcile_trigger")
-    queued = callable(trigger)
+    queued = callable(trigger) and changed
     if queued:
         trigger(force=True)
     return web.json_response({"ok": True, "reconciliation_queued": queued,
@@ -608,6 +900,7 @@ def register_routes(app):
     app.router.add_get("/api/native-export/config", read_config)
     app.router.add_post("/api/native-export/yaml", save_yaml)
     app.router.add_post("/api/native-export/group", configure_group)
+    app.router.add_post("/api/native-export/auto-group", auto_group)
     app.router.add_post("/api/native-export/setup", setup_sync_service)
 
 

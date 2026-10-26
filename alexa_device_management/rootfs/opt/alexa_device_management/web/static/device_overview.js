@@ -30,9 +30,9 @@
     "btn-settings": "Öffnet Einstellungen für Alexa-Abgleich, Alexa-Gruppen und Export.",
     "btn-preview": "Zeigt die v6-Hauptkonfiguration; sie kann im YAML-Editor geändert werden.",
     "btn-restart": "Startet Home Assistant neu, um einen neu eingerichteten oder aktualisierten Alexa-Abgleichsdienst zu laden.",
-    "btn-event-sync": "Sendet die v6-Endpunkte per AddOrUpdateReport, entfernte native Endpunkte per DeleteReport und bereinigt erkannte HA-v5-Geräte. Schreibt keine alexa.yaml.",
+    "btn-event-sync": "Übernimmt bei alten, noch nicht gruppierten v6-Geräten den Standard, fasst bereits ausgewählte Entities desselben HA-Geräts zusammen und sendet danach per AddOrUpdateReport die Änderungen an Alexa. Entfernte Endpunkte werden per DeleteReport bereinigt. Deaktivierte Entities bleiben deaktiviert; ausdrücklich getrennte oder angepasste Geräte bleiben erhalten. Schreibt keine alexa.yaml.",
     "btn-group-sync": "Ordnet bereits vorhandene Alexa-Endpunkte den konfigurierten Alexa-Gruppen zu.",
-    "btn-enable-useful": "Aktiviert alle aktuell sichtbaren, für Alexa sinnvoll erkannten Entitäten.",
+    "btn-enable-useful": "Exportiert für jedes sichtbare Home-Assistant-Gerät automatisch alle unterstützten Standardfunktionen und zeigt sie als Alexa-Gerät oder nötigenfalls als einzelne Endpunkte an.",
     "btn-disable-visible": "Deaktiviert den Alexa-Export für alle aktuell sichtbaren Entitäten.",
     "btn-hide-technical": "Blendet aktuell sichtbare Diagnose-, Energie- und andere technische Entitäten aus.",
     "btn-unhide-visible": "Blendet die durch den aktuellen Filter gefundenen Einträge wieder ein.",
@@ -44,7 +44,7 @@
     "toggle-area": "Öffnet oder schließt diesen Raum.",
     "more-area": "Zeigt den nächsten Block von Geräten in diesem Raum.",
     "toggle-device": "Öffnet oder schließt die Entitäten dieses Geräts.",
-    "prepare-device": "Aktiviert automatisch eine geeignete Entität dieses Geräts. Weitere Entitäten können danach manuell ergänzt werden.",
+    "prepare-device": "Exportiert automatisch alle unterstützten Standardfunktionen dieses Home-Assistant-Geräts und gruppiert sie passend für Alexa.",
     "disable-device-export": "Deaktiviert alle Entitäten dieses Geräts für Alexa.",
     "toggle-simple-device": "Öffnet oder schließt die manuelle Entitäts- und Namensauswahl.",
     "edit-simple-device": "Pausiert den Alexa-Hintergrundabgleich und schaltet die Entitätsauswahl frei.",
@@ -59,7 +59,7 @@
     "delete-alexa": "Löscht den bereits bei Alexa vorhandenen Endpunkt.",
     "delete-selected-alexa": "Löscht die ausgewählten Alexa-Geräte nach einer Sicherheitsabfrage nacheinander.",
     "assign-group": "Ordnet diesen Alexa-Endpunkt der angegebenen Alexa-Gruppe zu.",
-    "configure-device-group": "Wählt die exportierten Entitäten, den Alexa-Gesamtnamen und die Exportform dieses Home-Assistant-Geräts.",
+    "configure-device-group": "Zeigt die Alexa-Vorschau und lässt Mehrfachausgänge bei Bedarf auf mehrere Alexa-Geräte aufteilen.",
     "fill-entity": "Übernimmt den automatisch ermittelten Alexa-Namen und die passende Kategorie.",
     "suggest-simple-name": "Übernimmt den vorgeschlagenen Alexa-Namen in das weiterhin editierbare Namensfeld."
   };
@@ -269,6 +269,37 @@
     const problem = ["only_alexa", "duplicate", "problem", "orphaned"].includes(status);
     const cls = status === "synced" ? "synced" : status === "pending" ? "pending" : problem ? "problem" : "";
     return `<span class="badge ${cls}">${esc(STATUS_TEXT[status] || status)}</span>`;
+  }
+
+  function devicePreviewText(device) {
+    const suggestion = device.grouping_suggestion || {};
+    const ids = Array.isArray(suggestion.entity_ids) ? suggestion.entity_ids : [];
+    if (!ids.length) return "Alexa-Vorschau: keine unterstützte Standardfunktion";
+    const selected = ids.map(id => (device.entities || []).find(entity => entity.entity_id === id))
+      .filter(Boolean);
+    const mode = suggestion.mode === "separate" ? "separate" : "combined";
+    const descriptions = selected.map(entity => {
+      const settings = entityConfig(entity.entity_id);
+      const funcs = entity.export?.capability_mode === "custom"
+        ? (entity.export.capabilities || []).map(id => ({id, label: capabilityOptions(entity).find(option => option.id === id)?.label || id}))
+        : capabilityOptions(entity).filter(option => option.id !== "Alexa.PlaybackController");
+      const controls = funcs.map(option => option.label).join(", ") || "Funktion";
+      return `${settings.name || entity.name || entity.entity_id} (${controls})`;
+    });
+    if (mode === "separate") {
+      const label = suggestion.reason === "configured" ? "Alexa aktuell" : "Alexa-Vorschau (Standard)";
+      return `${label}: ${selected.length} Gerät${selected.length === 1 ? "" : "e"} · ${descriptions.slice(0, 3).join("; ")}${descriptions.length > 3 ? `; +${descriptions.length - 3}` : ""}`;
+    }
+    const functions = selected.flatMap(entity => {
+      const settings = entityConfig(entity.entity_id);
+      const funcs = entity.export?.capability_mode === "custom"
+        ? (entity.export.capabilities || []).map(id => ({id, label: capabilityOptions(entity).find(option => option.id === id)?.label || id}))
+        : capabilityOptions(entity).filter(option => option.id !== "Alexa.PlaybackController");
+      return funcs.map(option => `${settings.name || entity.name || entity.entity_id}: ${option.label}`);
+    });
+    const name = suggestion.name || device.name || "Home-Assistant-Gerät";
+    const label = suggestion.reason === "configured" ? "Alexa aktuell" : "Alexa-Vorschau (Standard)";
+    return `${label}: 1 Gerät „${name}“ · ${functions.slice(0, 4).join("; ")}${functions.length > 4 ? `; +${functions.length - 4}` : ""}`;
   }
 
   function scheduleSave() {
@@ -497,7 +528,7 @@
     prepare.className = "button primary small";
     prepare.dataset.action = "prepare-device";
     prepare.dataset.device = String(device.device_id || "");
-    prepare.textContent = "Sinnvoll aktivieren";
+    prepare.textContent = "Automatisch exportieren";
     const visibility = document.createElement("button");
     visibility.className = "button secondary small";
     visibility.dataset.action = device.hidden ? "show-device" : "hide-device";
@@ -507,8 +538,8 @@
     grouping.className = "button secondary small";
     grouping.dataset.action = "configure-device-group";
     grouping.dataset.device = String(device.device_id || "");
-    grouping.textContent = "Alexa-Gerät konfigurieren";
-    grouping.title = "Entitäten zu einem Alexa-Gesamtgerät gruppieren oder wieder trennen";
+    grouping.textContent = "Vorschau / anpassen";
+    grouping.title = "Alexa-Gruppierung ansehen oder Mehrfachausgänge anpassen";
     actions.append(prepare, grouping, visibility);
     head.append(toggle, title, actions);
     section.append(head);
@@ -554,9 +585,12 @@
       name.textContent = String(item.device.name || item.device.device_id || "Unbekanntes Gerät");
       const detail = document.createElement("span");
       detail.className = "muted";
-      const selected = item.entities.filter(entity => entityConfig(entity.entity_id).enabled || entity.native?.enabled).length;
-      detail.textContent = `${item.entities.length} Entität${item.entities.length === 1 ? "" : "en"} • ${selected} für Alexa`;
-      info.append(name, detail);
+      const endpointIds = new Set(item.entities.flatMap(entity => entity.native?.endpoint_ids || []));
+      detail.textContent = `${item.entities.length} HA-Entität${item.entities.length === 1 ? "" : "en"} · ${endpointIds.size} Alexa-Gerät${endpointIds.size === 1 ? "" : "e"} aktuell`;
+      const preview = document.createElement("span");
+      preview.className = "device-preview muted";
+      preview.textContent = devicePreviewText(item.device);
+      info.append(name, detail, preview);
       const actions = document.createElement("div");
       actions.className = "device-actions";
       for (const [action, text, cls] of [
@@ -577,9 +611,9 @@
       edit.className = "button secondary small";
       edit.dataset.action = "edit-simple-device";
       edit.dataset.device = deviceId;
-      edit.textContent = isWaiting ? "Sync pausiert…" : isEditing ? "Fertig" : "Bearbeiten";
+      edit.textContent = isWaiting ? "Sync pausiert…" : isEditing ? "Fertig" : isOpen ? "Bearbeiten" : "Details";
       edit.disabled = isWaiting || !isOpen;
-      edit.title = "Pausiert den Alexa-Abgleich und schaltet die Entitätsliste frei";
+      edit.title = "Zeigt die einzelnen Home-Assistant-Entitäten; Bearbeiten pausiert den Alexa-Abgleich";
       actions.append(edit);
       row.append(info, actions);
       if (isOpen) renderSimpleEntityList(row, item.device, isEditing);
@@ -918,15 +952,32 @@
     message(`„${item.name}“ wurde der Alexa-Gruppe „${groupName}“ zugeordnet.`); await load(true);
   }
 
-  async function prepareDevice(deviceId) {
-    const device = (model.devices || []).find(item => item.device_id === deviceId); if (!device) return;
-    const candidate = device.entities.find(isUseful) || device.entities.find(entity => !isTechnical(entity));
-    if (!candidate) return message("Für dieses Gerät wurde keine sinnvolle Alexa-Entität gefunden.", "err");
-    for (const entity of device.entities) entityConfig(entity.entity_id).enabled = false;
-    const settings = entityConfig(candidate.entity_id);
-    settings.enabled = true; settings.name ||= suggestedName(candidate, device); settings.display_category ||= suggestedCategory(candidate, device);
-    for (const entity of device.entities) entity.export.enabled = entity.entity_id === candidate.entity_id;
-    await saveConfig(); await load(false); message(`${candidate.entity_id} wurde für v6 gespeichert.`);
+  async function autoExportDevices(deviceIds, button = null) {
+    if (!deviceIds.length) return message("Keine sichtbaren Home-Assistant-Geräte zum Exportieren gefunden.", "warn");
+    if (button) setBusy(button, true, "Gruppiere…");
+    try {
+      await saveConfig();
+      const result = await request("/api/native-export/auto-group", {
+        method: "POST",
+        body: JSON.stringify({native_revision: config.native_revision, device_ids: deviceIds}),
+      });
+      if (result.configuration) config = result.configuration;
+      await load(false);
+      const count = result.configured?.length || 0;
+      const skipped = result.skipped || [];
+      const firstReason = skipped[0]?.reason ? ` Erster Hinweis: ${skipped[0].reason}` : "";
+      message(`${count} Home-Assistant-Gerät${count === 1 ? "" : "e"} nach Standard gruppiert; ${skipped.length} ausgelassen.${firstReason}`, skipped.length ? "warn" : "ok");
+    } catch (error) {
+      message(`Automatischer Alexa-Export fehlgeschlagen: ${error.message}`, "err");
+    } finally {
+      if (button) setBusy(button, false);
+    }
+  }
+
+  async function prepareDevice(deviceId, button = null) {
+    const device = (model.devices || []).find(item => item.device_id === deviceId);
+    if (!device) return;
+    await autoExportDevices([deviceId], button);
   }
 
   async function disableDeviceExport(deviceId) {
@@ -1045,7 +1096,15 @@
       // edits before reconciliation reads the native configuration from disk.
       await saveConfig();
       const result = await request("/api/native-export/sync", {method: "POST", body: JSON.stringify({force: true})});
-      if (result.queued) { message(result.message, "warn"); return; }
+      if (result.queued) {
+        const grouped = result.normalized_groups || [];
+        const merged = grouped.reduce((total, group) => total + Math.max(0, (group.old_endpoint_count || 0) - (group.endpoint_count || 0)), 0);
+        const note = grouped.length
+          ? `\n${grouped.length} Gerät${grouped.length === 1 ? "" : "e"} nach Standard gruppiert; ${merged} überzählige Alexa-Endpunkt${merged === 1 ? "" : "e"} werden bereinigt.`
+          : "\nKeine bisher ungruppierten Standardgeräte gefunden.";
+        message(`${result.message}${note}`, grouped.length ? "warn" : "ok");
+        return;
+      }
       message(`Alexa Event Gateway erfolgreich.\nUpdates: ${result.official?.add_or_update_count || 0}\nNative Löschungen: ${result.official?.delete_count || 0}\nAlte v5-Geräte gelöscht: ${result.lifecycle?.legacy_deleted || 0}\nVerbleibende v5-Geräte: ${result.lifecycle?.legacy_remaining ?? "ungeprüft"}`); await load(true);
     } catch (error) {
       const fallback = error.body?.fallback;
@@ -1065,6 +1124,43 @@
     finally { setBusy(button, false); }
   }
 
+  function renderDeviceGroupPreview() {
+    const dialog = document.getElementById("device-group-dialog");
+    const preview = document.getElementById("device-group-preview");
+    if (!dialog || !preview) return;
+    const mode = dialog.querySelector('input[name="device-group-mode"]:checked')?.value || "combined";
+    const selected = [...dialog.querySelectorAll("input[data-group-entity]:checked")];
+    const name = document.getElementById("device-group-name").value.trim() || "Home-Assistant-Gerät";
+    const controls = selected.flatMap(input => {
+      const entityId = input.dataset.groupEntity;
+      const device = (model.devices || []).find(item => String(item.device_id) === String(dialog.dataset.deviceId));
+      const entity = device?.entities.find(item => item.entity_id === entityId);
+      if (!entity) return [];
+      const profile = [...dialog.querySelectorAll("select[data-group-profile]")]
+        .find(item => item.dataset.groupProfile === entityId)?.value || "standard";
+      const functions = profile === "custom"
+        ? [...dialog.querySelectorAll("input[data-group-capability]:checked")]
+          .filter(item => item.dataset.groupCapability === entityId).map(item => item.value)
+        : capabilityOptions(entity).filter(item => item.id !== "Alexa.PlaybackController").map(item => item.id);
+      const memberName = [...dialog.querySelectorAll("input[data-group-name]")]
+        .find(item => item.dataset.groupName === entityId)?.value.trim()
+        || entity.name || entity.entity_id;
+      return functions.map(id => {
+        const option = capabilityOptions(entity).find(item => item.id === id);
+        return {name: memberName, function: option?.label || id};
+      });
+    });
+    if (!controls.length) {
+      preview.textContent = "Wähle mindestens eine unterstützte Funktion aus.";
+      return;
+    }
+    const lines = mode === "combined"
+      ? [`1 Alexa-Gerät: „${name}“`, ...controls.map(control => `• ${control.name}: ${control.function}`)]
+      : [`${selected.length} Alexa-Gerät${selected.length === 1 ? "" : "e"}:`,
+         ...[...new Set(controls.map(control => `${control.name}: ${control.function}`)).values()].map(value => `• ${value}`)];
+    preview.textContent = lines.join("\n");
+  }
+
   function openDeviceGroup(deviceId) {
     const device = (model.devices || []).find(item => String(item.device_id) === String(deviceId));
     if (!device) throw new Error("Home-Assistant-Gerät wurde nicht gefunden.");
@@ -1076,8 +1172,9 @@
     const selectedIds = new Set(explicitMode
       ? activeIds
       : Array.isArray(suggestion.entity_ids) ? suggestion.entity_ids : activeIds);
-    const thermostatDefault = !explicitMode && suggestion.reason === "thermostat";
-    const combined = explicitMode ? explicitMode === "combined" : suggestion.mode === "combined";
+    const thermostatDefault = !explicitMode && suggestion.entity_ids?.some(id => id.startsWith("climate."))
+      && entities.some(entity => entity.domain === "sensor" && entity.device_class === "temperature");
+    const combined = explicitMode ? explicitMode === "combined" : suggestion.mode !== "separate";
     const currentGroupName = entities.find(entity => entity.export?.logical_device_name)?.export.logical_device_name;
     document.getElementById("device-group-dialog").dataset.deviceId = String(deviceId);
     document.getElementById("device-group-title").textContent = `Alexa-Gerät konfigurieren: ${device.name}`;
@@ -1087,7 +1184,7 @@
     document.getElementById("device-group-entities").innerHTML = entities.map(entity => {
       const settings = entityConfig(entity.entity_id);
       const enabled = selectedIds.has(entity.entity_id);
-      const label = settings.name || suggestedName(entity, device);
+      const label = settings.name || entity.name || entity.entity_id;
       const options = capabilityOptions(entity);
       const profileMode = entity.export?.capability_mode === "custom" ? "custom" : "standard";
       const standard = options.filter(option => option.id !== "Alexa.PlaybackController").map(option => option.id);
@@ -1104,9 +1201,10 @@
       const note = thermostatHelper
         ? "Standard: Ist- und Wunschtemperatur kommen über das Thermostat. Dieses Sensor-Entity wird daher nicht als weiteres Alexa-Gerät angelegt. Für einen zusätzlichen Sensor bitte auswählen; für ein eigenes Alexa-Gerät oben „einzelne Geräte“ wählen."
         : roleNote(entity);
-      return `<div class="device-group-entity"><label class="device-group-selection"><input type="checkbox" data-group-entity="${attr(entity.entity_id)}" ${enabled ? "checked" : ""}><span><strong>${esc(entity.name || entity.entity_id)}</strong><small>${esc(entity.entity_id)}</small></span></label><div class="device-group-member-name">Alexa-Funktionsname<input data-group-name="${attr(entity.entity_id)}" value="${attr(label)}" maxlength="128" autocomplete="off">${relayCategory}<label>Funktionsprofil<select data-group-profile="${attr(entity.entity_id)}"><option value="standard" ${profileMode === "standard" ? "selected" : ""}>Standard (empfohlen)</option><option value="custom" ${profileMode === "custom" ? "selected" : ""}>Eigene Funktionen</option></select></label><div class="device-group-capabilities ${profileMode === "custom" ? "" : "hidden"}" data-group-capabilities="${attr(entity.entity_id)}">${capabilities}</div>${note ? `<small class="device-group-role-note">${esc(note)}</small>` : ""}</div></div>`;
+      return `<div class="device-group-entity"><label class="device-group-selection"><input type="checkbox" data-group-entity="${attr(entity.entity_id)}" ${enabled ? "checked" : ""} ${options.length ? "" : "disabled"}><span><strong>${esc(entity.name || entity.entity_id)}</strong><small>${esc(entity.entity_id)}</small></span></label><div class="device-group-member-name">Alexa-Funktionsname<input data-group-name="${attr(entity.entity_id)}" value="${attr(label)}" maxlength="128" autocomplete="off">${relayCategory}<label>Funktionsprofil<select data-group-profile="${attr(entity.entity_id)}"><option value="standard" ${profileMode === "standard" ? "selected" : ""}>Standard (empfohlen)</option><option value="custom" ${profileMode === "custom" ? "selected" : ""}>Eigene Funktionen</option></select></label><div class="device-group-capabilities ${profileMode === "custom" ? "" : "hidden"}" data-group-capabilities="${attr(entity.entity_id)}">${capabilities}</div>${note ? `<small class="device-group-role-note">${esc(note)}</small>` : ""}</div></div>`;
     }).join("");
     document.getElementById("device-group-name-field").classList.toggle("hidden", !combined);
+    renderDeviceGroupPreview();
     document.getElementById("device-group-dialog").showModal();
   }
 
@@ -1242,7 +1340,7 @@
       else if (action === "delete-alexa") await deleteAlexa(button.dataset.key);
       else if (action === "delete-selected-alexa") await deleteSelectedAlexa();
       else if (action === "assign-group") await assignGroup(button.dataset.entity, button.dataset.key);
-      else if (action === "prepare-device") await prepareDevice(button.dataset.device);
+      else if (action === "prepare-device") await prepareDevice(button.dataset.device, button);
       else if (action === "configure-device-group") openDeviceGroup(button.dataset.device);
       else if (action === "disable-device-export") await disableDeviceExport(button.dataset.device);
       else if (action === "toggle-simple-device") toggleSimpleDevice(button, button.dataset.device);
@@ -1379,24 +1477,30 @@
     const category = event.target.closest("select[data-group-category]");
     if (category) category.dataset.categoryMode = "custom";
     const select = event.target.closest("select[data-group-profile]");
-    if (!select) return;
-    const choices = [...document.querySelectorAll("[data-group-capabilities]")]
-      .find(element => element.dataset.groupCapabilities === select.dataset.groupProfile);
-    choices?.classList.toggle("hidden", select.value !== "custom");
+    if (select) {
+      const choices = [...document.querySelectorAll("[data-group-capabilities]")]
+        .find(element => element.dataset.groupCapabilities === select.dataset.groupProfile);
+      choices?.classList.toggle("hidden", select.value !== "custom");
+    }
+    renderDeviceGroupPreview();
   });
   document.querySelectorAll('input[name="device-group-mode"]').forEach(input => input.addEventListener("change", () => {
     document.getElementById("device-group-name-field").classList.toggle("hidden", input.value !== "combined");
+    renderDeviceGroupPreview();
   }));
+  document.getElementById("device-group-dialog").addEventListener("input", event => {
+    if (event.target.matches("#device-group-name, input[data-group-name]")) renderDeviceGroupPreview();
+  });
   document.getElementById("btn-close-yaml").addEventListener("click", () => document.getElementById("yaml-dialog").close());
   document.getElementById("btn-close-alexa-details").addEventListener("click", () => document.getElementById("alexa-details-dialog").close());
   document.getElementById("btn-logout").addEventListener("click", () => logout().catch(error => message(error.message, "err")));
 
   document.getElementById("btn-enable-useful").addEventListener("click", async () => {
     const filter = filters();
-    for (const device of model.devices || []) for (const entity of device.entities || []) if (entityMatchesFilter(entity, device, filter) && isUseful(entity)) {
-      const settings = entityConfig(entity.entity_id); settings.enabled = true; settings.name ||= suggestedName(entity, device); settings.display_category ||= suggestedCategory(entity, device);
-    }
-    await saveConfig(); await load(false);
+    const deviceIds = (model.devices || []).filter(device =>
+      (device.entities || []).some(entity => entityMatchesFilter(entity, device, filter))
+    ).map(device => device.device_id);
+    await autoExportDevices(deviceIds, document.getElementById("btn-enable-useful"));
   });
   document.getElementById("btn-disable-visible").addEventListener("click", async () => {
     const filter = filters();

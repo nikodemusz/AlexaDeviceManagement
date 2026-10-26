@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.9.0
+
+- Der Standard fasst die unterstützten Funktionen eines Home-Assistant-Geräts automatisch zu einer Alexa-Gerätevorschau zusammen. Mehrere Relaisausgänge werden mit eigenen Funktionsnamen als getrennte Schalter im gemeinsamen Alexa-Gerät angelegt; die Gruppierungsansicht kann sie bei Bedarf auf einzelne Alexa-Geräte verteilen.
+- Beim ausdrücklich gestarteten Alexa-Abgleich werden bereits aktivierte, noch nicht gruppierte v6-Entities desselben HA-Geräts nach dem Standard zusammengeführt. Explizite Einzelgeräte-/Funktionsprofile bleiben erhalten; deaktivierte Entities werden nicht aktiviert. Temperatur- und klar benannte Sollwert-Helfer am selben aktiven Thermostat werden als bereits im Thermostat enthaltener Wert entfernt.
+- Geräteübersicht und Gruppierungsdialog zeigen vor dem Speichern Alexa-Gerätenamen, Anzahl und Funktionen. Vorschau, Eingaben und Aktionen sind auf schmalen Mobilbildschirmen lesbar.
+- Unveränderte Autosaves senden keinen Alexa-Report. Der Hintergrundlauf prüft regelmäßig nur den lokalen Änderungsstand und wiederholt Fehler; ein bereits akzeptierter, aber noch nicht im Alexa-Bestand sichtbarer Endpunkt wird nicht alle zehn Minuten erneut gesendet.
+
 ## 3.8.1
 
 - Die Gruppierungsansicht lädt gespeicherten Modus und Alexa-Gesamtnamen wieder korrekt. Für ein Thermostat mit zusätzlichen Temperatur-Sensor-Entities schlägt sie standardmäßig nur das `climate`-Entity mit Ist- und Sollwert vor; der separate Export bleibt wählbar.
