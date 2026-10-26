@@ -12,15 +12,26 @@ Each key in native `devices` is a stable logical endpoint, externally prefixed
 with `native:`. Multiple HA values, such as cistern liters and percentage,
 remain capabilities of one device with distinct controller instances. The
 device overview can explicitly group selected entities belonging to one HA
-device into a named Alexa endpoint, or expose them as separate Alexa endpoints.
-Combined endpoints store `group_mode: combined`, `ha_device_id`, and `members`.
-An explicit `group_mode: separate` plus `ha_device_id` preserves a user's
-choice to keep one endpoint per entity. Capability-level `enabled` flags
-control individual exported functions, and `capability_names` provides
-friendly names for controllers that need instances, such as each relay in a
-dual relay. Entities left unchecked in the grouping editor are removed from
-the native export; reconciliation then retires endpoints no longer selected.
-Endpoint IDs and unrelated capabilities are preserved.
+device into a named Alexa endpoint. The standard export action automatically
+groups supported functions from one HA device; the overview previews the Alexa
+name, endpoint count and functions. Multi-output relay modules can instead be
+configured as separate Alexa endpoints. Combined endpoints store
+`group_mode: combined`, `ha_device_id`, and `members`. An explicit
+`group_mode: separate` plus `ha_device_id` preserves a user's choice to keep
+one endpoint per entity. Capability-level `enabled` flags control individual
+exported functions, and `capability_names` provides friendly names for relay
+controls. Functions omitted from a saved group are removed from the native
+export; reconciliation then retires endpoints no longer selected. Unchanged
+native configuration does not produce another Alexa report; failed reports
+and explicit manual sync remain retryable. On explicit manual sync only,
+already-enabled v6 endpoints without a saved grouping/profile override are
+normalized to the standard for their Home Assistant device. This does not
+activate other entities or import archived v5 selections. A temperature
+helper is retired only when it is on the same registered HA device as an
+active climate entity, whose thermostat capability already reports current
+temperature and setpoint. Clearly named target-temperature helpers (`Sollwert`,
+`Wunschtemperatur`, or an English setpoint label) on that same device are
+retired for the same reason.
 
 The editor applies domain-based standard profiles by default. Dimmable lights
 use PowerController and BrightnessController, covers use the writable position

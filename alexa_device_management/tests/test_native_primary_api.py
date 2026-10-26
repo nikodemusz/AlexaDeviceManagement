@@ -186,6 +186,69 @@ class PrimaryAPITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 409)
         inventory.assert_not_awaited()
 
+    async def test_auto_group_api_exports_all_supported_outputs_as_one_relay_device(self):
+        inventory = {"devices": [{
+            "device_id": "relay-device", "name": "Doppelrelais", "entities": [
+                {"entity_id": "switch.relay_a", "domain": "switch", "name": "Relais A"},
+                {"entity_id": "switch.relay_b", "domain": "switch", "name": "Relais B"},
+                {"entity_id": "sensor.relay_energy", "domain": "sensor", "device_class": "energy", "name": "Energie"},
+            ],
+        }]}
+        with patch.object(ha_export, "_inventory", AsyncMock(return_value=inventory)):
+            body = (await (await self.client.get("/api/ha-export/config")).json())["configuration"]
+            trigger = Mock()
+            self.client.server.app["native_reconcile_trigger"] = trigger
+            response = await self.client.post("/api/native-export/auto-group", json={
+                "native_revision": body["native_revision"], "device_ids": ["relay-device"],
+            })
+            result = await response.json()
+
+        self.assertEqual(response.status, 200, result)
+        self.assertEqual(len(result["configured"]), 1)
+        self.assertEqual(result["configured"][0]["endpoint_count"], 1)
+        self.assertEqual(result["configured"][0]["entity_count"], 2)
+        group = next(device for device in self.store.load()["devices"].values()
+                     if device.get("group_mode") == "combined")
+        self.assertEqual(group["name"], "Doppelrelais")
+        self.assertEqual(group["members"], ["switch.relay_a", "switch.relay_b"])
+        self.assertEqual({cap["interface"] for cap in group["capabilities"]}, {"Alexa.ToggleController"})
+        trigger.assert_called_once_with(force=True)
+
+    async def test_explicit_alexa_sync_regroups_previously_enabled_standard_entities(self):
+        inventory = {"devices": [{
+            "device_id": "relay-device", "name": "Doppelrelais", "entities": [
+                {"entity_id": "switch.relay_a", "domain": "switch", "name": "Relais A"},
+                {"entity_id": "switch.relay_b", "domain": "switch", "name": "Relais B"},
+            ],
+        }]}
+        self.store.save({"schema_version": 6, "enabled": True, "locale": "de-DE", "devices": {
+            "ha:switch.relay_a": {"name": "Relais A", "capabilities": [
+                {"interface": "Alexa.PowerController", "entity_id": "switch.relay_a"}]},
+            "ha:switch.relay_b": {"name": "Relais B", "capabilities": [
+                {"interface": "Alexa.PowerController", "entity_id": "switch.relay_b"}]},
+        }})
+        ha_export._inventory.return_value = inventory
+
+        response = await self.client.post("/api/native-export/sync", json={})
+        result = await response.json()
+
+        self.assertEqual(response.status, 202, result)
+        self.assertEqual(len(result["normalized_groups"]), 1)
+        self.assertEqual(result["normalized_groups"][0]["endpoint_count"], 1)
+        self.assertEqual(set(self.store.load()["devices"]), {"ha:group:7e02b2c213f2674b"})
+
+    async def test_unchanged_autosave_does_not_force_an_alexa_report(self):
+        body = (await (await self.client.get("/api/ha-export/config")).json())["configuration"]
+        trigger = Mock()
+        self.client.server.app["native_reconcile_trigger"] = trigger
+
+        response = await self.client.post("/api/ha-export/autosave", json=body)
+        result = await response.json()
+
+        self.assertEqual(response.status, 200, result)
+        self.assertFalse(result["reconciliation_queued"])
+        trigger.assert_not_called()
+
     async def test_old_browser_cannot_enable_v5_and_migration_page_is_retired(self):
         response = await self.client.post("/api/ha-export/autosave", json={"entities": {"light.bad": {"enabled": True}}})
         self.assertEqual(response.status, 409)

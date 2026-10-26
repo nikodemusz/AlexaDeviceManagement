@@ -130,8 +130,9 @@ def validate_devices(devices: Any) -> dict[str, dict[str, Any]]:
                 if not isinstance(cap.get("unit"), str) or not cap["unit"].strip():
                     raise DeviceModelError(f"{endpoint_id}: RangeController requires unit")
                 if cap.get("read_only", True) is not True:
-                    if not entity_id.startswith("cover.") or instance != "cover.position":
-                        raise DeviceModelError(f"{endpoint_id}: writable ranges only supported for cover.position")
+                    if (not entity_id.startswith("cover.")
+                            or instance != "cover.position" and not str(instance).startswith("cover.position_")):
+                        raise DeviceModelError(f"{endpoint_id}: writable ranges only supported for cover positions")
             if interface == "Alexa.ContactSensor" and not entity_id.startswith("binary_sensor."):
                 raise DeviceModelError(f"{endpoint_id}: ContactSensor requires binary_sensor")
             if interface == "Alexa.MotionSensor" and not entity_id.startswith("binary_sensor."):

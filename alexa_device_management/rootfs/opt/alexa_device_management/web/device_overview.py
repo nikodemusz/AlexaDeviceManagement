@@ -519,14 +519,7 @@ def _device_status(statuses: Iterable[str]) -> str:
 
 
 def _grouping_suggestion(entities: list[dict[str, Any]], device_name: str) -> dict[str, Any]:
-    """Suggest one thermostat endpoint for a climate entity and its temp helpers.
-
-    The climate endpoint already carries targetSetpoint and
-    thermostatTemperatureAmbient. Exporting same-device temperature helpers
-    as independent endpoints creates duplicate-looking Alexa devices, so the
-    standard suggestion keeps the climate entity and leaves helpers available
-    as an explicit opt-in.
-    """
+    """Preview a logical HA device using its safe standard Alexa profile."""
     active = [entity for entity in entities if entity.get("export", {}).get("enabled")]
     active_ids = [entity["entity_id"] for entity in active]
     explicit_modes = {
@@ -538,29 +531,19 @@ def _grouping_suggestion(entities: list[dict[str, Any]], device_name: str) -> di
                        if entity.get("export", {}).get("logical_device_name")), None)
     if "combined" in explicit_modes:
         return {"mode": "combined", "entity_ids": active_ids,
-                "name": str(group_name or device_name), "reason": "configured"}
+                "name": str(group_name or device_name), "reason": "configured",
+                "endpoint_count": 1 if active_ids else 0}
     if "separate" in explicit_modes:
         return {"mode": "separate", "entity_ids": active_ids,
-                "name": str(device_name), "reason": "configured"}
+                "name": str(device_name), "reason": "configured",
+                "endpoint_count": len(active_ids)}
 
-    thermostats = [entity for entity in active if entity.get("domain") == "climate"]
-    has_temperature_helpers = any(
-        entity.get("domain") == "sensor" and entity.get("device_class") == "temperature"
-        for entity in entities
-    )
-    if len(thermostats) == 1 and has_temperature_helpers:
-        thermostat = thermostats[0]
-        return {
-            # One climate endpoint already contains every thermostat value.
-            # Keep its stable endpoint ID instead of wrapping it in a new
-            # one-member combined endpoint.
-            "mode": "separate",
-            "entity_ids": [thermostat["entity_id"]],
-            "name": str(thermostat.get("export", {}).get("name") or device_name),
-            "reason": "thermostat",
-        }
-    return {"mode": "separate", "entity_ids": active_ids,
-            "name": str(device_name), "reason": "standard"}
+    # With no saved group choice, show the same automatic grouping the
+    # standard-export action will apply. This also avoids advertising a
+    # temperature helper as a duplicate thermostat endpoint.
+    return native_export.standard_device_group({
+        "device_id": "preview", "name": device_name, "entities": entities,
+    })
 
 
 def build_overview(

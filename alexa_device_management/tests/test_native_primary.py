@@ -147,10 +147,11 @@ class NativePrimaryTests(unittest.TestCase):
 
         overview = build_overview(inventory, [], [], native_export.configuration(native, {}), native)
         suggestion = overview["devices"][0]["grouping_suggestion"]
-        self.assertEqual(suggestion, {
-            "mode": "separate", "entity_ids": ["climate.room"],
-            "name": "Thermostat Bad", "reason": "thermostat",
-        })
+        self.assertEqual(suggestion["mode"], "combined")
+        self.assertEqual(suggestion["entity_ids"], ["climate.room"])
+        self.assertEqual(suggestion["name"], "VTherm Bad OG")
+        self.assertEqual(suggestion["endpoint_count"], 1)
+        self.assertEqual(suggestion["functions"][0]["interfaces"], ["Alexa.ThermostatController"])
 
         grouped = native_export.apply_device_group(
             native, "thermostat-device", ["climate.room"], "combined",
@@ -291,7 +292,7 @@ class NativeLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(call.await_count, 2)
             self.assertNotIn("published_revision", native_lifecycle.read_status())
 
-    async def test_missing_native_ids_are_republished_even_after_previous_acceptance(self):
+    async def test_missing_native_ids_are_visible_without_republishing_unchanged_endpoints(self):
         server = Mock()
         server.is_configured.return_value = True
         server._DEVICES_CACHE = {"devices": [{"serial": "native:tank"}]}
@@ -302,7 +303,7 @@ class NativeLifecycleTests(unittest.IsolatedAsyncioTestCase):
              patch.object(native_lifecycle, "cleanup_legacy", AsyncMock()), \
              patch.object(native_lifecycle, "publish_native", AsyncMock()) as publish:
             await native_lifecycle.reconcile(server)
-            publish.assert_awaited_once_with(True)
+            publish.assert_awaited_once_with(False)
             self.assertEqual(native_lifecycle.read_status()["native_pending"], 1)
 
 

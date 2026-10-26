@@ -16,6 +16,7 @@ from aiohttp import web
 
 import alexa_event_support as support
 import ha_export
+import native_export
 from native_endpoints import endpoints
 from native_identity import embedded_native_endpoint_ids
 from native_skill_config import NativeSkillConfigStore
@@ -39,6 +40,19 @@ def write_status(**values):
     data = {**read_status(), **values, "updated_at": int(time.time())}
     support._atomic_write_bytes(STATUS_PATH, json.dumps(data, ensure_ascii=False).encode())
     return data
+
+
+def _publication_fingerprint(native, status):
+    current = endpoints(native)
+    active_ids = {item["endpointId"] for item in current}
+    known = {"native:" + key for key in native["devices"]}
+    known |= {value for value in status.get("published_ids", []) if value.startswith("native:")}
+    known |= {value for value in status.get("unselected_native_ids", []) if value.startswith("native:")}
+    deleted = known - active_ids
+    fingerprint = hashlib.sha256(json.dumps(
+        {"endpoints": current, "delete_ids": sorted(deleted)}, sort_keys=True
+    ).encode()).hexdigest()
+    return current, active_ids, deleted, fingerprint
 
 
 def _active_edit_pauses(state, *, now=None):
@@ -273,16 +287,10 @@ async def cleanup_legacy(server, native=None):
 async def publish_native(force=False):
     async with _REPORT_LOCK:
         native = selection_config()
-        current = endpoints(native)
         status = read_status()
-        active_ids = {item["endpointId"] for item in current}
         # Disabled endpoints may predate published_ids; their IDs still belong
         # to this configuration. Observed orphan IDs require provider evidence.
-        known = {"native:" + key for key in native["devices"]}
-        known |= {value for value in status.get("published_ids", []) if value.startswith("native:")}
-        known |= {value for value in status.get("unselected_native_ids", []) if value.startswith("native:")}
-        deleted = known - active_ids
-        fingerprint = hashlib.sha256(json.dumps({"endpoints": current, "delete_ids": sorted(deleted)}, sort_keys=True).encode()).hexdigest()
+        current, active_ids, deleted, fingerprint = _publication_fingerprint(native, status)
         if not force and status.get("published_revision") == fingerprint:
             return status
         settings = support._event_settings(ha_export.CONFIG_STORE.load())
@@ -321,15 +329,16 @@ async def reconcile(server, force=False):
         write_status(inventory_verified=False, selection_verified=False, legacy_verified=False,
                      legacy_error="Auswahl/Bereinigung nicht prüfbar; keine weitere Löschung, erneuter Versuch folgt.")
     try:
-        # HTTP 202 does not prove presence. Re-publish missing native IDs after
-        # a fresh complete inventory, even if the YAML revision is unchanged.
+        # HTTP 202 does not prove presence. Record missing IDs for the UI, but
+        # do not resend an unchanged discovery report on every timer tick.
+        # A changed config or an explicit manual sync publishes again; a failed
+        # report keeps its previous revision and is retried by this timer.
         status = read_status()
         if server.is_configured() and status.get("inventory_verified"):
             expected = {item["endpointId"] for item in endpoints(NativeSkillConfigStore().load())}
             observed = set().union(*(identifiers(item) for item in server._DEVICES_CACHE.get("devices", [])))
             missing = expected - observed
             write_status(native_observed=len(expected & observed), native_pending=len(missing))
-            force = force or bool(missing)
         await publish_native(force)
         if server.is_configured() and not read_status().get("publish_error"):
             fresh, warnings = await server._fetch_devices_from_alexa(server.session_data())
@@ -421,8 +430,18 @@ def install(app, server):
     # timer remains a fallback for retries and external Alexa changes.
     app["native_reconcile_trigger"] = start_job
     async def periodic():
+        await asyncio.sleep(1)
         while True:
-            start_job()
+            status = read_status()
+            try:
+                _native, _ids, _deleted, fingerprint = _publication_fingerprint(
+                    selection_config(), status
+                )
+            except Exception:
+                fingerprint = None
+            if (fingerprint != status.get("published_revision")
+                    or status.get("publish_error") or status.get("legacy_error")):
+                start_job()
             await asyncio.sleep(600)
     async def startup(app):
         app["native_reconcile_task"] = asyncio.create_task(periodic())
@@ -448,9 +467,28 @@ def install(app, server):
                                  "sync_paused": bool(_active_edit_pauses(state)),
                                  "background_error": "Alexa-Abgleich konnte nicht abgeschlossen werden." if failed else None})
     async def sync(request):
+        # Older v6 versions exported each enabled HA entity as its own Alexa
+        # endpoint. On an explicit sync, apply today's standard grouping to
+        # those default mappings before publishing. Disabled entities stay
+        # disabled, while a saved combined/separate/custom choice is preserved.
+        try:
+            inventory = await ha_export._inventory()
+            current = native_export.STORE.load()
+            proposed, normalized_groups = native_export.normalize_active_device_groups(
+                current, inventory
+            )
+            if native_export.revision(proposed) != native_export.revision(current):
+                native_export.STORE.save(proposed)
+        except Exception:
+            return web.json_response({
+                "error": "Home-Assistant-Geräte konnten nicht sicher gelesen werden. Der Alexa-Abgleich wurde nicht gestartet."
+            }, status=502)
         start_job(force=True)
         return web.json_response({"ok": True, "queued": True,
-                                 "message": "Ausgewählte v6-Geräte werden veröffentlicht; alte v5-Kopien und abgewählte v6-Geräte werden bereinigt."}, status=202)
+                                 "normalized_groups": normalized_groups,
+                                 "message": (f"{len(normalized_groups)} Standardgruppen aktualisiert; "
+                                             "ausgewählte v6-Geräte werden veröffentlicht, "
+                                             "alte v5-Kopien und abgewählte v6-Geräte bereinigt.")}, status=202)
     app.on_startup.append(startup)
     app.on_cleanup.append(shutdown)
     app.router.add_get("/api/native-export/lifecycle", status)

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Alexa-Geräteverwaltung</title>
-  <link rel="stylesheet" href="{{INGRESS_PATH}}/static/device_overview.css?v=3.8.1">
+  <link rel="stylesheet" href="{{INGRESS_PATH}}/static/device_overview.css?v=3.9.0">
 </head>
 <body>
   <header class="topbar">
@@ -51,14 +51,14 @@
     </section>
 
     <section class="bulk-actions">
-      <button id="btn-enable-useful" class="button secondary">Sinnvolle sichtbare aktivieren</button>
+      <button id="btn-enable-useful" class="button secondary">Sichtbare Geräte automatisch exportieren</button>
       <button id="btn-disable-visible" class="button secondary">Sichtbare deaktivieren</button>
       <button id="btn-hide-technical" class="button secondary">Technische sichtbare ausblenden</button>
       <button id="btn-unhide-visible" class="button secondary hidden">Gefilterte wieder einblenden</button>
     </section>
 
     <section id="summary" class="summary"></section>
-    <p class="muted">Die Exportfelder bearbeiten v6. Die Zähler vergleichen eindeutige v6-Endpunkt-IDs mit dem Alexa-Bestand. Eine Zuordnung bestätigt keine erfolgreiche Steuerung. Erkannte alte HA-v5-Geräte werden automatisch bereinigt.</p>
+    <p class="muted">Standard: Ein Home-Assistant-Gerät wird als ein Alexa-Gerät mit allen unterstützten Funktionen exportiert. Mehrfachausgänge lassen sich bei Bedarf auf einzelne Alexa-Geräte aufteilen. Die Vorschau zeigt Name, Gerätezahl und Funktionen vor dem Speichern.</p>
     <div id="message" class="message hidden"></div>
     <section id="content" class="content"><div class="loading">Geräte werden geladen…</div></section>
   </main>
@@ -146,7 +146,7 @@
         <button id="btn-close-device-group" class="button secondary">Schließen</button>
       </header>
       <div class="dialog-content">
-        <p class="muted">Wähle die Home-Assistant-Entitäten aus, die Alexa erhalten soll. Abgewählte Entitäten werden aus dem Alexa-Export entfernt. Sie können danach wieder einzeln aktiviert werden.</p>
+        <p class="muted">Standardmäßig werden alle unterstützten Funktionen dieses Home-Assistant-Geräts zusammengefasst. Die einzelnen Entitäten musst du normalerweise nicht auswählen. Bei Mehrfachausgängen kannst du sie hier auf mehrere Alexa-Geräte aufteilen.</p>
         <p class="muted">Standardprofile: Dimmer erhalten Ein/Aus und Helligkeits-Slider, Rollläden nur den Positions-Slider, Thermostate Modus, Sollwert und Ist-Temperatur. Wenn ein Thermostat diese Werte bereits bereitstellt, werden Temperatur-Sensoren standardmäßig nicht als eigene Alexa-Geräte vorgeschlagen. Unter „Eigene Funktionen“ oder „einzelne Geräte“ kannst du davon abweichen.</p>
         <fieldset>
           <legend>Exportform</legend>
@@ -154,6 +154,10 @@
           <label class="check"><input type="radio" name="device-group-mode" value="separate"> Für jede ausgewählte Entität ein eigenes Alexa-Gerät</label>
           <label id="device-group-name-field">Name des Alexa-Gesamtgeräts<input id="device-group-name" maxlength="128" autocomplete="off"></label>
         </fieldset>
+        <section class="group-preview" aria-live="polite">
+          <strong>So erscheint es in Alexa</strong>
+          <div id="device-group-preview" class="muted">Vorschau wird erstellt…</div>
+        </section>
         <h3>Entitäten und Alexa-Funktionsnamen</h3>
         <div id="device-group-entities" class="device-group-entities"></div>
       </div>
@@ -164,7 +168,7 @@
   </dialog>
 
   <script>document.documentElement.dataset.ingressPath="{{INGRESS_PATH}}";</script>
-  <script src="{{INGRESS_PATH}}/static/device_overview.js?v=3.8.1"></script>
+  <script src="{{INGRESS_PATH}}/static/device_overview.js?v=3.9.0"></script>
   <script src="{{INGRESS_PATH}}/static/device_export_guard.js?v=3.5.0"></script>
 </body>
 </html>
