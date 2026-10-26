@@ -53,6 +53,10 @@
         "display_category": {
           "type": "string"
         },
+        "display_category_mode": {
+          "enum": ["standard", "custom"],
+          "description": "Standard is inferred from the Home Assistant entity unless explicitly customized."
+        },
         "aliases": {
           "type": "array",
           "items": {
@@ -143,6 +147,10 @@
         "enabled": {
           "type": "boolean",
           "default": true
+        },
+        "capability_mode": {
+          "enum": ["custom"],
+          "description": "Present only when the owner overrides the domain-based standard profile."
         },
         "interface": {
           "enum": [

@@ -25,6 +25,12 @@ def candidate(entity_id, settings):
     # HA-v5 endpoint IDs are domain#object_id, independent of the friendly name.
     legacy_endpoint_id = entity_id.replace(".", "#", 1)
     category = str(settings.get("display_category") or "").upper()
+    if domain in ("switch", "fan") and category in ("", "OTHER"):
+        text = f"{entity_id} {settings.get('name') or ''}".casefold()
+        if any(word in text for word in ("steckdose", "stecker", "smart plug", "socket", "outlet", "plug")):
+            category = "SMARTPLUG"
+        elif any(word in text for word in ("lampe", "licht", "light", "beleuchtung", "bulb")):
+            category = "LIGHT"
     if domain == "binary_sensor" and category not in ("CONTACT_SENSOR", "MOTION_SENSOR"):
         return None
     if domain == "sensor" and category != "TEMPERATURE_SENSOR":
@@ -35,8 +41,6 @@ def candidate(entity_id, settings):
              "entity_id": entity_id, "unit": "Alexa.Unit.Percent",
              "minimum": 0, "maximum": 100, "precision": 1,
              "read_only": False, "capability_names": ["Position"]},
-            {"interface": "Alexa.PlaybackController", "entity_id": entity_id,
-             "supported_operations": ["Stop"]},
         ]
     elif domain == "climate":
         bindings = [{"interface": "Alexa.ThermostatController", "entity_id": entity_id}]
@@ -52,7 +56,8 @@ def candidate(entity_id, settings):
         "description": str(settings.get("description") or ""),
         "display_category": ("INTERIOR_BLIND" if domain == "cover" else
                              "THERMOSTAT" if domain == "climate" else
-                             category if domain in ("sensor", "binary_sensor") else
+                             category if domain in ("sensor", "binary_sensor", "switch", "fan")
+                             and category not in ("", "OTHER") else
                              "LIGHT" if domain == "light" else "SWITCH"),
         "enabled": False,
         "replaces_legacy_endpoint": legacy_endpoint_id,

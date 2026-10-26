@@ -160,6 +160,10 @@ class PrimaryAPITests(unittest.IsolatedAsyncioTestCase):
                 "mode": "combined",
                 "name": "Heizrelais",
                 "names": {"switch.relay_a": "Büro", "switch.relay_b": "Keller"},
+                "profiles": {
+                    "switch.relay_a": {"mode": "custom", "capabilities": ["Alexa.PowerController"]},
+                    "switch.relay_b": {"mode": "custom", "capabilities": ["Alexa.PowerController"]},
+                },
             })
             result = await response.json()
 
@@ -169,6 +173,7 @@ class PrimaryAPITests(unittest.IsolatedAsyncioTestCase):
                      if device.get("group_mode") == "combined")
         self.assertEqual(group["name"], "Heizrelais")
         self.assertEqual({cap["interface"] for cap in group["capabilities"]}, {"Alexa.ToggleController"})
+        self.assertEqual({cap["capability_mode"] for cap in group["capabilities"]}, {"custom"})
         self.assertEqual(result["configuration"]["entities"]["switch.relay_a"]["logical_device_name"], "Heizrelais")
         trigger.assert_called_once_with(force=True)
 

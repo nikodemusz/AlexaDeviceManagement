@@ -79,12 +79,35 @@ class NativeDeviceGroupingTests(unittest.TestCase):
         self.assertEqual(set(separate["devices"]), {"ha:switch.relay_a", "ha:switch.relay_b"})
         self.assertEqual({device["capabilities"][0]["interface"]
                           for device in separate["devices"].values()}, {"Alexa.PowerController"})
-        self.assertNotIn("group_mode", separate["devices"]["ha:switch.relay_a"])
+        self.assertEqual({device["group_mode"] for device in separate["devices"].values()}, {"separate"})
+        self.assertEqual({device["ha_device_id"] for device in separate["devices"].values()}, {"relay-device"})
+        self.assertEqual(entity_settings(separate)["switch.relay_a"]["group_mode"], "separate")
 
     def test_entities_from_another_ha_device_cannot_be_mixed(self):
         with self.assertRaisesRegex(ValueError, "selben Home-Assistant-Gerät"):
             apply_device_group(self.native, "relay-device", ["switch.relay_a", "switch.other"],
                                "combined", "Falsche Gruppe", self.inventory)
+
+    def test_custom_profile_is_saved_and_standard_profile_can_be_selected_explicitly(self):
+        custom = apply_device_group(
+            self.native, "relay-device", ["switch.relay_a"], "separate", "", self.inventory,
+            profiles={"switch.relay_a": {"mode": "custom", "capabilities": ["Alexa.PowerController"],
+                                           "display_category": "SMARTPLUG",
+                                           "display_category_mode": "custom"}},
+        )
+        capability = custom["devices"]["ha:switch.relay_a"]["capabilities"][0]
+        self.assertEqual(capability["capability_mode"], "custom")
+        self.assertEqual(custom["devices"]["ha:switch.relay_a"]["display_category"], "SMARTPLUG")
+        settings = entity_settings(custom)["switch.relay_a"]
+        self.assertEqual(settings["capability_mode"], "custom")
+
+        standard = apply_device_group(
+            custom, "relay-device", ["switch.relay_a"], "separate", "", self.inventory,
+            profiles={"switch.relay_a": {"mode": "standard", "capabilities": ["Alexa.PowerController"]}},
+        )
+        capability = standard["devices"]["ha:switch.relay_a"]["capabilities"][0]
+        self.assertNotIn("capability_mode", capability)
+        self.assertEqual(entity_settings(standard)["switch.relay_a"]["capability_mode"], "standard")
 
     def test_stale_group_members_missing_from_ha_inventory_are_retired(self):
         combined = apply_device_group(

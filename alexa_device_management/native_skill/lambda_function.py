@@ -106,7 +106,9 @@ def capability_config(binding):
                 "supportedOperations": binding.get("supported_operations", ["Stop"])}
     if name == "Alexa.ThermostatController":
         return {"type": "AlexaInterface", "interface": name, "version": "3",
-                "properties": {"supported": [{"name": "targetSetpoint"}, {"name": "thermostatMode"}],
+                "properties": {"supported": [{"name": "targetSetpoint"},
+                                               {"name": "thermostatMode"},
+                                               {"name": "thermostatTemperatureAmbient"}],
                                "proactivelyReported": False, "retrievable": True},
                 "configuration": {"supportsScheduling": False,
                                   "supportedModes": binding.get("supported_modes", ["HEAT"])}}
@@ -242,13 +244,20 @@ def thermostat_properties(binding, states):
     if mode not in modes:
         raise EndpointUnavailable("Thermostat mode unavailable")
     stamp = sample_time(state)
-    return [
+    properties = [
         {"namespace": "Alexa.ThermostatController", "name": "targetSetpoint",
          "value": {"value": target, "scale": "CELSIUS"},
          "timeOfSample": stamp, "uncertaintyInMilliseconds": 1000},
         {"namespace": "Alexa.ThermostatController", "name": "thermostatMode",
          "value": modes[mode], "timeOfSample": stamp, "uncertaintyInMilliseconds": 1000},
     ]
+    current = attributes.get("current_temperature")
+    if current is not None:
+        properties.append({"namespace": "Alexa.ThermostatController",
+                           "name": "thermostatTemperatureAmbient",
+                           "value": {"value": numeric_state(current), "scale": "CELSIUS"},
+                           "timeOfSample": stamp, "uncertaintyInMilliseconds": 1000})
+    return properties
 
 
 def state_properties(bindings, states):

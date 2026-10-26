@@ -80,6 +80,38 @@ class NativePrimaryTests(unittest.TestCase):
         self.assertEqual([c["interface"] for c in updated["devices"]["desk"]["capabilities"]],
                          ["Alexa.PowerController"])
 
+    def test_standard_cover_profile_is_position_slider_without_a_switch_or_stop_button(self):
+        inventory = {"devices": [{"entities": [{"entity_id": "cover.blind", "supported_features": 4}]}]}
+        updated = native_export.apply_entities(config(), {"cover.blind": {"enabled": True}}, inventory)
+        capabilities = updated["devices"]["ha:cover.blind"]["capabilities"]
+        self.assertEqual([cap["interface"] for cap in capabilities], ["Alexa.RangeController"])
+        self.assertEqual(capabilities[0]["instance"], "cover.position")
+
+    def test_custom_cover_can_export_only_stop_without_position_support(self):
+        inventory = {"devices": [{"entities": [{"entity_id": "cover.blind", "supported_features": 0}]}]}
+        updated = native_export.apply_entities(config(), {"cover.blind": {
+            "enabled": True, "capability_mode": "custom", "capabilities": ["Alexa.PlaybackController"]
+        }}, inventory)
+        active = [cap for cap in updated["devices"]["ha:cover.blind"]["capabilities"]
+                  if cap.get("enabled", True)]
+        self.assertEqual([cap["interface"] for cap in active], ["Alexa.PlaybackController"])
+
+    def test_standard_relay_category_uses_device_names_without_changing_on_off_semantics(self):
+        for entity_id, name, category in (
+            ("switch.badlicht", "Badlicht", "LIGHT"),
+            ("switch.keller_steckdose", "Keller Steckdose", "SMARTPLUG"),
+            ("switch.heizventil", "Heizventil", "SWITCH"),
+        ):
+            with self.subTest(entity_id=entity_id):
+                inventory = {"devices": [{"name": name, "entities": [
+                    {"entity_id": entity_id, "domain": "switch", "name": name}
+                ]}]}
+                updated = native_export.apply_entities(config(), {entity_id: {"enabled": True}}, inventory)
+                device = updated["devices"]["ha:" + entity_id]
+                self.assertEqual(device["display_category"], category)
+                self.assertEqual([cap["interface"] for cap in device["capabilities"]],
+                                 ["Alexa.PowerController"])
+
     def test_unsupported_new_devices_do_not_partially_change_configuration(self):
         original = config()
         with self.assertRaises(ValueError):
@@ -92,6 +124,48 @@ class NativePrimaryTests(unittest.TestCase):
         thermostat = next(item for item in endpoints(updated) if item["endpointId"] == "native:ha:climate.room")
         capability = next(item for item in thermostat["capabilities"] if item["interface"] == "Alexa.ThermostatController")
         self.assertEqual(capability["configuration"]["supportedModes"], ["HEAT", "OFF"])
+
+    def test_thermostat_group_suggestion_uses_climate_and_retains_saved_mode(self):
+        inventory = {"devices": [{
+            "device_id": "thermostat-device", "name": "VTherm Bad OG", "entities": [
+                {"entity_id": "climate.room", "domain": "climate", "name": "Thermostat Bad",
+                 "hvac_modes": ["off", "heat"]},
+                {"entity_id": "sensor.room_temperature", "domain": "sensor",
+                 "device_class": "temperature", "name": "Temperatur Bad"},
+                {"entity_id": "sensor.room_target", "domain": "sensor",
+                 "device_class": "temperature", "name": "Wunschtemperatur Bad"},
+            ],
+        }]}
+        native = {"schema_version": 6, "enabled": True, "locale": "de-DE", "devices": {
+            "ha:climate.room": {"name": "Thermostat Bad", "enabled": True, "capabilities": [
+                {"interface": "Alexa.ThermostatController", "entity_id": "climate.room"}]},
+            "ha:sensor.room_temperature": {"name": "Temperatur Bad", "enabled": True, "capabilities": [
+                {"interface": "Alexa.TemperatureSensor", "entity_id": "sensor.room_temperature"}]},
+            "ha:sensor.room_target": {"name": "Wunschtemperatur Bad", "enabled": True, "capabilities": [
+                {"interface": "Alexa.TemperatureSensor", "entity_id": "sensor.room_target"}]},
+        }}
+
+        overview = build_overview(inventory, [], [], native_export.configuration(native, {}), native)
+        suggestion = overview["devices"][0]["grouping_suggestion"]
+        self.assertEqual(suggestion, {
+            "mode": "separate", "entity_ids": ["climate.room"],
+            "name": "Thermostat Bad", "reason": "thermostat",
+        })
+
+        grouped = native_export.apply_device_group(
+            native, "thermostat-device", ["climate.room"], "combined",
+            "Thermostat Bad", inventory,
+        )
+        grouped_overview = build_overview(
+            inventory, [], [], native_export.configuration(grouped, {}), grouped,
+        )
+        climate_export = next(entity["export"] for entity in grouped_overview["devices"][0]["entities"]
+                              if entity["entity_id"] == "climate.room")
+        self.assertEqual(climate_export["group_mode"], "combined")
+        self.assertEqual(climate_export["logical_device_name"], "Thermostat Bad")
+        self.assertEqual(len(climate_export["native_endpoint_ids"]), 1)
+        self.assertNotIn("sensor.room_temperature", native_export.entity_settings(grouped))
+        self.assertNotIn("sensor.room_target", native_export.entity_settings(grouped))
 
     def test_endpoint_summary_counts_tank_once_and_does_not_match_old_copy(self):
         native = config()

@@ -518,6 +518,51 @@ def _device_status(statuses: Iterable[str]) -> str:
     return "not_exposed"
 
 
+def _grouping_suggestion(entities: list[dict[str, Any]], device_name: str) -> dict[str, Any]:
+    """Suggest one thermostat endpoint for a climate entity and its temp helpers.
+
+    The climate endpoint already carries targetSetpoint and
+    thermostatTemperatureAmbient. Exporting same-device temperature helpers
+    as independent endpoints creates duplicate-looking Alexa devices, so the
+    standard suggestion keeps the climate entity and leaves helpers available
+    as an explicit opt-in.
+    """
+    active = [entity for entity in entities if entity.get("export", {}).get("enabled")]
+    active_ids = [entity["entity_id"] for entity in active]
+    explicit_modes = {
+        str(entity.get("export", {}).get("group_mode") or "")
+        for entity in entities
+    }
+    group_name = next((entity.get("export", {}).get("logical_device_name")
+                       for entity in entities
+                       if entity.get("export", {}).get("logical_device_name")), None)
+    if "combined" in explicit_modes:
+        return {"mode": "combined", "entity_ids": active_ids,
+                "name": str(group_name or device_name), "reason": "configured"}
+    if "separate" in explicit_modes:
+        return {"mode": "separate", "entity_ids": active_ids,
+                "name": str(device_name), "reason": "configured"}
+
+    thermostats = [entity for entity in active if entity.get("domain") == "climate"]
+    has_temperature_helpers = any(
+        entity.get("domain") == "sensor" and entity.get("device_class") == "temperature"
+        for entity in entities
+    )
+    if len(thermostats) == 1 and has_temperature_helpers:
+        thermostat = thermostats[0]
+        return {
+            # One climate endpoint already contains every thermostat value.
+            # Keep its stable endpoint ID instead of wrapping it in a new
+            # one-member combined endpoint.
+            "mode": "separate",
+            "entity_ids": [thermostat["entity_id"]],
+            "name": str(thermostat.get("export", {}).get("name") or device_name),
+            "reason": "thermostat",
+        }
+    return {"mode": "separate", "entity_ids": active_ids,
+            "name": str(device_name), "reason": "standard"}
+
+
 def build_overview(
     ha_inventory: dict[str, Any],
     alexa_devices: list[dict[str, Any]],
@@ -602,7 +647,13 @@ def build_overview(
                     "name": str(settings.get("name") or ""),
                     "description": str(settings.get("description") or ""),
                     "display_category": str(settings.get("display_category") or ""),
+                    "display_category_mode": str(settings.get("display_category_mode") or "standard"),
                     "alexa_group": str(settings.get("alexa_group") or ""),
+                    "capability_mode": str(settings.get("capability_mode") or "standard"),
+                    "capabilities": list(settings.get("capabilities") or []),
+                    "group_mode": str(settings.get("group_mode") or ""),
+                    "logical_device_name": str(settings.get("logical_device_name") or ""),
+                    "native_endpoint_ids": list(settings.get("native_endpoint_ids") or []),
                 },
                 "alexa": {
                     "present": bool(matches),
@@ -621,6 +672,9 @@ def build_overview(
         devices.append({
             **{key: value for key, value in ha_device.items() if key != "entities"},
             "entities": public_entities,
+            "grouping_suggestion": _grouping_suggestion(
+                public_entities, str(ha_device.get("name") or device_id)
+            ),
             "status": _device_status(statuses),
             "hidden": hidden,
         })

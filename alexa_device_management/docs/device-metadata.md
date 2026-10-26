@@ -13,13 +13,29 @@ with `native:`. Multiple HA values, such as cistern liters and percentage,
 remain capabilities of one device with distinct controller instances. The
 device overview can explicitly group selected entities belonging to one HA
 device into a named Alexa endpoint, or expose them as separate Alexa endpoints.
-The `group_mode`, `ha_device_id`, and `members` fields record combined-group
-membership. Capability-level `enabled` flags control individual exported
-functions, and `capability_names` provides friendly names for controllers that
-need instances, such as each relay in a dual relay. Entities left unchecked in
-the grouping editor are removed from the native export; reconciliation then
-retires endpoints no longer selected. Endpoint IDs and unrelated capabilities
-are preserved.
+Combined endpoints store `group_mode: combined`, `ha_device_id`, and `members`.
+An explicit `group_mode: separate` plus `ha_device_id` preserves a user's
+choice to keep one endpoint per entity. Capability-level `enabled` flags
+control individual exported functions, and `capability_names` provides
+friendly names for controllers that need instances, such as each relay in a
+dual relay. Entities left unchecked in the grouping editor are removed from
+the native export; reconciliation then retires endpoints no longer selected.
+Endpoint IDs and unrelated capabilities are preserved.
+
+The editor applies domain-based standard profiles by default. Dimmable lights
+use PowerController and BrightnessController, covers use the writable position
+RangeController, and climate entities use ThermostatController for mode, target
+setpoint and current ambient temperature. When the same HA device has a climate
+entity and temperature sensor helpers, the standard grouping suggestion uses
+the climate entity alone because its thermostat controller already exposes the
+target and current temperature; users can opt into separate helper endpoints.
+Switches use PowerController; their
+Alexa display category is suggested as LIGHT, SMARTPLUG or SWITCH from the
+entity/device names and class. A simple relay named as a heating valve remains
+an on/off switch; a real thermostat requires a climate entity. In the group
+editor, explicitly choosing “Eigene Funktionen” stores the selected controller
+interfaces and marks them with `capability_mode: custom`. Returning to the
+standard profile regenerates its domain defaults.
 
 The native file remains disabled by default on new installations. Existing
 native files retain their global and individual activation settings. Selection

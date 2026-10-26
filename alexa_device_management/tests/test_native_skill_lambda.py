@@ -29,6 +29,20 @@ def legacy_discovery():
 
 
 class CombinedSkillTests(unittest.TestCase):
+    def test_thermostat_standard_reports_mode_target_and_current_ambient_temperature(self):
+        binding = {"interface": "Alexa.ThermostatController", "entity_id": "climate.office",
+                   "supported_modes": ["HEAT", "OFF"]}
+        discovered = mod.capability_config(binding)
+        supported = [item["name"] for item in discovered["properties"]["supported"]]
+        self.assertEqual(supported, ["targetSetpoint", "thermostatMode", "thermostatTemperatureAmbient"])
+        reported = mod.thermostat_properties(binding, {"climate.office": {
+            "state": "heat", "last_updated": "2026-10-10T08:00:00Z",
+            "attributes": {"temperature": 20.5, "current_temperature": 20.2},
+        }})
+        self.assertEqual([item["name"] for item in reported],
+                         ["targetSetpoint", "thermostatMode", "thermostatTemperatureAmbient"])
+        self.assertEqual(reported[2]["value"], {"value": 20.2, "scale": "CELSIUS"})
+
     def test_accept_grant_authenticates_grantee_token_and_forwards_original_directive(self):
         request = event("Alexa.Authorization", "AcceptGrant")
         request["directive"]["payload"] = {
