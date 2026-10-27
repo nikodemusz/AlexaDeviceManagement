@@ -43,6 +43,14 @@ class CombinedSkillTests(unittest.TestCase):
                          ["targetSetpoint", "thermostatMode", "thermostatTemperatureAmbient"])
         self.assertEqual(reported[2]["value"], {"value": 20.2, "scale": "CELSIUS"})
 
+    def test_thermostat_reports_target_and_mode_when_ambient_temperature_is_unavailable(self):
+        binding = {"interface": "Alexa.ThermostatController", "entity_id": "climate.office",
+                   "supported_modes": ["HEAT", "OFF"]}
+        reported = mod.thermostat_properties(binding, {"climate.office": {
+            "state": "heat", "attributes": {"temperature": 20.5, "current_temperature": "unknown"},
+        }})
+        self.assertEqual([item["name"] for item in reported], ["targetSetpoint", "thermostatMode"])
+
     def test_accept_grant_authenticates_grantee_token_and_forwards_original_directive(self):
         request = event("Alexa.Authorization", "AcceptGrant")
         request["directive"]["payload"] = {
@@ -114,6 +122,36 @@ class CombinedSkillTests(unittest.TestCase):
                 result = mod.lambda_handler(event("Alexa", "ReportState", "native:desk"), None)
             self.assertEqual(result["event"]["payload"]["type"], "ENDPOINT_UNREACHABLE")
             self.assertNotIn("context", result)
+
+    def test_unavailable_member_does_not_hide_other_states_in_combined_endpoint(self):
+        bindings = [
+            {"interface": "Alexa.PowerController", "entity_id": "switch.pump"},
+            {"interface": "Alexa.RangeController", "instance": "liters",
+             "entity_id": "sensor.tank_liters"},
+        ]
+        config = {"devices": {"tank": {"name": "Zisterne", "capabilities": bindings}}}
+        states = {
+            "switch.pump": {"state": "on", "last_updated": "2026-10-10T08:00:00Z"},
+            "sensor.tank_liters": {"state": "unavailable"},
+        }
+
+        def gw(path, method="GET", payload=None):
+            if path == "/v1/config":
+                return config
+            if path == "/v1/state":
+                return {"states": states}
+            raise AssertionError(path)
+
+        with patch.object(mod, "verify_account", return_value="dummy-ha-user"), \
+                patch.object(mod, "gateway", side_effect=gw):
+            result = mod.lambda_handler(event("Alexa", "ReportState", "native:tank"), None)
+
+        self.assertEqual(result["event"]["header"]["name"], "StateReport")
+        reported = {(item["namespace"], item["name"]): item["value"]
+                    for item in result["context"]["properties"]}
+        self.assertEqual(reported[("Alexa.PowerController", "powerState")], "ON")
+        self.assertNotIn(("Alexa.RangeController", "rangeValue"), reported)
+        self.assertEqual(reported[("Alexa.EndpointHealth", "connectivity")], {"value": "OK"})
 
     def test_off_light_without_brightness_attribute_reports_zero(self):
         prop = mod.state_for({"interface": "Alexa.BrightnessController", "entity_id": "light.desk"},

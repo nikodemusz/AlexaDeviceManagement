@@ -358,6 +358,16 @@ class NativeDeviceContractTests(unittest.TestCase):
         self.assertEqual(self.properties(result)[("Alexa.PowerController", "powerState", None)], "OFF")
         self.assertEqual(self.properties(result), self.properties(self.invoke(directive("Alexa", "ReportState", "native:desk"))))
 
+    def test_report_state_keeps_available_members_when_another_group_member_is_unavailable(self):
+        self.states["sensor.test_litres"]["state"] = "unavailable"
+
+        result = self.invoke(directive("Alexa", "ReportState", "native:cistern"))
+
+        reported = self.properties(result)
+        self.assertEqual(reported[("Alexa.RangeController", "rangeValue", "percent")], 50.0)
+        self.assertNotIn(("Alexa.RangeController", "rangeValue", "litres"), reported)
+        self.assertEqual(reported[("Alexa.EndpointHealth", "connectivity", None)], {"value": "OK"})
+
     def test_v5_unknown_and_disabled_endpoints_never_control_ha(self):
         for endpoint in ("light#test_desk", "native:missing", "native:disabled"):
             for namespace, action in (("Alexa", "ReportState"), ("Alexa.PowerController", "TurnOn")):
@@ -372,10 +382,12 @@ class NativeDeviceContractTests(unittest.TestCase):
     def test_unavailable_missing_and_invalid_sensor_states_are_unreachable(self):
         for state in ("unknown", "unavailable", "nan", "inf", None):
             with self.subTest(state=state):
-                if state is None:
-                    self.states.pop("sensor.test_litres")
-                else:
-                    self.states["sensor.test_litres"]["state"] = state
+                self.states = fixture_states()
+                for entity_id in ("sensor.test_litres", "sensor.test_percent"):
+                    if state is None:
+                        self.states.pop(entity_id)
+                    else:
+                        self.states[entity_id]["state"] = state
                 result = self.invoke(directive("Alexa", "ReportState", "native:cistern"))
                 self.assertEqual(result["event"]["payload"]["type"], "ENDPOINT_UNREACHABLE")
                 self.assertNotIn("context", result)

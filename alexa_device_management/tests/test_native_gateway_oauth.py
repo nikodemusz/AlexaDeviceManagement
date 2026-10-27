@@ -6,6 +6,8 @@ import importlib
 import pathlib
 import sys
 import unittest
+import json
+from types import SimpleNamespace
 from unittest.mock import patch
 from aiohttp import web
 
@@ -44,6 +46,38 @@ class FakeSession:
 
 
 class GatewayOAuthTests(unittest.TestCase):
+    def test_state_route_fetches_group_members_concurrently_and_keeps_live_states(self):
+        config = {"enabled": True, "devices": {"combined": {"enabled": True, "capabilities": [
+            {"enabled": True, "entity_id": f"switch.relay_{index}"} for index in range(20)
+        ]}}}
+        active = 0
+        maximum_active = 0
+
+        async def fetch(method, path, token=None):
+            nonlocal active, maximum_active
+            active += 1
+            maximum_active = max(maximum_active, active)
+            try:
+                await asyncio.sleep(0.005)
+                if path.endswith("switch.relay_7"):
+                    raise web.HTTPNotFound()
+                return {"entity_id": path.rsplit("/", 1)[-1], "state": "on"}
+            finally:
+                active -= 1
+
+        request = SimpleNamespace(json=lambda: asyncio.sleep(0, result={
+            "endpoint_id": "combined", "token": "test-oauth"}))
+        with patch.object(gateway, "active_config", return_value=config), \
+                patch.object(gateway, "ha_request", side_effect=fetch):
+            response = asyncio.run(gateway.state_route(request))
+
+        result = json.loads(response.text)
+        self.assertGreater(maximum_active, 1)
+        self.assertLessEqual(maximum_active, 16)
+        self.assertEqual(len(result["states"]), 19)
+        self.assertNotIn("switch.relay_7", result["states"])
+        self.assertEqual(result["states"]["switch.relay_8"]["state"], "on")
+
     def test_disabled_group_capability_cannot_be_controlled(self):
         config = {"devices": {"relay": {"name": "Doppelrelais", "capabilities": [
             {"interface": "Alexa.ToggleController", "instance": "left", "entity_id": "switch.left"},

@@ -253,25 +253,38 @@ def thermostat_properties(binding, states):
     ]
     current = attributes.get("current_temperature")
     if current is not None:
-        properties.append({"namespace": "Alexa.ThermostatController",
-                           "name": "thermostatTemperatureAmbient",
-                           "value": {"value": numeric_state(current), "scale": "CELSIUS"},
-                           "timeOfSample": stamp, "uncertaintyInMilliseconds": 1000})
+        try:
+            ambient = numeric_state(current)
+        except EndpointUnavailable:
+            ambient = None
+        if ambient is not None:
+            properties.append({"namespace": "Alexa.ThermostatController",
+                               "name": "thermostatTemperatureAmbient",
+                               "value": {"value": ambient, "scale": "CELSIUS"},
+                               "timeOfSample": stamp, "uncertaintyInMilliseconds": 1000})
     return properties
 
 
 def state_properties(bindings, states):
-    """Return every retrievable property plus the discovered endpoint health."""
-    for binding in bindings:
-        available_state(binding, states)
+    """Return available properties without hiding healthy members of a group."""
     properties = []
+    stateful_bindings = sum(1 for binding in bindings
+                            if binding["interface"] != "Alexa.PlaybackController")
     for binding in bindings:
-        if binding["interface"] == "Alexa.PlaybackController":
+        try:
+            available_state(binding, states)
+            if binding["interface"] == "Alexa.PlaybackController":
+                continue
+            if binding["interface"] == "Alexa.ThermostatController":
+                properties.extend(thermostat_properties(binding, states))
+            else:
+                properties.append(state_for(binding, states))
+        except EndpointUnavailable:
+            # One stale or temporarily unavailable member must not make all
+            # other entities in a combined Alexa endpoint appear unknown.
             continue
-        if binding["interface"] == "Alexa.ThermostatController":
-            properties.extend(thermostat_properties(binding, states))
-        else:
-            properties.append(state_for(binding, states))
+    if stateful_bindings and not properties:
+        raise EndpointUnavailable("No bound entity has a reportable state")
     properties.append({"namespace": "Alexa.EndpointHealth", "name": "connectivity",
                        "value": {"value": "OK"},
                        "timeOfSample": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
