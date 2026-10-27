@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.11.3
+
+- Alexa-Statusabfragen laden Entities in virtuellen Gesamtgeräten parallel. Eine fehlende oder vorübergehend nicht verfügbare Entity lässt die übrigen erreichbaren Zustände weiter melden; nur wenn keine Statusfunktion lesbar ist, gilt das Gesamtgerät als nicht erreichbar. Fehlende Thermostat-Isttemperaturen verbergen Sollwert und Modus nicht mehr.
+
 ## 3.11.2
 
 - Die zentrale Bearbeitungsleiste steht direkt über der gesamten Geräteauflistung. Sie erscheint genau einmal für alle Bereiche; Bereichszeilen dienen nur zum Auf- und Zuklappen.

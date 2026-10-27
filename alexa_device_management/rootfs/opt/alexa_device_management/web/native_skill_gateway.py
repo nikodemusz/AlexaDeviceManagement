@@ -5,6 +5,7 @@ admin/ingress UI. A secret bearer token is required for every request.
 """
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
 import os
@@ -95,9 +96,21 @@ async def state_route(request: web.Request) -> web.Response:
         raise web.HTTPNotFound(text="Unknown endpoint")
     entities = sorted({cap["entity_id"] for cap in device["capabilities"]
                        if cap.get("enabled", True)})
-    states = {}
-    for entity in entities:
-        states[entity] = await ha_request("GET", "/states/" + entity, token=token)
+    # A virtual Alexa device can contain many entities. Fetch them concurrently
+    # so a long list does not consume Alexa's short ReportState response window.
+    # A missing HA entity is represented by an omitted state; the Lambda can
+    # still report the other live capabilities on this endpoint.
+    semaphore = asyncio.Semaphore(16)
+
+    async def fetch_state(entity: str):
+        async with semaphore:
+            try:
+                return entity, await ha_request("GET", "/states/" + entity, token=token)
+            except web.HTTPNotFound:
+                return entity, None
+
+    results = await asyncio.gather(*(fetch_state(entity) for entity in entities))
+    states = {entity: state for entity, state in results if state is not None}
     return web.json_response({"endpoint_id": endpoint_id, "states": states})
 
 
