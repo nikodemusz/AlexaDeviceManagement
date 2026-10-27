@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 14551)
-Total output lines: 524
-
 # Changelog
 
 ## 3.11.3
@@ -276,7 +273,93 @@ Total output lines: 524
 
 ## 2.16.5
 
-- **Fix**: Geräteköpfe eines geöffneten Raums werden ohne HTML-Templates ausschließlich über sichere DOM-Knoten und `textContent` erzeugt. Ungewöhnliche Gerätedaten können den HTML-Parser dami…2551 tokens truncated…`-Feld im einzelnen Cookie-Objekt der `/ap/exchangetoken`-Antwort gegenüber dem Domain-Schlüssel der umgebenden Map. openHABs Referenzimplementierung verwendet dafür immer den Map-Schlüssel und ignoriert ein per-Cookie-Domain-Feld komplett — angeglichen, mit Regressionstest.
+- **Fix**: Geräteköpfe eines geöffneten Raums werden ohne HTML-Templates ausschließlich über sichere DOM-Knoten und `textContent` erzeugt. Ungewöhnliche Gerätedaten können den HTML-Parser damit nicht mehr blockieren.
+- **Kompatibilität**: Das in 2.16.4 ergänzte CSS-Containment wurde entfernt, da die Blockade auch bei nur einem Gerät auftrat und im Zusammenspiel mit dem dynamisch wachsenden Raumcontainer problematisch sein kann.
+
+## 2.16.4
+
+- **Fix**: Das Öffnen eines Raums führt keine synchrone DOM-Arbeit mehr im Klick-Handler aus. Geräte werden nach dem Klick in kleinen Gruppen über mehrere Browser-Frames eingefügt, sodass die Oberfläche bedienbar bleibt.
+- **Performance**: CSS-Containment kapselt Layout und Darstellung der Räume sowie der Alexa-Karten. Änderungen in einem Raum lösen damit kein vollständiges Layout des langen Gesamtdokuments mehr aus.
+
+## 2.16.3
+
+- **Fix**: Das Auf- und Zuklappen eines Raums aktualisiert nur noch dessen eigenen Gerätecontainer. Der restliche DOM mit allen HA-Geräten, Entitäten und Alexa-Karten wird nicht mehr bei jedem Klick vollständig ersetzt.
+- **Performance**: Raumaktionen behalten ihren Button im DOM und rendern weiterhin höchstens 25 Geräte je Schritt. Das verhindert die reproduzierbare Blockade des Browser-Hauptthreads beim Öffnen von „Küche“ und anderen Räumen.
+
+## 2.16.2
+
+- **Fix**: Beim Aufklappen eines Raums werden zunächst höchstens 25 Geräte gerendert. Weitere Geräte lassen sich kontrolliert in 25er-Schritten nachladen, damit große Räume den Home-Assistant-WebView nicht mehr durch einen einzigen synchronen DOM-Aufbau zum Absturz bringen.
+- **Cache**: Die Versionskennung der Geräteübersicht wurde aktualisiert, damit Home Assistant die korrigierte JavaScript-Datei zuverlässig neu lädt.
+
+## 2.16.1
+
+- **Fix**: Die Verarbeitung großer oder sehr tief verschachtelter Phoenix-Antworten erfolgt jetzt iterativ und mit festen Grenzen. Dadurch kann die Raum-Anreicherung beim Laden der Geräteliste das Add-on nicht mehr durch rekursive beziehungsweise quadratische Verarbeitung zum Absturz bringen.
+- **Tests**: Regressionstests decken eingebettete Phoenix-Daten, sehr tiefe Strukturen und die Abgrenzung tatsächlicher Gruppenmitglieder ab.
+
+## 2.16.0
+
+- **Geräteexport**: Ganze HA-Geräte lassen sich direkt über die Gerätezeile exportieren; automatisch wird eine geeignete Haupt-Entity gewählt.
+- **Duplikatschutz**: Exportdaten werden um die HA-Geräte-ID ergänzt. Vorschau und Deployment verweigern in dieser Version mehrere aktive Alexa-Endpunkte für dasselbe physische Gerät; diese Einschränkung wurde mit 2.16.10 wieder aufgehoben.
+- **Versionierung**: Entwicklungsstände verwenden keinen `rc`-Zusatz mehr.
+
+## 2.15.1-rc1
+
+- **Fix**: Versionsgebundene CSS- und JavaScript-URLs verhindern, dass Home-Assistant-Ingress nach einem Update die alte Geräteoberfläche aus dem Browsercache lädt.
+- **Fix**: Der aufklappbare Gerätekopf verwendet das korrekte dreispaltige Layout für Pfeil, Gerätedaten und Aktionen.
+
+## 2.15.0-rc1
+
+- **Übersicht**: Bereiche und Geräte sind standardmäßig eingeklappt und können unabhängig aufgeklappt werden.
+- **Performance**: Ausblenden und Einblenden aktualisiert die Ansicht sofort, ohne die vollständige Geräteliste neu zu laden.
+
+## 2.14.1-rc1
+
+- **Changelog**: Der vollständige Versionsverlauf bleibt dauerhaft in `CHANGELOG.md`; neue Versionseinträge werden oben ergänzt.
+
+## 2.14.0-rc1
+
+- **Geräteverwaltung**: Home-Assistant-Export und Alexa-Gerätebestand sind in einer gemeinsamen Ansicht zusammengeführt.
+- **Status**: Vorhandene, ausstehende, doppelte und nur noch in Alexa vorhandene Endpunkte werden pro Entity angezeigt.
+- **Ausblenden**: HA-Geräte, einzelne Entities und reine Alexa-Endpunkte können unabhängig vom Export verborgen werden.
+- **Bedienung**: Export, Alexa-Gruppen, Umbenennen, Löschen, Deployment und Synchronisierung sind auf einer Seite verfügbar.
+
+## 2.13.0-rc1
+
+- **Event Gateway**: Neue, geänderte und entfernte Endpunkte werden offiziell per `AddOrUpdateReport` und `DeleteReport` an Alexa gemeldet.
+- **Konfiguration**: Skill-Zugangsdaten werden ausschließlich über `!secret` referenziert.
+- **Lifecycle**: Änderungen werden gegen den zuletzt tatsächlich ausgerollten Bestand berechnet.
+
+## 2.11.26-rc1
+
+- **Fix (Session „nicht verbunden" trotz erfolgreichem Login)**: Nach dem Login meldete die App „Alexa-Web-Session fehlt / Kein Amazon-Benutzer" (Geräte 0), obwohl der Login erfolgreich war und die Region `amazon.de` korrekt erkannt wurde. Ursache: `is_configured()` verlangt zwingend einen `csrf`-Wert in der gespeicherten Session. Die neuen curl_cffi-**Einweg**-Sessions verwarfen aber die `Set-Cookie`-Header der API-Antworten (inkl. `csrf`), die die frühere aiohttp-Version automatisch übernommen hatte — so blieb `csrf` leer und die Session galt als ungültig. Jetzt werden Response-Cookies aus curl_cffi zurück in den Cookie-Jar geschrieben (`store_response_cookies`). Falls `users/me`/`endpoints` kein `csrf` setzen, wird es zusätzlich über einen nicht-fatalen Priming-Aufruf (`/api/language`, `/api/ping`) geholt. Mit Regressionstest abgesichert.
+
+## 2.11.25-rc1
+
+- **Fix (TLS-Impersonation für die gesamte Geräte-API)**: 2.11.24-rc1 hat bestätigt, dass der Login mit iOS-TLS-Fingerabdruck (`curl_cffi`) durchläuft — „Alexa login successful, Session stored for eu-api-alexa.amazon.com". Da die **laufenden** App-Funktionen (Geräteliste, **Gruppen**, GraphQL/Nexus, Umbenennen, Löschen) dieselbe `alexa.amazon.com/api/*`-Schnittstelle nutzen, hätten sie ohne Impersonation denselben 401 bekommen. Alle sechs zentralen Alexa-API-Helfer in `server_clean.py` (`alexa_delete`, `alexa_raw_get`, `alexa_raw_delete`, `alexa_raw_post`, `alexa_raw_put`, `alexa_get_json`) laufen jetzt über einen gemeinsamen `oh_style_login.impersonated_request`-Helfer mit demselben iOS-Safari-Fingerabdruck. Die HA-seitigen Aufrufe (Supervisor/HA-Export) bleiben auf aiohttp, da sie nicht von Amazon-Fingerprinting betroffen sind.
+
+## 2.11.24-rc1
+
+- **Experiment Login (TLS-Impersonation)**: Die Diagnose aus 2.11.23-rc1 hat bewiesen, dass unser Cookie-Austausch echte, gültige App-Auth-Cookies liefert (`at-main`, `x-main`, `sess-at-main`, `session-token`, 2083-Byte-Antwort) — und Amazons Server `/api/users/me` **trotzdem** mit `401`/`X-Cache: Error from cloudfront` ablehnt, während dieselbe Anmeldung in der offiziellen Alexa-App funktioniert. Das deutet stark auf **TLS-/Client-Fingerprinting** durch Amazons CDN: Python/aiohttp hat einen erkennbar anderen TLS-Handshake als eine echte iOS-App. Die beiden blockierten App-API-Aufrufe (`/api/users/me`, `/api/endpoints`) laufen jetzt über `curl_cffi` mit einem echten iOS-Safari-TLS-Fingerabdruck (`safari18_4_ios`); die Cookies stammen weiterhin aus dem bestehenden Login-Flow. Neue Abhängigkeit `curl_cffi==0.11.4` (musl-Wheels für aarch64/amd64, passend zur Alpine-Basis). **Hinweis:** Falls der Login danach erfolgreich ist, aber Geräteoperationen (Liste/Gruppen) noch fehlschlagen, muss dieselbe Impersonation auch auf die laufende Geräte-API ausgeweitet werden — dieser Schritt validiert zunächst nur, ob Fingerprinting die Ursache ist.
+
+## 2.11.23-rc1
+
+- **Diagnose (Cookie-Austausch)**: Wichtige Beobachtung — jeder Login-Versuch erzeugt eine **neue** Geräteregistrierung im Amazon-Konto. Das beweist, dass `/auth/register` erfolgreich ist und ein gültiger Refresh-Token zurückkommt; das Problem liegt also eng zwischen `exchange_token` (Refresh-Token → Auth-Cookies) und `/api/users/me`. Verdacht: `exchange_token` liefert zwar `200 OK`, aber die zurückgegebenen Auth-Cookies sind leer/unbrauchbar, sodass `/api/users/me` nur die alten Website-Login-Cookies sieht und ablehnt. `exchange_token` protokolliert jetzt, **was** Amazon zurückschickt (Antwortgröße, Domains und Namen der gelieferten Cookies); diese Zusammenfassung erscheint bei einem 401 in der Fehlermeldung (`exchange=...`), um genau diesen Handoff sichtbar zu machen.
+
+## 2.11.22-rc1
+
+- **Fix-Versuch Login (Header-Parität)**: Die Diagnose aus 2.11.21-rc1 hat die letzten Verdachtsmomente ausgeschlossen: ausgehende IP ist die Wohnanschluss-IP und ändert sich im Login nicht (`ip_changed=False`), Cookies sind vollständig, App-Version stimmt. Die 401-Antwort enthält aber sowohl `x-amzn-RequestId` als auch `X-Cache: Error from cloudfront` — die Kombination zeigt, dass die Anfrage tatsächlich den Alexa-Anwendungsserver erreicht und *dieser* den 401 liefert (keine reine CloudFront-Blockade). Der einzige verbliebene konkrete Unterschied zur openHAB-Referenz waren zwei Standard-Header, die openHAB an jede Anfrage hängt (`DNT: 1`, `Upgrade-Insecure-Requests: 1`) — jetzt auch beim `/api/users/me`-Aufruf gesetzt.
+
+## 2.11.21-rc1
+
+- **Diagnose**: Die ausgehende IP aus 2.11.20-rc1 war die normale Wohnanschluss-IP, nicht die des gehosteten vServers — eine Rechenzentrums-IP scheidet damit als Ursache aus. Um zu prüfen, ob sich die ausgehende Amazon-Verbindung *innerhalb eines einzelnen Login-Durchlaufs* ändert (z.B. durch abweichendes Routing zwischen lokalem und öffentlichem Zugriff auf das Add-on), wird die ausgehende IP jetzt zusätzlich beim **Start** des Logins ermittelt und gespeichert. Schlägt der finale `/api/users/me`-Aufruf fehl, zeigt die Fehlermeldung jetzt `start_ip`, `ip_at_failure` und `ip_changed`, damit sich ein Wechsel der ausgehenden Adresse während des Logins zweifelsfrei erkennen (oder ausschließen) lässt.
+
+## 2.11.20-rc1
+
+- **Diagnose**: Die Diagnosedaten aus 2.11.19-rc1 zeigten `X-Cache: Error from cloudfront` bei ansonsten vollständigem, korrektem Cookie-Satz (`at-main`, `x-main`, `session-token` usw.) — ein starkes Indiz, dass die Ablehnung auf Amazons CloudFront-/Edge-Ebene passiert (z.B. Bot-/Anti-Fraud-Erkennung), nicht an fehlerhaften Zugangsdaten. Rechenzentrums-IPs werden von solcher Erkennung typischerweise strenger behandelt als Wohnanschlüsse. Die Fehlermeldung zeigt bei einem fehlgeschlagenen API-Aufruf jetzt zusätzlich die tatsächliche ausgehende IP-Adresse des Add-ons (ermittelt über einen externen IP-Echo-Dienst), damit sich prüfen lässt, ob die Amazon-Anfragen über eine Wohn-IP oder eine (ggf. auffällige) Server-/Hosting-IP laufen.
+
+## 2.11.19-rc1
+
+- **Fix**: `add_exchange_cookie` bevorzugte ein evtl. vorhandenes `Domain`-Feld im einzelnen Cookie-Objekt der `/ap/exchangetoken`-Antwort gegenüber dem Domain-Schlüssel der umgebenden Map. openHABs Referenzimplementierung verwendet dafür immer den Map-Schlüssel und ignoriert ein per-Cookie-Domain-Feld komplett — angeglichen, mit Regressionstest.
 - **Diagnose**: Bei einem fehlgeschlagenen `GET`-API-Aufruf (z.B. `/api/users/me`) zeigt die Fehlerseite jetzt zusätzlich an, ob ein `csrf`-Header gesendet wurde, welche Cookie-Namen zu diesem Zeitpunkt vorhanden waren (keine Werte) und ausgewählte Response-Header (u.a. `Server`, `Via`, `X-Amzn-RequestId`, `X-Cache`, `X-Amz-Cf-*`) — damit sich bei einem erneuten leeren 401 erkennen lässt, ob die Ablehnung auf CDN-/Edge-Ebene oder in der eigentlichen Anwendung passiert.
 
 ## 2.11.18-rc1
