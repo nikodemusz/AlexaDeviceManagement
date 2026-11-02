@@ -9,12 +9,14 @@ import asyncio
 import hmac
 import json
 import os
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 import aiohttp
 from aiohttp import web
 
-from native_skill_config import NativeSkillConfigStore
+from native_skill_config import NativeSkillConfigStore, NativeSkillConfigError
 from device_model import DeviceModelError
 
 OPTIONS = Path("/data/options.json")
@@ -22,6 +24,106 @@ HA_URL = os.environ.get("HA_HTTP_URL", "http://supervisor/core/api")
 # User OAuth tokens must be validated by Home Assistant Core directly, NOT
 # through the Supervisor proxy (which requires a Supervisor-specific token).
 HA_USER_URL = os.environ.get("HA_USER_HTTP_URL", "http://homeassistant:8123/api").rstrip("/")
+HA_TIMEOUT = aiohttp.ClientTimeout(total=2.5)
+CURRENT_RESOURCES = ContextVar("gateway_resources", default=None)
+
+
+class GatewayResources:
+    """Resources belong to one app/event loop, never to a linked user."""
+
+    def __init__(self):
+        self.config_lock = asyncio.Lock()
+        self.config_signature = None
+        self.config = None
+        self.session = None
+
+    def _load_config(self):
+        store = NativeSkillConfigStore()
+
+        def signature():
+            try:
+                stat = store.path.stat()
+                return (str(store.path), stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+            except FileNotFoundError:
+                return (str(store.path), None)
+
+        before = signature()
+        if self.config is not None and before == self.config_signature:
+            return self.config
+        # A failed read must never fall back to a previously enabled config.
+        self.config = None
+        self.config_signature = None
+        config = store.load()
+        if signature() != before:
+            raise NativeSkillConfigError("Configuration changed while reading; retry request")
+        self.config, self.config_signature = config, before
+        return config
+
+    async def load_config(self):
+        # Coalesce a burst into one YAML parse and keep disk/validation work
+        # off the event loop so pending HA responses can still be processed.
+        async with self.config_lock:
+            return await asyncio.to_thread(self._load_config)
+
+    def client(self):
+        if self.session is None:
+            self.session = aiohttp.ClientSession(
+                connector=aiohttp.TCPConnector(limit=32, limit_per_host=32),
+                cookie_jar=aiohttp.DummyCookieJar())
+        return self.session
+
+
+RESOURCES = web.AppKey("gateway_resources", GatewayResources)
+
+
+async def resource_context(app):
+    resources = app[RESOURCES]
+    try:
+        yield
+    finally:
+        if resources.session is not None:
+            await resources.session.close()
+
+
+@web.middleware
+async def resources_middleware(request, handler):
+    marker = CURRENT_RESOURCES.set(request.app[RESOURCES])
+    try:
+        return await handler(request)
+    except (asyncio.TimeoutError, aiohttp.ServerTimeoutError):
+        raise web.HTTPGatewayTimeout(text="Home Assistant request timed out") from None
+    except aiohttp.ClientError:
+        raise web.HTTPBadGateway(text="Home Assistant connection failed") from None
+    except NativeSkillConfigError:
+        raise web.HTTPServiceUnavailable(text="Native skill configuration unavailable") from None
+    finally:
+        CURRENT_RESOURCES.reset(marker)
+
+
+async def request_config():
+    resources = CURRENT_RESOURCES.get()
+    if resources is None:
+        return await asyncio.to_thread(NativeSkillConfigStore().load)
+    return await resources.load_config()
+
+
+async def request_active_config():
+    if CURRENT_RESOURCES.get() is None:
+        return active_config()
+    config = await request_config()
+    if not config["enabled"]:
+        raise web.HTTPServiceUnavailable(text="Native skill is disabled")
+    return config
+
+
+@asynccontextmanager
+async def ha_session(headers):
+    resources = CURRENT_RESOURCES.get()
+    if resources is None:
+        async with aiohttp.ClientSession(headers=headers) as session:
+            yield session
+    else:
+        yield resources.client()
 
 
 def secret() -> str:
@@ -49,7 +151,7 @@ def active_config() -> dict:
 
 
 async def config_route(request: web.Request) -> web.Response:
-    config = NativeSkillConfigStore().load()
+    config = await request_config()
     return web.json_response({"schema_version": config["schema_version"],
                               "export_mode": "native", "runtime_version": "3.1.0",
                               "locale": config["locale"], "enabled": config["enabled"],
@@ -72,9 +174,9 @@ async def ha_request(method: str, endpoint: str, payload=None, token: str | None
     if token is None or not isinstance(token, str) or not token:
         raise web.HTTPUnauthorized(text="User token required")
     headers = {"Authorization": f"Bearer {token}"}
-    async with aiohttp.ClientSession(headers=headers) as session:
+    async with ha_session(headers) as session:
         async with session.request(method, HA_USER_URL + endpoint, json=payload,
-                                   timeout=aiohttp.ClientTimeout(total=10)) as result:
+                                   headers=headers, timeout=HA_TIMEOUT) as result:
             if result.status in (401, 403):
                 raise web.HTTPUnauthorized(text="Home Assistant authorization rejected")
             if result.status == 404:
@@ -88,7 +190,7 @@ async def ha_request(method: str, endpoint: str, payload=None, token: str | None
 
 async def state_route(request: web.Request) -> web.Response:
     data = await request.json()
-    config = active_config()
+    config = await request_active_config()
     endpoint_id = data.get("endpoint_id", "")
     token = data.get("token")
     device = config["devices"].get(endpoint_id)
@@ -115,7 +217,7 @@ async def state_route(request: web.Request) -> web.Response:
 
 
 async def control_route(request: web.Request) -> web.Response:
-    config = active_config()
+    config = await request_active_config()
     data = await request.json()
     interface = data.get("interface")
     instance = data.get("instance")
@@ -192,10 +294,10 @@ async def linked_token_request(token: str, endpoint: str, data=None):
     if not isinstance(token, str) or not token or len(token) > 8192:
         raise web.HTTPUnauthorized(text="Missing linked Home Assistant token")
     headers = {"Authorization": "Bearer " + token}
-    async with aiohttp.ClientSession(headers=headers) as session:
+    async with ha_session(headers) as session:
         async with session.request("POST" if data is not None else "GET",
                                    HA_USER_URL + endpoint, json=data,
-                                   timeout=aiohttp.ClientTimeout(total=12)) as result:
+                                   headers=headers, timeout=HA_TIMEOUT) as result:
             if result.status in (401, 403):
                 raise web.HTTPUnauthorized(text="Home Assistant authorization rejected")
             if result.status >= 400:
@@ -223,7 +325,9 @@ async def legacy_route(request: web.Request) -> web.Response:
     return web.json_response(response)
 
 def create_app() -> web.Application:
-    app = web.Application(middlewares=[authentication], client_max_size=16 * 1024)
+    app = web.Application(middlewares=[authentication, resources_middleware], client_max_size=16 * 1024)
+    app[RESOURCES] = GatewayResources()
+    app.cleanup_ctx.append(resource_context)
     app.router.add_post("/v1/authorize", linked_authorize_route)
     app.router.add_post("/v1/legacy", legacy_route)
     app.router.add_get("/v1/config", config_route)
