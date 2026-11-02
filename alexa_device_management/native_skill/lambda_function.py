@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import math
 import os
+import time
+from contextvars import ContextVar
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -20,6 +22,20 @@ NATIVE_PREFIX = "native:"
 INTERFACE_ACTIONS = {"Alexa.PowerController", "Alexa.BrightnessController",
                      "Alexa.RangeController", "Alexa.ToggleController",
                      "Alexa.PlaybackController", "Alexa.ThermostatController"}
+REQUEST_DEADLINE = ContextVar("request_deadline", default=None)
+RESPONSE_BUDGET_SECONDS = 7.0
+HTTP_TIMEOUT_SECONDS = 3.0
+
+
+def request_timeout():
+    """All gateway calls share the Alexa response budget, including state reads."""
+    deadline = REQUEST_DEADLINE.get()
+    if deadline is None:
+        return HTTP_TIMEOUT_SECONDS
+    remaining = deadline - time.monotonic() - 0.25
+    if remaining <= 0:
+        raise TimeoutError("Gateway response budget exhausted")
+    return min(HTTP_TIMEOUT_SECONDS, remaining)
 
 
 def request_json(url, method="GET", payload=None, bearer=None):
@@ -30,7 +46,7 @@ def request_json(url, method="GET", payload=None, bearer=None):
     if data is not None:
         headers["Content-Type"] = "application/json"
     request = urllib.request.Request(url, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(request, timeout=8) as response:
+    with urllib.request.urlopen(request, timeout=request_timeout()) as response:
         return json.load(response)
 
 
@@ -294,6 +310,25 @@ def state_properties(bindings, states):
 
 
 def lambda_handler(event, context):
+    started = time.monotonic()
+    budget = RESPONSE_BUDGET_SECONDS
+    if context is not None:
+        budget = min(budget, max(0, context.get_remaining_time_in_millis() / 1000 - 0.5))
+    deadline_token = REQUEST_DEADLINE.set(started + budget)
+    try:
+        result = handle_directive(event, context)
+        # Log only outcome metadata; directives and gateway bodies contain tokens.
+        response_event = result.get("event", {})
+        print(json.dumps({"operation": "AlexaRequest", "version": "3.1.1",
+                          "response": response_event.get("header", {}).get("name"),
+                          "error_type": response_event.get("payload", {}).get("type"),
+                          "duration_ms": round((time.monotonic() - started) * 1000)}))
+        return result
+    finally:
+        REQUEST_DEADLINE.reset(deadline_token)
+
+
+def handle_directive(event, context):
     directive = event.get("directive", {})
     hdr = directive.get("header", {})
     namespace, name = hdr.get("namespace"), hdr.get("name")
@@ -329,7 +364,7 @@ def lambda_handler(event, context):
             values = state_properties(bindings, states)
             return response(event, "Alexa", "StateReport", endpoint=external_id, properties=values)
         if namespace in INTERFACE_ACTIONS and name in (
-                "TurnOn", "TurnOff", "SetBrightness", "SetRangeValue",
+                "TurnOn", "TurnOff", "SetBrightness", "AdjustBrightness", "SetRangeValue",
                 "AdjustRangeValue", "Stop", "SetTargetTemperature",
                 "AdjustTargetTemperature", "SetThermostatMode"):
             matching = [b for b in bindings if b["interface"] == namespace
@@ -342,6 +377,17 @@ def lambda_handler(event, context):
             action_payload = directive.get("payload", {})
             if name == "SetBrightness":
                 value = action_payload.get("brightness")
+            elif name == "AdjustBrightness":
+                # The deployed gateway already supports SetBrightness. Translate
+                # the delta here rather than requiring a new gateway action.
+                delta = action_payload.get("brightnessDelta")
+                if (isinstance(delta, bool) or not isinstance(delta, (int, float))
+                        or not math.isfinite(delta) or not -100 <= delta <= 100):
+                    return error(event, "INVALID_VALUE", "Invalid brightness delta", external_id)
+                states = gateway("/v1/state", "POST", {"endpoint_id": endpoint_id, "token": token})["states"]
+                current = state_for(binding, states)["value"]
+                value = max(0, min(100, round(current + delta)))
+                name = "SetBrightness"
             elif name == "SetRangeValue":
                 value = action_payload.get("rangeValue")
             elif name == "AdjustRangeValue":
@@ -369,10 +415,14 @@ def lambda_handler(event, context):
         # Do not include the response body: it may contain account data.
         kind = {401: "INVALID_AUTHORIZATION_CREDENTIAL", 403: "INVALID_DIRECTIVE",
                 404: "ENDPOINT_UNREACHABLE", 400: "INVALID_DIRECTIVE",
-                503: "BRIDGE_UNREACHABLE", 504: "BRIDGE_UNREACHABLE"}.get(exc.code, "INTERNAL_ERROR")
+                502: "BRIDGE_UNREACHABLE", 503: "BRIDGE_UNREACHABLE",
+                504: "BRIDGE_UNREACHABLE"}.get(exc.code, "INTERNAL_ERROR")
         print(f"Alexa gateway request failed: HTTP {exc.code}")
         return error(event, kind, endpoint=external_id or None)
-    except (ValueError, KeyError, TypeError, urllib.error.URLError) as exc:
+    except (TimeoutError, ConnectionError, urllib.error.URLError) as exc:
+        print(f"Alexa gateway unavailable: {type(exc).__name__}")
+        return error(event, "BRIDGE_UNREACHABLE", "Gateway did not respond", external_id or None)
+    except (ValueError, KeyError, TypeError) as exc:
         # Never log Alexa's directive: it contains the linked user's access token.
         print(f"Alexa request failed: {type(exc).__name__}")
         return error(event, endpoint=external_id or None)
