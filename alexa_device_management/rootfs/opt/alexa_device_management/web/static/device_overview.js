@@ -18,7 +18,7 @@
   let includeHiddenSummaryMatches = false;
   const AREA_PAGE_SIZE = 25;
   const EDIT_DRAFT_KEY = "alexa_device_management_edit_draft_v1";
-  const EDITABLE_ENTITY_FIELDS = ["enabled", "name", "description", "display_category", "display_category_mode", "alexa_group", "capability_mode", "capabilities"];
+  const EDITABLE_ENTITY_FIELDS = ["enabled", "name", "description", "display_category", "display_category_mode", "alexa_group", "capability_mode", "capabilities", "logical_device_name", "read_only"];
   let globalEditMode = false;
   let pendingGlobalEdit = false;
   let editBaseEntities = null;
@@ -493,7 +493,7 @@
         for (const [entityId, saved] of Object.entries(result.configuration?.entities || {})) {
           const current = config.entities?.[entityId];
           if (current) {
-            for (const field of ["enabled", "name", "description", "display_category", "display_category_mode", "alexa_group", "capability_mode", "capabilities"]) {
+            for (const field of EDITABLE_ENTITY_FIELDS) {
               if (current[field] === snapshot.entities?.[entityId]?.[field]) current[field] = saved[field];
             }
           }
@@ -809,6 +809,19 @@
     scheduleEditDraftPersistence();
   }
 
+  function updateLogicalDeviceName(entityId, value) {
+    const ids = entityConfig(entityId).native_endpoint_ids || [];
+    for (const [id, settings] of Object.entries(config.entities || {})) {
+      if (id === entityId || settings.native_endpoint_ids?.some(endpoint => ids.includes(endpoint))) {
+        settings.logical_device_name = value;
+        for (const input of document.querySelectorAll(".export-device-name")) {
+          if (input.dataset.entity === id) input.value = value;
+        }
+      }
+    }
+    syncEntityModelFromConfig();
+  }
+
   function renderSimpleEntityList(row, device, isEditing) {
     const list = document.createElement("div");
     list.className = `simple-entity-list${isEditing ? " editing" : ""}`;
@@ -851,6 +864,17 @@
       suggestion.disabled = !isEditing;
       nameField.append(nameCaption, nameInput, suggestion);
       entityRow.append(checkbox, text, nameField);
+      const fields = document.createElement("div");
+      fields.className = "simple-entity-settings";
+      const grouped = settings.group_mode === "combined";
+      const categories = model.display_categories || [];
+      const writable = capabilityOptions(entity).some(option => ![
+        "Alexa.ContactSensor", "Alexa.MotionSensor", "Alexa.TemperatureSensor"
+      ].includes(option.id)) && !["sensor", "binary_sensor", "number", "input_number"].includes(entity.domain);
+      fields.innerHTML = `${grouped ? `<label>Name des Alexa-Gesamtgeräts<input class="export-device-name" data-entity="${attr(entity.entity_id)}" value="${attr(settings.logical_device_name || "")}" maxlength="128" ${isEditing ? "" : "disabled"}></label>` : ""}
+        <label>Alexa-Typ<select class="export-category" data-entity="${attr(entity.entity_id)}" ${isEditing ? "" : "disabled"}><option value="" ${settings.display_category_mode === "custom" ? "" : "selected"}>Automatisch (${esc(suggestedCategory(entity, device))})</option>${categories.map(category => `<option value="${attr(category)}" ${settings.display_category_mode === "custom" && settings.display_category === category ? "selected" : ""}>${esc(category)}</option>`).join("")}</select></label>
+        <label>Zugriff<select class="export-access" data-entity="${attr(entity.entity_id)}" ${isEditing ? "" : "disabled"}><option value="read" ${settings.read_only === true || !writable ? "selected" : ""}>Nur lesend</option><option value="write" ${settings.read_only !== true && writable ? "selected" : ""} ${writable ? "" : "disabled"}>Kann gesetzt werden</option></select></label>`;
+      entityRow.append(fields);
       list.append(entityRow);
     }
     row.append(list);
@@ -1872,6 +1896,15 @@
       syncEntityModelFromConfig();
       persistEditDraft();
       message(`${entityId} wurde im Entwurf ${target.checked ? "für Alexa ausgewählt" : "abgewählt"}. Klicke „Fertig – alles speichern“, um die Auswahl zu übernehmen.`, "warn");
+    } else if (target.classList.contains("export-access")) {
+      if (!globalEditMode) return;
+      settings.read_only = target.value === "read";
+      syncEntityModelFromConfig();
+      scheduleSave();
+    } else if (target.classList.contains("export-device-name")) {
+      if (!globalEditMode) return;
+      updateLogicalDeviceName(entityId, target.value);
+      scheduleSave();
     } else if (target.classList.contains("export-category")) {
       if (!globalEditMode) return;
       settings.display_category = target.value;
@@ -1890,6 +1923,7 @@
     if (!globalEditMode) return;
     const settings = entityConfig(entityId);
     if (target.classList.contains("export-name")) settings.name = target.value;
+    if (target.classList.contains("export-device-name")) updateLogicalDeviceName(entityId, target.value);
     if (target.classList.contains("export-group")) settings.alexa_group = target.value;
     syncEntityModelFromConfig();
     scheduleSave();

@@ -116,6 +116,13 @@
         "read_only": {
           "type": "boolean"
         },
+        "display_category": {
+          "type": "string",
+          "minLength": 1
+        },
+        "display_category_mode": {
+          "enum": ["standard", "custom"]
+        },
         "supported_operations": {
           "type": "array",
           "const": [

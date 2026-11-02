@@ -16,11 +16,17 @@ def test_autosave_does_not_replace_newer_browser_configuration():
     assert "savePromise.catch(() => {}).then" in SCRIPT
 
 
-def test_entity_alexa_name_has_explicit_save_and_commits_on_blur():
-    assert 'data-action="save-entity-name"' in SCRIPT
-    assert 'saveName.dataset.action = "save-entity-name"' in SCRIPT
+def test_entity_alexa_names_are_staged_and_committed_with_global_editor():
+    editor = SCRIPT.split("function renderSimpleEntityList(", 1)[1].split("function alexaOnlyHtml(", 1)[0]
+    assert 'nameInput.className = "export-name"' in editor
+    assert 'nameInput.disabled = !isEditing' in editor
+    assert 'class="export-device-name"' in editor
     assert 'else if (target.classList.contains("export-name"))' in SCRIPT
-    assert "Alexa-Name für ${entityId} wurde gespeichert." in SCRIPT
+    change = SCRIPT.split('else if (target.classList.contains("export-name"))', 1)[1].split('});', 1)[0]
+    assert 'settings.name = target.value' in change
+    assert 'persistEditDraft()' in change
+    finish = SCRIPT.split("async function finishGlobalEditMode(", 1)[1].split("async function ", 1)[0]
+    assert 'await saveConfig()' in finish
     queue_start = SCRIPT.index("savePromise = savePromise.catch(() => {}).then")
     snapshot = SCRIPT.index("const snapshot = JSON.parse(JSON.stringify(config))")
     assert snapshot > queue_start

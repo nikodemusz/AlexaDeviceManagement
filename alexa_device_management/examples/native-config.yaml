@@ -14,6 +14,8 @@ devices:
         entity_id: sensor.zisterne_liter
         unit: Volume.Liters
         read_only: true
+        display_category: OTHER
+        display_category_mode: standard
       - interface: Alexa.RangeController
         instance: fill
         entity_id: sensor.zisterne_prozent

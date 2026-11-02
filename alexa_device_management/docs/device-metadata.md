@@ -56,6 +56,17 @@ editor, explicitly choosing “Eigene Funktionen” stores the selected controll
 interfaces and marks them with `capability_mode: custom`. Returning to the
 standard profile regenerates its domain defaults.
 
+The central editor exposes the logical Alexa endpoint name separately from
+each member's function name, including virtual groups. Entity Alexa types use
+the HA domain/device class by default and can be overridden (for example SWITCH
+to LIGHT). Capability `display_category` and `display_category_mode` preserve
+member types independently within a combined endpoint. The endpoint category
+is shared when all members have the same type; mixed types use OTHER when
+edited. Capability `read_only` applies to every function of the edited entity;
+controllers can be switched between read-only and writable access. Sensors and
+non-cover numeric ranges remain read-only, and playback Stop requires write
+access. Read-only controls reject directives in both Lambda and the gateway.
+
 The native file remains disabled by default on new installations. Existing
 native files retain their global and individual activation settings. Selection
 is explicit; unsupported new types fail rather than falling back to v5.

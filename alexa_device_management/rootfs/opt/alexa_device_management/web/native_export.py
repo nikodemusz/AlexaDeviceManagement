@@ -41,8 +41,9 @@ def entity_settings(native):
             settings = result.setdefault(entity_id, {
                 "enabled": False, "name": name,
                 "description": device.get("description", ""),
-                "display_category": device.get("display_category", "OTHER"),
-                "display_category_mode": device.get("display_category_mode", "standard"),
+                "display_category": capability.get("display_category", device.get("display_category", "OTHER")),
+                "display_category_mode": capability.get("display_category_mode", device.get("display_category_mode", "standard")),
+                "read_only": True,
                 "alexa_group": device.get("alexa_group", ""),
                 "native_endpoint_ids": [],
                 # No stored mode means this device has not been configured in
@@ -54,6 +55,9 @@ def entity_settings(native):
                 "capabilities": [],
             })
             settings["enabled"] |= bool(device.get("enabled", True) and capability.get("enabled", True))
+            if capability.get("enabled", True):
+                settings["read_only"] &= capability.get("read_only", interface in {
+                    "Alexa.RangeController", "Alexa.ContactSensor", "Alexa.MotionSensor", "Alexa.TemperatureSensor"})
             if capability.get("capability_mode") == "custom":
                 settings["capability_mode"] = "custom"
             if capability.get("enabled", True) and editor_interface not in settings["capabilities"]:
@@ -328,7 +332,7 @@ def apply_entities(native, requested, inventory):
             raise ValueError("Entitätsauswahl muss ein boolescher Wert sein.")
         old = baseline.get(entity_id, {})
         fields = ("enabled", "name", "description", "display_category",
-                  "display_category_mode", "alexa_group")
+                  "display_category_mode", "alexa_group", "logical_device_name", "read_only")
         changes = {key: settings[key] for key in fields
                    if key in settings and settings[key] != old.get(key, False if key == "enabled" else "")}
         owners = [key for key, device in proposed["devices"].items()
@@ -380,6 +384,12 @@ def apply_entities(native, requested, inventory):
             capabilities = _entity_capabilities(
                 entity_id, settings, entity, mode=mode,
                 selected=settings.get("capabilities"))
+            for capability in capabilities:
+                capability["display_category"] = _display_category(
+                    entity_id, entity, settings.get("display_category", old.get("display_category")),
+                    settings.get("display_category_mode", old.get("display_category_mode", "standard")))
+                capability["display_category_mode"] = settings.get(
+                    "display_category_mode", old.get("display_category_mode", "standard"))
             for owner in owners:
                 device = proposed["devices"][owner]
                 if device.get("group_mode") == "combined":
@@ -392,6 +402,15 @@ def apply_entities(native, requested, inventory):
                 ] + copy.deepcopy(capabilities)
         for key in owners:
             device = proposed["devices"][key]
+            if "logical_device_name" in changes:
+                device["name"] = changes["logical_device_name"]
+            access = settings.get("read_only", old.get("read_only"))
+            if access is not None and ("read_only" in changes or apply_profile or brightness_added or not old):
+                if type(access) is not bool:
+                    raise ValueError("Lesezugriff muss ein boolescher Wert sein.")
+                for capability in device.get("capabilities", []):
+                    if capability["entity_id"] == entity_id:
+                        _set_access(capability, access)
             if "enabled" in changes:
                 if device.get("group_mode") == "combined":
                     for capability in device.get("capabilities", []):
@@ -403,7 +422,8 @@ def apply_entities(native, requested, inventory):
                     # toggle controls its whole logical endpoint (for example,
                     # disabling either tank value disables the entire tank).
                     device["enabled"] = changes["enabled"]
-            device_changes = {key: value for key, value in changes.items() if key != "enabled"}
+            device_changes = {key: value for key, value in changes.items()
+                              if key not in {"enabled", "logical_device_name", "read_only"}}
             if (entity and device_changes.get("display_category_mode",
                                               device.get("display_category_mode", "standard")) != "custom"
                     and ("display_category" in device_changes or "display_category_mode" in device_changes)):
@@ -415,9 +435,35 @@ def apply_entities(native, requested, inventory):
                     if capability["entity_id"] == entity_id:
                         capability["capability_names"] = [device_changes["name"]]
                 device_changes.pop("name")
+                if device.get("virtual_device"):
+                    device.setdefault("member_names", {})[entity_id] = settings["name"]
+            if "display_category" in device_changes or "display_category_mode" in device_changes:
+                for cap in device.get("capabilities", []):
+                    saved = baseline.get(cap["entity_id"], {})
+                    cap.setdefault("display_category", saved.get("display_category", device.get("display_category", "OTHER")))
+                    cap.setdefault("display_category_mode", saved.get("display_category_mode", device.get("display_category_mode", "standard")))
+                category = device_changes.get("display_category", old.get("display_category", "OTHER"))
+                category_mode = device_changes.get("display_category_mode", old.get("display_category_mode", "standard"))
+                for capability in device.get("capabilities", []):
+                    if capability["entity_id"] == entity_id:
+                        capability.update(display_category=category, display_category_mode=category_mode)
+                if device.get("group_mode") == "combined":
+                    categories = {cap.get("display_category", device.get("display_category", "OTHER"))
+                                  for cap in device["capabilities"]}
+                    device_changes["display_category"] = next(iter(categories)) if len(categories) == 1 else "OTHER"
             device.update(device_changes)
     _normalize_combined_power_controllers(proposed["devices"])
     return NativeSkillConfigStore.validate(proposed)
+
+
+def _set_access(capability, read_only):
+    interface = capability["interface"]
+    if not read_only and (interface in {"Alexa.ContactSensor", "Alexa.MotionSensor", "Alexa.TemperatureSensor"}
+                          or interface == "Alexa.RangeController" and not capability["entity_id"].startswith("cover.")):
+        raise ValueError(f"{capability['entity_id']}: Diese HA-Funktion unterstützt nur lesenden Zugriff.")
+    if read_only and interface == "Alexa.PlaybackController":
+        raise ValueError("Die Stop-Funktion kann nicht nur lesend exportiert werden.")
+    capability["read_only"] = read_only
 
 
 def apply_device_group(native, device_id, entity_ids, mode, group_name, inventory, names=None,
@@ -460,6 +506,8 @@ def apply_device_group(native, device_id, entity_ids, mode, group_name, inventor
                 "capabilities": interfaces,
                 "apply_capability_profile": True,
             })
+            if "read_only" in profile:
+                selected_settings[entity_id]["read_only"] = profile["read_only"]
             category = profile.get("display_category")
             if category:
                 selected_settings[entity_id]["display_category"] = category
@@ -552,7 +600,8 @@ def apply_device_group(native, device_id, entity_ids, mode, group_name, inventor
         combined = [cap for values in capabilities_by_entity.values() for cap in values]
         aliases = list(dict.fromkeys(str(names.get(eid) or eid) for eid in selected))
         description = (old_group or {}).get("description", "")
-        member_categories = {member_templates[entity_id].get("display_category", "OTHER")
+        member_categories = {capabilities_by_entity[entity_id][0].get("display_category",
+                             member_templates[entity_id].get("display_category", "OTHER"))
                              for entity_id in selected}
         category = (next(iter(member_categories)) if len(member_categories) == 1
                     else "SWITCH" if all(entity_id.startswith(("switch.", "input_boolean."))
@@ -596,6 +645,8 @@ def apply_device_group(native, device_id, entity_ids, mode, group_name, inventor
             proposed["devices"][key] = {
                 **template,
                 "name": name,
+                "display_category": capabilities_by_entity[entity_id][0].get("display_category", template.get("display_category", "OTHER")),
+                "display_category_mode": capabilities_by_entity[entity_id][0].get("display_category_mode", template.get("display_category_mode", "standard")),
                 "capabilities": capabilities,
                 "enabled": True,
                 # Persist the explicit separate choice so the editor does not
@@ -633,7 +684,8 @@ def _standalone_endpoint(entity_id, capabilities, name, display_category="OTHER"
     return key, {
         "name": str(name or entity_id)[:128],
         "description": "",
-        "display_category": str(display_category or "OTHER"),
+        "display_category": capabilities[0].get("display_category", str(display_category or "OTHER")),
+        "display_category_mode": capabilities[0].get("display_category_mode", "standard"),
         "aliases": [],
         "capabilities": [_restore_separate_capability(cap) for cap in capabilities],
         "enabled": any(cap.get("enabled", True) for cap in capabilities),
