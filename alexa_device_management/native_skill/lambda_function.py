@@ -109,7 +109,8 @@ def capability_config(binding):
                 "properties": {"supported": [{"name": "targetSetpoint"},
                                                {"name": "thermostatMode"},
                                                {"name": "thermostatTemperatureAmbient"}],
-                               "proactivelyReported": False, "retrievable": True},
+                               "proactivelyReported": False, "retrievable": True,
+                               **({"nonControllable": True} if binding.get("read_only") else {})},
                 "configuration": {"supportsScheduling": False,
                                   "supportedModes": binding.get("supported_modes", ["HEAT"])}}
     capability = {"type": "AlexaInterface", "interface": name, "version": "3",
@@ -129,7 +130,7 @@ def capability_config(binding):
                                                            "maximumValue": binding.get("maximum", 10000),
                                                            "precision": binding.get("precision", 1)},
                                         "unitOfMeasure": binding["unit"]}
-    if binding.get("read_only", True) and name == "Alexa.RangeController":
+    if binding.get("read_only", name == "Alexa.RangeController"):
         capability["properties"]["nonControllable"] = True
     return capability
 

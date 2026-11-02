@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.12.0
+
+- Die zentrale Bearbeitung erlaubt auch bei gruppierten Geräten das Ändern des Alexa-Gesamtnamens und der einzelnen Funktionsnamen. Jede Entity erhält einen aus Home Assistant vorgeschlagenen, überschreibbaren Alexa-Typ (z. B. Schalter als Licht) und die Auswahl „Nur lesend“ / „Kann gesetzt werden“. Reine Sensoren bleiben lesend; Lesezugriff wird bei Alexa-Steuerbefehlen durchgesetzt. Individuelle Typen und Zugriffsrechte bleiben innerhalb einer Gruppe erhalten.
+
 ## 3.11.4
 
 - Gleichzeitige Alexa-Statusabfragen teilen sich einen begrenzten Home-Assistant-Verbindungspool. Die native YAML-Konfiguration wird außerhalb der Ereignisschleife geladen und bis zur nächsten Dateiänderung wiederverwendet. Das verhindert wiederholtes blockierendes Parsen bei großen Abfragewellen; Benutzerautorisierung und Konfigurationsänderungen bleiben wirksam. Verbindungsfehler und Zeitüberschreitungen liefern gezielte Gateway-Fehlerantworten.

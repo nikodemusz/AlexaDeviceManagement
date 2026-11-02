@@ -116,6 +116,13 @@ def validate_devices(devices: Any) -> dict[str, dict[str, Any]]:
                 raise DeviceModelError(f"{endpoint_id}: capability must be an object")
             if type(cap.get("enabled", True)) is not bool:
                 raise DeviceModelError(f"{endpoint_id}: capability enabled must be true or false")
+            if "read_only" in cap and type(cap["read_only"]) is not bool:
+                raise DeviceModelError(f"{endpoint_id}: read_only must be true or false")
+            if cap.get("read_only") is False and cap.get("interface") in {
+                    "Alexa.ContactSensor", "Alexa.MotionSensor", "Alexa.TemperatureSensor"}:
+                raise DeviceModelError(f"{endpoint_id}: sensors are read-only")
+            if cap.get("read_only") is True and cap.get("interface") == "Alexa.PlaybackController":
+                raise DeviceModelError(f"{endpoint_id}: playback requires write access")
             if cap.get("capability_mode") not in (None, "custom"):
                 raise DeviceModelError(f"{endpoint_id}: capability_mode must be custom when present")
             capability_names = cap.get("capability_names")

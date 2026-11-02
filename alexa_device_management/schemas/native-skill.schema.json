@@ -196,6 +196,14 @@
         "read_only": {
           "type": "boolean"
         },
+        "display_category": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Member Alexa type, preserved independently within combined endpoints."
+        },
+        "display_category_mode": {
+          "enum": ["standard", "custom"]
+        },
         "supported_operations": {
           "type": "array",
           "const": [
