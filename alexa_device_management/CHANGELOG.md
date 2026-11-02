@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.12.1
+
+- Die bereits in AWS eingesetzten Lambda-Verbesserungen sind jetzt auch im mitgelieferten Adapter enthalten: gemeinsames Antwortzeitbudget, Behandlung von Netzwerk-Timeouts und Gateway-Fehlern, relative Helligkeitsänderungen über den vorhandenen Gateway-Aufruf sowie Protokollierung von Ergebnis und Laufzeit ohne Zugangstokens. Die Nur-Lese-Funktionen aus 3.12.0 bleiben erhalten. Regressionstests sichern das Verhalten ab; dieses Update führt keine automatische AWS-Bereitstellung aus.
+
 ## 3.12.0
 
 - Die zentrale Bearbeitung erlaubt auch bei gruppierten Geräten das Ändern des Alexa-Gesamtnamens und der einzelnen Funktionsnamen. Jede Entity erhält einen aus Home Assistant vorgeschlagenen, überschreibbaren Alexa-Typ (z. B. Schalter als Licht) und die Auswahl „Nur lesend“ / „Kann gesetzt werden“. Reine Sensoren bleiben lesend; Lesezugriff wird bei Alexa-Steuerbefehlen durchgesetzt. Individuelle Typen und Zugriffsrechte bleiben innerhalb einer Gruppe erhalten.
