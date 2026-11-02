@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.11.4
+
+- Gleichzeitige Alexa-Statusabfragen teilen sich einen begrenzten Home-Assistant-Verbindungspool. Die native YAML-Konfiguration wird außerhalb der Ereignisschleife geladen und bis zur nächsten Dateiänderung wiederverwendet. Das verhindert wiederholtes blockierendes Parsen bei großen Abfragewellen; Benutzerautorisierung und Konfigurationsänderungen bleiben wirksam. Verbindungsfehler und Zeitüberschreitungen liefern gezielte Gateway-Fehlerantworten.
+
 ## 3.11.3
 
 - Alexa-Statusabfragen laden Entities in virtuellen Gesamtgeräten parallel. Eine fehlende oder vorübergehend nicht verfügbare Entity lässt die übrigen erreichbaren Zustände weiter melden; nur wenn keine Statusfunktion lesbar ist, gilt das Gesamtgerät als nicht erreichbar. Fehlende Thermostat-Isttemperaturen verbergen Sollwert und Modus nicht mehr.
