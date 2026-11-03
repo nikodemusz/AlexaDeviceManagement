@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Alexa-Geräteverwaltung</title>
-  <link rel="stylesheet" href="{{INGRESS_PATH}}/static/device_overview.css?v=3.11.2">
+  <link rel="stylesheet" href="{{INGRESS_PATH}}/static/device_overview.css?v={{OVERVIEW_ASSET_VERSION}}">
 </head>
 <body>
   <header class="topbar">
@@ -19,6 +19,22 @@
       <button id="btn-settings" class="button secondary">Einstellungen</button>
       <a class="button secondary" href="{{INGRESS_PATH}}/debug">Debug</a>
     </div>
+    <section id="device-edit-toolbar" class="device-edit-toolbar" aria-label="Geräte bearbeiten">
+      <div class="device-edit-copy">
+        <strong id="device-edit-title">Geräte & Funktionen</strong>
+        <span id="device-edit-description" class="muted">Namen und Typen direkt ändern. Entities auswählen, um sie zusammenzufassen.</span>
+      </div>
+      <div id="entity-selection-actions" class="entity-selection-actions hidden">
+        <span id="entity-selection-count" role="status" aria-live="polite"></span>
+        <button id="btn-combine-selection" class="button secondary" type="button">Als ein Alexa-Gerät</button>
+        <button id="btn-clear-entity-selection" class="button secondary small" type="button">Auswahl aufheben</button>
+      </div>
+      <div class="device-edit-actions">
+        <button id="btn-start-edit" class="button primary">Bearbeiten</button>
+        <button id="btn-finish-edit" class="button primary hidden">Fertig – alles speichern</button>
+        <button id="btn-discard-edit" class="button secondary hidden">Entwurf verwerfen</button>
+      </div>
+    </section>
   </header>
 
   <main>
@@ -57,26 +73,14 @@
     </section>
 
     <section id="virtual-groups-section" class="virtual-groups-section hidden" aria-live="polite">
-      <h2>Virtuelle Alexa-Gesamtgeräte</h2>
-      <p class="muted">Diese Alexa-Geräte bündeln Entities aus verschiedenen Home-Assistant-Geräten. Änderungen werden erst mit „Fertig – alles speichern“ übernommen.</p>
+      <h2>Zusammengefasste Alexa-Geräte</h2>
+      <p class="muted">Mehrere Funktionen, ein Name bei Alexa. Änderungen werden mit „Fertig – alles speichern“ übernommen.</p>
       <div id="virtual-group-list" class="virtual-group-list"></div>
     </section>
 
     <section id="summary" class="summary"></section>
     <p class="muted">Standard: Ein Home-Assistant-Gerät wird als ein Alexa-Gerät mit allen unterstützten Funktionen exportiert. Mehrfachausgänge lassen sich bei Bedarf auf einzelne Alexa-Geräte aufteilen. Die Vorschau zeigt Name, Gerätezahl und Funktionen vor dem Speichern.</p>
     <div id="message" class="message hidden"></div>
-    <section id="device-edit-toolbar" class="device-edit-toolbar" aria-live="polite">
-      <div class="device-edit-copy">
-        <strong id="device-edit-title">Geräte zentral bearbeiten</strong>
-        <span id="device-edit-description" class="muted">Einmal bearbeiten, dann alle Änderungen gemeinsam speichern. Ein offener Entwurf bleibt auch nach einem Neuladen erhalten.</span>
-      </div>
-      <div class="device-edit-actions">
-        <button id="btn-create-virtual-group" class="button secondary" disabled>Alexa-Gesamtgerät aus Entities</button>
-        <button id="btn-start-edit" class="button primary">Bearbeiten</button>
-        <button id="btn-finish-edit" class="button primary hidden">Fertig – alles speichern</button>
-        <button id="btn-discard-edit" class="button secondary hidden">Entwurf verwerfen</button>
-      </div>
-    </section>
     <section id="content" class="content"><div class="loading">Geräte werden geladen…</div></section>
   </main>
 
@@ -194,6 +198,7 @@
         <p class="muted">Wähle unterstützte Entities aus beliebigen Home-Assistant-Geräten. Sie erscheinen in Alexa als ein Gerät. Der Entwurf wird lokal gesichert; erst „In Entwurf übernehmen“ plus das zentrale „Fertig“ speichert ihn.</p>
         <label class="virtual-group-name-field">Name des Alexa-Gesamtgeräts<input id="virtual-group-name" maxlength="128" autocomplete="off" placeholder="z. B. Zisterne"></label>
         <input id="virtual-group-search" class="virtual-group-search" type="search" placeholder="Entität, Gerät oder Bereich suchen">
+        <label class="check"><input id="virtual-group-show-all" type="checkbox"> Weitere Funktionen hinzufügen</label>
         <section class="group-preview" aria-live="polite">
           <strong>So erscheint es in Alexa</strong>
           <div id="virtual-group-preview" class="muted">Wähle mindestens eine Entity.</div>
@@ -207,7 +212,7 @@
   </dialog>
 
   <script>document.documentElement.dataset.ingressPath="{{INGRESS_PATH}}";</script>
-  <script src="{{INGRESS_PATH}}/static/device_overview.js?v=3.11.2"></script>
+  <script src="{{INGRESS_PATH}}/static/device_overview.js?v={{OVERVIEW_ASSET_VERSION}}"></script>
   <script src="{{INGRESS_PATH}}/static/device_export_guard.js?v=3.5.0"></script>
 </body>
 </html>

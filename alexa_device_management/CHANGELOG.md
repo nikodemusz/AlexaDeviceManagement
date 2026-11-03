@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.13.0
+
+- „Bearbeiten“, Speichern und Verwerfen bleiben gemeinsam im Sticky-Kopf erreichbar, auch auf dem Handy. Alexa-Namen, verständlich benannte Gerätetypen und Zugriff stehen direkt an jeder Entity.
+- Entities lassen sich direkt in der Liste zum Zusammenfassen auswählen. Erst bei einer Auswahl erscheint die Aktion „Als ein Alexa-Gerät“ mit vorausgefüllten Namen und Funktionen. Ein separater Anlegen-Button entfällt; zusätzliche Funktionen lassen sich gezielt ergänzen.
+- Neue Gruppen werden nicht länger fälschlich als bereits zur Auflösung vorgemerkt abgewiesen. Der gemeinsame Alexa-Name erscheint pro Gerät nur einmal; Funktionsnamen bleiben einzeln änderbar.
+- Die Oberfläche verwendet automatisch aus dem Dateiinhalt abgeleitete Asset-Kennungen. Das verhindert, dass nach einem App-Update weiterhin die alten JavaScript-/CSS-Dateien unter der bisherigen Kennung 3.11.2 geladen werden.
+
 ## 3.12.0
 
 - Die zentrale Bearbeitung erlaubt auch bei gruppierten Geräten das Ändern des Alexa-Gesamtnamens und der einzelnen Funktionsnamen. Jede Entity erhält einen aus Home Assistant vorgeschlagenen, überschreibbaren Alexa-Typ (z. B. Schalter als Licht) und die Auswahl „Nur lesend“ / „Kann gesetzt werden“. Reine Sensoren bleiben lesend; Lesezugriff wird bei Alexa-Steuerbefehlen durchgesetzt. Individuelle Typen und Zugriffsrechte bleiben innerhalb einer Gruppe erhalten.
