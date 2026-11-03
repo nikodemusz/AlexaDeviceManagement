@@ -13,6 +13,7 @@
   const stagedAutoGroupDeviceIds = new Set();
   const pendingVirtualGroups = new Map();
   const selectedAlexaKeys = new Set();
+  const selectedEntityIds = new Set();
   const visibleAreaCounts = new Map();
   const renderedAreaItems = new Map();
   let includeHiddenSummaryMatches = false;
@@ -46,7 +47,8 @@
     "btn-start-edit": "Pausiert den Alexa-Abgleich und aktiviert die Eingaben für alle geöffneten Entitätenlisten.",
     "btn-finish-edit": "Speichert alle Änderungen und vorgemerkten Standardprofile gemeinsam und setzt danach den Alexa-Abgleich fort.",
     "btn-discard-edit": "Verwirft den ungespeicherten Entwurf und setzt den Alexa-Abgleich fort.",
-    "btn-create-virtual-group": "Stellt ein Alexa-Gesamtgerät aus Entitäten beliebiger Home-Assistant-Geräte zusammen. Es wird erst mit „Fertig“ gespeichert.",
+    "btn-combine-selection": "Fasst die ausgewählten Entities als Funktionen eines Alexa-Geräts zusammen. Name und Funktionen werden vor dem Übernehmen angezeigt.",
+    "btn-clear-entity-selection": "Hebt die Auswahl zum Zusammenfassen auf. Die Alexa-Freigaben bleiben erhalten.",
     "btn-hide-technical": "Blendet aktuell sichtbare Diagnose-, Energie- und andere technische Entitäten aus.",
     "btn-unhide-visible": "Blendet die durch den aktuellen Filter gefundenen Einträge wieder ein.",
     "btn-save-settings": "Speichert die Einstellungen und richtet bei aktiviertem Alexa-Abgleich den benötigten HA-Dienst ein.",
@@ -157,8 +159,7 @@
     }
     const autoGroup = document.getElementById("btn-enable-useful");
     if (autoGroup) autoGroup.disabled = !globalEditMode || pendingGlobalEdit;
-    const virtualGroup = document.getElementById("btn-create-virtual-group");
-    if (virtualGroup) virtualGroup.disabled = !globalEditMode || pendingGlobalEdit;
+    updateEntitySelectionUi();
     if (finish) {
       finish.classList.toggle("hidden", !globalEditMode && !pendingGlobalEdit);
       finish.disabled = !globalEditMode || pendingGlobalEdit;
@@ -168,10 +169,26 @@
       discard.disabled = pendingGlobalEdit;
     }
     document.getElementById("device-edit-title")?.replaceChildren(document.createTextNode(globalEditMode
-      ? "Geräte zentral bearbeiten" : hasSavedEditDraft() ? "Offener Entwurf" : "Geräte zentral bearbeiten"));
+      ? "Bearbeitung aktiv" : hasSavedEditDraft() ? "Offener Entwurf" : "Geräte & Funktionen"));
     document.getElementById("device-edit-description")?.replaceChildren(document.createTextNode(globalEditMode
-      ? "Eingaben und Auswahl werden automatisch als Entwurf gesichert. „Fertig“ übernimmt alles gemeinsam; ein Neuladen verwirft nichts." + (stagedAutoGroupDeviceIds.size ? " " + stagedAutoGroupDeviceIds.size + " Standardgeräte vorgemerkt." : "")
-      : "Einmal bearbeiten, dann alle Änderungen gemeinsam speichern. Ein offener Entwurf bleibt auch nach einem Neuladen erhalten."));
+      ? "Namen, Typ und Zugriff direkt ändern. Zum Zusammenfassen mehrere Entities auswählen." + (stagedAutoGroupDeviceIds.size ? " " + stagedAutoGroupDeviceIds.size + " Standardgeräte vorgemerkt." : "")
+      : "Namen und Typen direkt ändern. Entities auswählen, um sie zusammenzufassen."));
+  }
+  function updateEntitySelectionUi() {
+    const toolbar = document.getElementById("entity-selection-actions");
+    const count = selectedEntityIds.size;
+    toolbar?.classList.toggle("hidden", !globalEditMode || count === 0);
+    document.getElementById("entity-selection-count").textContent = `${count} ${count === 1 ? "Entity" : "Entities"} ausgewählt`;
+    document.getElementById("btn-combine-selection").disabled = count < 2 || pendingGlobalEdit;
+    for (const input of document.querySelectorAll("input[data-combine-entity]")) {
+      input.checked = selectedEntityIds.has(input.dataset.combineEntity);
+      input.closest(".simple-entity-row")?.classList.toggle("selected-for-combining", input.checked);
+    }
+  }
+  function categoryLabel(category) {
+    return ({LIGHT: "Licht", SWITCH: "Schalter", SMARTPLUG: "Steckdose", OTHER: "Sonstiges",
+      THERMOSTAT: "Thermostat", INTERIOR_BLIND: "Rollladen / Jalousie", GARAGE_DOOR: "Garagentor",
+      CONTACT_SENSOR: "Kontaktsensor", MOTION_SENSOR: "Bewegungssensor", TEMPERATURE_SENSOR: "Temperatursensor"})[category] || category;
   }
   function clearMessage() { document.getElementById("message").className = "message hidden"; }
   function setBusy(button, busy, text) {
@@ -390,6 +407,7 @@
         expanded_simple_devices: [...expandedSimpleDevices],
         auto_group_device_ids: [...stagedAutoGroupDeviceIds],
         pending_virtual_groups: [...pendingVirtualGroups.entries()],
+        selected_entity_ids: [...selectedEntityIds],
         active_virtual_group_id: activeVirtualGroupId,
         visible_area_counts: [...visibleAreaCounts.entries()],
         scroll_y: window.scrollY,
@@ -440,6 +458,8 @@
     editBaseEntities = {revision: draft.base_revision, entities: baseEntities};
     syncPauseClientId = typeof draft.client_id === "string" && draft.client_id ? draft.client_id : null;
     const ui = draft.ui || {};
+    selectedEntityIds.clear();
+    for (const id of ui.selected_entity_ids || []) if (entityLocation(id)) selectedEntityIds.add(id);
     expandedAreas.clear();
     for (const value of Array.isArray(ui.expanded_areas) ? ui.expanded_areas : []) expandedAreas.add(String(value));
     expandedDevices.clear();
@@ -825,10 +845,16 @@
   function renderSimpleEntityList(row, device, isEditing) {
     const list = document.createElement("div");
     list.className = `simple-entity-list${isEditing ? " editing" : ""}`;
+    const shownEndpointNames = new Set();
     for (const entity of device.entities || []) {
       const entityRow = document.createElement("div");
       entityRow.className = "simple-entity-row";
       const settings = entityConfig(entity.entity_id);
+      const grouped = settings.group_mode === "combined";
+      const endpointKey = settings.native_endpoint_ids?.join("|") || entity.entity_id;
+      const showDeviceName = grouped && !shownEndpointNames.has(endpointKey);
+      if (grouped) shownEndpointNames.add(endpointKey);
+      entityRow.dataset.entity = entity.entity_id;
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
       checkbox.className = "export-toggle";
@@ -844,7 +870,7 @@
       const nameField = document.createElement("div");
       nameField.className = "simple-alexa-name";
       const nameCaption = document.createElement("label");
-      nameCaption.textContent = "Name bei Alexa";
+      nameCaption.textContent = grouped ? "Name der Funktion" : "Name bei Alexa";
       const nameInput = document.createElement("input");
       nameInput.className = "export-name";
       nameInput.dataset.entity = String(entity.entity_id || "");
@@ -866,15 +892,24 @@
       entityRow.append(checkbox, text, nameField);
       const fields = document.createElement("div");
       fields.className = "simple-entity-settings";
-      const grouped = settings.group_mode === "combined";
-      const categories = model.display_categories || [];
+      const categories = [...new Set([...(model.display_categories || []), "LIGHT", "SWITCH", "SMARTPLUG",
+        "THERMOSTAT", "INTERIOR_BLIND", "CONTACT_SENSOR", "MOTION_SENSOR", "TEMPERATURE_SENSOR", "OTHER",
+        settings.display_category].filter(Boolean))];
       const writable = capabilityOptions(entity).some(option => ![
         "Alexa.ContactSensor", "Alexa.MotionSensor", "Alexa.TemperatureSensor"
       ].includes(option.id)) && !["sensor", "binary_sensor", "number", "input_number"].includes(entity.domain);
-      fields.innerHTML = `${grouped ? `<label>Name des Alexa-Gesamtgeräts<input class="export-device-name" data-entity="${attr(entity.entity_id)}" value="${attr(settings.logical_device_name || "")}" maxlength="128" ${isEditing ? "" : "disabled"}></label>` : ""}
-        <label>Alexa-Typ<select class="export-category" data-entity="${attr(entity.entity_id)}" ${isEditing ? "" : "disabled"}><option value="" ${settings.display_category_mode === "custom" ? "" : "selected"}>Automatisch (${esc(suggestedCategory(entity, device))})</option>${categories.map(category => `<option value="${attr(category)}" ${settings.display_category_mode === "custom" && settings.display_category === category ? "selected" : ""}>${esc(category)}</option>`).join("")}</select></label>
+      fields.innerHTML = `${showDeviceName ? `<label class="logical-device-name-field">Gemeinsamer Name bei Alexa<input class="export-device-name" data-entity="${attr(entity.entity_id)}" value="${attr(settings.logical_device_name || "")}" maxlength="128" ${isEditing ? "" : "disabled"}></label>` : ""}
+        <label>Alexa-Typ<select class="export-category" data-entity="${attr(entity.entity_id)}" ${isEditing ? "" : "disabled"}><option value="" ${settings.display_category_mode === "custom" ? "" : "selected"}>Automatisch · ${esc(categoryLabel(suggestedCategory(entity, device)))}</option>${categories.map(category => `<option value="${attr(category)}" ${settings.display_category_mode === "custom" && settings.display_category === category ? "selected" : ""}>${esc(categoryLabel(category))}</option>`).join("")}</select></label>
         <label>Zugriff<select class="export-access" data-entity="${attr(entity.entity_id)}" ${isEditing ? "" : "disabled"}><option value="read" ${settings.read_only === true || !writable ? "selected" : ""}>Nur lesend</option><option value="write" ${settings.read_only !== true && writable ? "selected" : ""} ${writable ? "" : "disabled"}>Kann gesetzt werden</option></select></label>`;
       entityRow.append(fields);
+      const selectable = capabilityOptions(entity).length || canUseReadOnlyRange(entity) || settings.capabilities?.length;
+      if (isEditing && selectable) {
+        const selection = document.createElement("label");
+        selection.className = "combine-entity-choice";
+        selection.innerHTML = `<input type="checkbox" data-combine-entity="${attr(entity.entity_id)}" aria-label="${attr(entity.name || entity.entity_id)} zum Zusammenfassen auswählen" ${selectedEntityIds.has(entity.entity_id) ? "checked" : ""}> Zusammenfassen`;
+        entityRow.append(selection);
+        entityRow.classList.toggle("selected-for-combining", selectedEntityIds.has(entity.entity_id));
+      }
       list.append(entityRow);
     }
     row.append(list);
@@ -1042,8 +1077,10 @@
 
   function filterVirtualGroupEntities() {
     const query = document.getElementById("virtual-group-search")?.value.trim().toLocaleLowerCase() || "";
+    const showAll = document.getElementById("virtual-group-show-all").checked;
     for (const row of document.querySelectorAll("[data-virtual-entity-row]")) {
-      row.classList.toggle("hidden", Boolean(query && !row.textContent.toLocaleLowerCase().includes(query)));
+      const selected = row.querySelector("input[data-vgroup-entity]").checked;
+      row.classList.toggle("hidden", query ? !row.textContent.toLocaleLowerCase().includes(query) : !showAll && !selected);
     }
   }
 
@@ -1107,11 +1144,13 @@
     preview.textContent = `1 Alexa-Gesamtgerät „${spec.name || "Name festlegen"}“ mit ${spec.entity_ids.length} Entity(s)\n${lines.join("\n")}`;
   }
 
-  function openVirtualGroupDialog(groupId = null) {
+  function openVirtualGroupDialog(groupId = null, selectedIds = []) {
     if (!globalEditMode) return message("Bitte zuerst den zentralen Bearbeitungsmodus starten.", "warn");
     const existing = groupId ? (config?.virtual_groups || []).find(group => group.group_id === groupId) : null;
     let spec = groupId ? pendingVirtualGroups.get(groupId) : null;
-    if (spec === null) return message("Diese Gruppe ist bereits zur Auflösung vorgemerkt.", "warn");
+    if (groupId && pendingVirtualGroups.has(groupId) && spec === null) {
+      return message("Diese Gruppe ist bereits zur Auflösung vorgemerkt.", "warn");
+    }
     if (!spec && existing) {
       spec = {group_id: groupId, name: existing.name, entity_ids: [...(existing.members || [])],
         names: {}, profiles: Object.fromEntries((existing.members || []).map(entityId => [entityId, {mode: "preserve"}])),
@@ -1124,12 +1163,20 @@
     }
     if (!spec) {
       const randomId = window.crypto?.randomUUID?.().replace(/-/g, "") || `${Date.now()}${Math.random().toString(36).slice(2)}`;
-      spec = {group_id: `virtual:${randomId}`, name: "", entity_ids: [], names: {}, profiles: {}, display_category: "OTHER", complete: false};
+      const places = [...new Set(selectedIds.map(id => entityLocation(id)?.device.area_name).filter(Boolean))];
+      spec = {group_id: `virtual:${randomId}`, name: places.length === 1 ? places[0] : "", entity_ids: [...selectedIds], names: {}, profiles: {}, display_category: "OTHER", complete: false};
+      for (const id of selectedIds) {
+        const settings = entityConfig(id);
+        spec.names[id] = settings.name || entityLocation(id)?.entity.name || id;
+        spec.profiles[id] = settings.native_endpoint_ids?.length ? {mode: "preserve"}
+          : capabilityOptions(entityLocation(id).entity).length ? {mode: "standard"} : {mode: "read_only_range"};
+      }
     }
     activeVirtualGroupId = spec.group_id;
-    document.getElementById("virtual-group-title").textContent = existing ? `Alexa-Gesamtgerät bearbeiten: ${existing.name}` : "Virtuelles Alexa-Gesamtgerät erstellen";
+    document.getElementById("virtual-group-title").textContent = existing ? `Funktionen von „${existing.name}“` : "Als ein Alexa-Gerät zusammenfassen";
     document.getElementById("virtual-group-name").value = spec.name || "";
     document.getElementById("virtual-group-search").value = "";
+    document.getElementById("virtual-group-show-all").checked = spec.entity_ids.length === 0;
     document.getElementById("virtual-group-dialog").dataset.groupId = spec.group_id;
     pendingVirtualGroups.set(spec.group_id, {...spec, complete: false});
     renderVirtualGroupEntities(spec);
@@ -1154,6 +1201,7 @@
     }
     spec.complete = true;
     pendingVirtualGroups.set(spec.group_id, spec);
+    selectedEntityIds.clear();
     activeVirtualGroupId = null;
     document.getElementById("virtual-group-dialog").close();
     persistEditDraft();
@@ -1513,6 +1561,7 @@
       localStorage.removeItem(EDIT_DRAFT_KEY);
       clearTimeout(draftPersistenceTimer);
       pendingVirtualGroups.clear();
+      selectedEntityIds.clear();
       activeVirtualGroupId = null;
       globalEditMode = false;
       pendingGlobalEdit = false;
@@ -1542,6 +1591,7 @@
     localStorage.removeItem(EDIT_DRAFT_KEY);
     clearTimeout(draftPersistenceTimer);
     pendingVirtualGroups.clear();
+    selectedEntityIds.clear();
     activeVirtualGroupId = null;
     globalEditMode = false;
     pendingGlobalEdit = false;
@@ -1874,6 +1924,15 @@
     if (element) hideButtonTooltip(element);
   });
   document.getElementById("content").addEventListener("change", async event => {
+    if (event.target.matches("input[data-combine-entity]")) {
+      if (!globalEditMode) return;
+      const id = event.target.dataset.combineEntity;
+      if (event.target.checked) selectedEntityIds.add(id);
+      else selectedEntityIds.delete(id);
+      updateEntitySelectionUi();
+      persistEditDraft();
+      return;
+    }
     const target = event.target, entityId = target.dataset.entity; if (!entityId) return;
     const settings = entityConfig(entityId);
     if (target.classList.contains("export-toggle")) {
@@ -1946,7 +2005,15 @@
     document.getElementById("content").scrollIntoView({behavior: "smooth", block: "start"});
   });
   document.getElementById("btn-refresh").addEventListener("click", () => load(true));
-  document.getElementById("btn-create-virtual-group").addEventListener("click", () => openVirtualGroupDialog());
+  document.getElementById("btn-combine-selection").addEventListener("click", () => {
+    if (selectedEntityIds.size >= 2) openVirtualGroupDialog(null, [...selectedEntityIds]);
+  });
+  document.getElementById("btn-clear-entity-selection").addEventListener("click", () => {
+    selectedEntityIds.clear();
+    updateEntitySelectionUi();
+    persistEditDraft();
+  });
+  document.getElementById("virtual-group-show-all").addEventListener("change", filterVirtualGroupEntities);
   document.getElementById("virtual-group-list").addEventListener("click", event => {
     const button = event.target.closest("button[data-virtual-action]");
     if (!button) return;

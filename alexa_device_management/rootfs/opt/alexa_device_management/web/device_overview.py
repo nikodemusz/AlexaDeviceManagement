@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import pathlib
 import re
@@ -709,10 +710,15 @@ def build_overview(
 
 async def page(request: web.Request) -> web.Response:
     text = (STATIC_DIR / "device_overview.html").read_text(encoding="utf-8")
+    asset_version = hashlib.sha256(b"".join(
+        (STATIC_DIR / name).read_bytes()
+        for name in ("device_overview.js", "device_overview.css")
+    )).hexdigest()[:16]
     ingress_path = request.headers.get("X-Ingress-Path", "").rstrip("/")
     return web.Response(
-        text=text.replace("{{INGRESS_PATH}}", ingress_path),
+        text=text.replace("{{INGRESS_PATH}}", ingress_path).replace("{{OVERVIEW_ASSET_VERSION}}", asset_version),
         content_type="text/html",
+        headers={"Cache-Control": "no-store"},
     )
 
 

@@ -86,7 +86,7 @@ pre{margin:0;max-height:70vh;overflow:auto;padding:16px;background:#111827;color
 /* Dense but readable entity lists on narrow screens. Keep form fields at
    16px on iOS to avoid involuntary browser zoom when editing names. */
 @media(max-width:700px){
-  .topbar{position:static}
+  .topbar{position:sticky}
   .simple-device-row{grid-template-columns:minmax(0,1fr)}
   .simple-device-row > .device-actions{grid-column:1/-1;min-width:0}
   .simple-device-row > .simple-entity-list{grid-column:1/-1;min-width:0;width:100%}
@@ -165,3 +165,36 @@ pre{margin:0;max-height:70vh;overflow:auto;padding:16px;background:#111827;color
 .alexa-details-summary>div{min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
 .alexa-details-summary dt{font-size:12px;color:var(--muted);font-weight:650}
 .alexa-details-summary dd{margin:4px 0 0;overflow-wrap:anywhere;user-select:text;-webkit-user-select:text}
+
+/* One sticky surface keeps editing and selection actions within reach. */
+.topbar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px 16px}
+.topbar .device-edit-toolbar{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 16px;margin:0;padding:10px 0 0;border:0;border-top:1px solid var(--line);border-radius:0}
+.device-edit-description{max-width:65ch}
+.entity-selection-actions{grid-column:1/-1;grid-row:2;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;border-radius:8px;background:var(--primary-soft)}
+.entity-selection-actions span{font-size:12px;font-weight:700;margin-right:auto}
+.device-edit-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;width:auto}
+.simple-entity-row{padding:12px 8px;gap:8px;border-bottom:1px solid var(--line);border-radius:8px}
+.simple-entity-row .simple-alexa-name{grid-column:2/-1;grid-template-columns:minmax(0,1fr) auto;gap:5px 8px}
+.simple-entity-row .simple-alexa-name>label{grid-column:1/-1}
+.simple-entity-row .simple-entity-settings{grid-column:2/-1;gap:10px}
+.simple-entity-row .simple-entity-settings label{font-size:12px;color:var(--muted)}
+.simple-entity-row input:disabled,.simple-entity-row select:disabled{opacity:1;color:var(--text);background:var(--bg);cursor:default}
+.combine-entity-choice{grid-column:2/-1;display:flex;align-items:center;gap:7px;font-size:12px;color:var(--primary);cursor:pointer;justify-self:start}
+.selected-for-combining{background:var(--primary-soft);box-shadow:inset 3px 0 var(--primary)}
+@media(max-width:620px){
+  .topbar{gap:8px;padding:9px 10px;grid-template-columns:1fr}
+  .topbar h1{font-size:16px}.topbar .subtitle{display:none}
+  .topbar .top-actions{display:flex;flex-wrap:nowrap;gap:5px;width:auto;overflow-x:auto}
+  .topbar .top-actions .button{font-size:11px;padding:6px 8px;white-space:nowrap;flex-shrink:0}
+  .topbar .device-edit-toolbar{grid-template-columns:minmax(0,1fr) auto;gap:6px;padding-top:7px}
+  .topbar .device-edit-copy strong{font-size:12px}.topbar #device-edit-description{display:none}
+  .topbar .device-edit-actions{gap:5px;flex-wrap:nowrap}
+  .topbar .device-edit-actions .button{font-size:11px;width:auto;padding:7px 8px;max-width:145px}
+  .entity-selection-actions{gap:6px;padding:6px}
+  .entity-selection-actions .button{font-size:11px;padding:6px 7px}
+  .entity-selection-actions span{flex-basis:100%;font-size:11px}
+  .simple-entity-row .simple-entity-settings{gap:8px}
+  .simple-entity-row .simple-entity-settings label{flex-basis:130px;font-size:11px}
+  .simple-entity-row .simple-entity-settings .logical-device-name-field{flex-basis:100%}
+  .simple-entity-row .simple-entity-settings input,.simple-entity-settings select{font-size:16px;min-height:36px}
+}
