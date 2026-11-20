@@ -161,7 +161,8 @@ class NativeDeviceContractTests(unittest.TestCase):
     def urlopen(self, request, timeout):
         url = urllib.parse.urlsplit(request.full_url)
         self.assertEqual((url.scheme, url.netloc), ("https", "offline.invalid"))
-        self.assertEqual(timeout, 8)
+        self.assertGreater(timeout, 0)
+        self.assertLessEqual(timeout, adapter.HTTP_TIMEOUT_SECONDS)
         path = url.path
         body = json.loads(request.data) if request.data else None
         self.requests.append((path, request.get_method(), copy.deepcopy(body)))
@@ -219,7 +220,9 @@ class NativeDeviceContractTests(unittest.TestCase):
         self.assertEqual(self.services, [(service, expected_payload)])
         self.assertEqual(self.properties(result)[prop], expected)
         self.assertEqual([path for path, _, _ in self.requests],
-                         ["/v1/authorize", "/v1/config", "/v1/control", "/v1/state"])
+                         ["/v1/authorize", "/v1/config"]
+                         + (["/v1/state"] if action == "AdjustBrightness" else [])
+                         + ["/v1/control", "/v1/state"])
         self.assert_contract(result, endpoint)
         self.assertTrue(all(p["timeOfSample"] == UPDATED for p in result["context"]["properties"]
                             if p["namespace"] != "Alexa.EndpointHealth"))
@@ -310,6 +313,12 @@ class NativeDeviceContractTests(unittest.TestCase):
         self.control("native:desk", "Alexa.BrightnessController", "SetBrightness", {"brightness": 42},
                      "/services/light/turn_on", {"entity_id": "light.test_desk", "brightness_pct": 42},
                      ("Alexa.BrightnessController", "brightness", None), 42)
+
+    def test_relative_brightness_reaches_existing_gateway_set_brightness_action(self):
+        self.states["light.test_desk"].update(state="on", attributes={"brightness": 128})
+        self.control("native:desk", "Alexa.BrightnessController", "AdjustBrightness", {"brightnessDelta": 10},
+                     "/services/light/turn_on", {"entity_id": "light.test_desk", "brightness_pct": 60},
+                     ("Alexa.BrightnessController", "brightness", None), 60)
 
     def test_toggle_uses_instance_and_correct_entity(self):
         self.control("native:toggle", "Alexa.ToggleController", "TurnOn", {}, "/services/input_boolean/turn_on",
