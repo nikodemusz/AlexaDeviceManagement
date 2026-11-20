@@ -184,7 +184,7 @@ async def _refresh_overview_sources(server: Any) -> None:
         _persist_overview_cache()
 
 
-def _schedule_overview_refresh(app: web.Application, server: Any) -> None:
+def _schedule_overview_refresh(app: web.Application, server: Any, *, force: bool = False) -> None:
     """Start a stale-while-revalidate refresh without delaying the UI response."""
     task = app.get("overview_refresh_task")
     if task and not task.done():
@@ -192,7 +192,7 @@ def _schedule_overview_refresh(app: web.Application, server: Any) -> None:
     now = time.time()
     # Failed refreshes leave the last good snapshot intact and stale. Back off
     # even in that case so each view poll does not launch another HTTP 299 call.
-    if now - float(_OVERVIEW_SOURCE_CACHE.get("last_attempt_at") or 0) < _OVERVIEW_RETRY_INTERVAL:
+    if not force and now - float(_OVERVIEW_SOURCE_CACHE.get("last_attempt_at") or 0) < _OVERVIEW_RETRY_INTERVAL:
         return
     if _OVERVIEW_REFRESH_LOCK.locked():
         return
@@ -230,13 +230,13 @@ async def _stop_overview_refresh(app: web.Application) -> None:
             task.cancel()
 
 
-def _schedule_alexa_device_refresh(app: web.Application, server: Any) -> None:
+def _schedule_alexa_device_refresh(app: web.Application, server: Any, *, force: bool = False) -> None:
     """Refresh Alexa inventory without blocking a request that can use cache."""
     task = app.get("overview_device_refresh_task")
     if task and not task.done():
         return
     now = time.time()
-    if now - float(app.get("overview_device_refresh_last_attempt") or 0) < _OVERVIEW_RETRY_INTERVAL:
+    if not force and now - float(app.get("overview_device_refresh_last_attempt") or 0) < _OVERVIEW_RETRY_INTERVAL:
         return
     lock = getattr(server, "_DEVICES_REFRESH_LOCK", None)
     if lock is not None and lock.locked():
@@ -487,6 +487,8 @@ def _native_bindings(config: dict[str, Any]) -> dict[str, list[str]]:
         if not device.get("enabled", True):
             continue
         for capability in device.get("capabilities", []):
+            if not capability.get("enabled", True):
+                continue
             entity_id = capability.get("entity_id")
             if entity_id:
                 ids = bindings.setdefault(entity_id, [])
@@ -519,7 +521,7 @@ def _device_status(statuses: Iterable[str]) -> str:
     return "not_exposed"
 
 
-def _grouping_suggestion(entities: list[dict[str, Any]], device_name: str) -> dict[str, Any]:
+def _grouping_suggestion(entities: list[dict[str, Any]], device_name: str, ha_device: dict[str, Any] | None = None) -> dict[str, Any]:
     """Preview a logical HA device using its safe standard Alexa profile."""
     active = [entity for entity in entities if entity.get("export", {}).get("enabled")]
     active_ids = [entity["entity_id"] for entity in active]
@@ -543,7 +545,7 @@ def _grouping_suggestion(entities: list[dict[str, Any]], device_name: str) -> di
     # standard-export action will apply. This also avoids advertising a
     # temperature helper as a duplicate thermostat endpoint.
     return native_export.standard_device_group({
-        "device_id": "preview", "name": device_name, "entities": entities,
+        **(ha_device or {}), "device_id": "preview", "name": device_name, "entities": entities,
     })
 
 
@@ -565,6 +567,25 @@ def build_overview(
 
     public_alexa = [_public_alexa_device(device, groups) for device in alexa_devices]
     native_inventory_ids = [native_lifecycle.identifiers(device) for device in alexa_devices]
+    # Decode each Alexa record once instead of repeating recursive ID extraction
+    # for every HA entity. Keep legacy and native matching rules separate.
+    identity_index: dict[str, set[int]] = {}
+    native_index: dict[str, set[int]] = {}
+    for index, device in enumerate(alexa_devices):
+        for value in native_inventory_ids[index]:
+            native_index.setdefault(value, set()).add(index)
+        if str(device.get("source") or "") == "echo":
+            continue
+        identifiers = _device_identifiers(device)
+        explicit = _alexa_entity_id(device)
+        if explicit:
+            identifiers.add(explicit)
+        for value in identifiers:
+            identity_index.setdefault(value, set()).add(index)
+
+    def lookup(index, values):
+        return set().union(*(index.get(value, set()) for value in values))
+
     matched_indexes: set[int] = set()
     devices: list[dict[str, Any]] = []
 
@@ -598,12 +619,15 @@ def build_overview(
                 settings = {}
             enabled = bool(settings.get("enabled") if native_primary else config.get("legacy_export_enabled", True) and settings.get("enabled"))
             native_ids = native_bindings.get(entity_id, [])
-            match_indexes = _entity_matches(entity_id, alexa_devices, native_ids)
+            expected = _canonical(entity_id)
+            for endpoint_id in native_ids:
+                expected.update(_canonical(endpoint_id))
+            match_indexes = sorted(lookup(identity_index, expected | {entity_id.lower()}))
             matched_indexes.update(match_indexes)
             matches = [public_alexa[index] for index in match_indexes]
-            native_matches = [index for index, alexa in enumerate(alexa_devices)
-                              if any(_canonical(value) & native_inventory_ids[index]
-                                     for value in native_ids)]
+            native_matches = set()
+            for value in native_ids:
+                native_matches.update(lookup(native_index, _canonical(value)))
             status = (_entity_status(bool(native_ids), len(native_matches)) if native_primary
                       else _entity_status(enabled or bool(native_ids), len(matches)))
             if native_primary and not native_ids and matches:
@@ -657,7 +681,7 @@ def build_overview(
             **{key: value for key, value in ha_device.items() if key != "entities"},
             "entities": public_entities,
             "grouping_suggestion": _grouping_suggestion(
-                public_entities, str(ha_device.get("name") or device_id)
+                public_entities, str(ha_device.get("name") or device_id), ha_device
             ),
             "status": _device_status(statuses),
             "hidden": hidden,
@@ -683,8 +707,7 @@ def build_overview(
     if native_primary:
         active_ids = {endpoint for values in native_bindings.values() for endpoint in values}
         alexa_counts = {
-            endpoint: sum(bool(_canonical(endpoint) & identifiers)
-                          for identifiers in native_inventory_ids)
+            endpoint: len(lookup(native_index, _canonical(endpoint)))
             for endpoint in active_ids
         }
         present_ids = {endpoint for endpoint, count in alexa_counts.items() if count}
@@ -731,18 +754,17 @@ async def overview(request: web.Request) -> web.Response:
     try:
         _load_overview_cache(server)
         if force:
-            if server.is_configured():
-                await server.refresh_devices_cache()
-            await _refresh_overview_sources(server)
-        else:
-            if _overview_sources_stale(server):
-                _schedule_overview_refresh(request.app, server)
-            if server.is_configured():
-                server._load_devices_cache()
-                device_cache = getattr(server, "_DEVICES_CACHE", {})
-                cache_age = time.time() - float(device_cache.get("updated_at") or 0)
-                if cache_age > _OVERVIEW_CACHE_TTL:
-                    _schedule_alexa_device_refresh(request.app, server)
+            _schedule_overview_refresh(request.app, server, force=True)
+        elif _overview_sources_stale(server):
+            _schedule_overview_refresh(request.app, server)
+        if server.is_configured():
+            server._load_devices_cache()
+            device_cache = getattr(server, "_DEVICES_CACHE", {})
+            cache_age = time.time() - float(device_cache.get("updated_at") or 0)
+            if force:
+                _schedule_alexa_device_refresh(request.app, server, force=True)
+            elif cache_age > _OVERVIEW_CACHE_TTL:
+                _schedule_alexa_device_refresh(request.app, server)
 
         ha_inventory = _OVERVIEW_SOURCE_CACHE.get("ha_inventory") or {
             "devices": [], "areas": [], "display_categories": []

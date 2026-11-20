@@ -303,7 +303,7 @@ class NativeLifecycleTests(unittest.IsolatedAsyncioTestCase):
              patch.object(native_lifecycle, "cleanup_legacy", AsyncMock()), \
              patch.object(native_lifecycle, "publish_native", AsyncMock()) as publish:
             await native_lifecycle.reconcile(server)
-            publish.assert_awaited_once_with(False)
+            publish.assert_awaited_once_with(False, None)
             self.assertEqual(native_lifecycle.read_status()["native_pending"], 1)
 
 

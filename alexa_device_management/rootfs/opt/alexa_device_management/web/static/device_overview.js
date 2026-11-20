@@ -41,7 +41,7 @@
     "btn-settings": "Öffnet Einstellungen für Alexa-Abgleich, Alexa-Gruppen und Export.",
     "btn-preview": "Zeigt die v6-Hauptkonfiguration; sie kann im YAML-Editor geändert werden.",
     "btn-restart": "Startet Home Assistant neu, um einen neu eingerichteten oder aktualisierten Alexa-Abgleichsdienst zu laden.",
-    "btn-event-sync": "Übernimmt bei alten, noch nicht gruppierten v6-Geräten den Standard, fasst bereits ausgewählte Entities desselben HA-Geräts zusammen und sendet danach per AddOrUpdateReport die Änderungen an Alexa. Entfernte Endpunkte werden per DeleteReport bereinigt. Deaktivierte Entities bleiben deaktiviert; ausdrücklich getrennte oder angepasste Geräte bleiben erhalten. Schreibt keine alexa.yaml.",
+    "btn-event-sync": "Sendet gespeicherte Änderungen manuell an Alexa und prüft abgewählte Geräte. Unveränderte Alexa-Geräte werden nicht erneut gemeldet.",
     "btn-group-sync": "Ordnet bereits vorhandene Alexa-Endpunkte den konfigurierten Alexa-Gruppen zu.",
     "btn-enable-useful": "Merkt für die aktuell sichtbaren Home-Assistant-Geräte die unterstützten Standardfunktionen vor. Erst „Fertig“ speichert sie gemeinsam mit den anderen Änderungen.",
     "btn-start-edit": "Pausiert den Alexa-Abgleich und aktiviert die Eingaben für alle geöffneten Entitätenlisten.",
@@ -60,6 +60,7 @@
     "more-area": "Zeigt den nächsten Block von Geräten in diesem Raum.",
     "toggle-device": "Öffnet oder schließt die Entitäten dieses Geräts.",
     "toggle-simple-device": "Öffnet oder schließt die Entitäten dieses Geräts.",
+    "sync-one-device": "Aktualisiert nur die Alexa-Endpunkte dieses Geräts.",
     "hide-device": "Blendet das Gerät in dieser Verwaltung aus, ohne es aus Home Assistant zu löschen.",
     "show-device": "Blendet das Gerät in dieser Verwaltung wieder ein.",
     "hide-entity": "Blendet diese Entität in der Verwaltung aus.",
@@ -813,6 +814,16 @@
       control.disabled = isWaiting;
       control.setAttribute("aria-expanded", String(isOpen));
       if (!isEditing || !isOpen) actions.append(control);
+      const allEndpointIds = new Set((item.device.entities || []).flatMap(entity => entity.native?.endpoint_ids || []));
+      if (!isEditing && !isWaiting && allEndpointIds.size) {
+        const sync = document.createElement("button");
+        sync.className = "button secondary small";
+        sync.dataset.action = "sync-one-device";
+        sync.dataset.device = deviceId;
+        sync.textContent = "Dieses Gerät abgleichen";
+        sync.title = "Nur die Alexa-Endpunkte dieses Geräts aktualisieren";
+        actions.append(sync);
+      }
       row.append(info, actions);
       if (isOpen) renderSimpleEntityList(row, item.device, isEditing);
       list.append(row);
@@ -1570,7 +1581,7 @@
       await load(false);
       const configured = grouped?.configured?.length || 0;
       const skipped = grouped?.skipped?.length || 0;
-      message(`Alle Änderungen wurden gemeinsam gespeichert${grouped ? `; ${configured} Standardgerät${configured === 1 ? "" : "e"} eingerichtet${skipped ? `, ${skipped} ausgelassen` : ""}` : ""}${virtualChanges ? `; ${virtualChanges} virtuelles Alexa-Gesamtgerät(er) übernommen` : ""}. Der Alexa-Abgleich läuft weiter.`, skipped ? "warn" : "ok");
+      message(`Alle Änderungen wurden gemeinsam gespeichert${grouped ? `; ${configured} Standardgerät${configured === 1 ? "" : "e"} eingerichtet${skipped ? `, ${skipped} ausgelassen` : ""}` : ""}${virtualChanges ? `; ${virtualChanges} virtuelles Alexa-Gesamtgerät(er) übernommen` : ""}. Änderungen können über „Änderungen an Alexa senden“ manuell abgeglichen werden.`, skipped ? "warn" : "ok");
     } catch (error) {
       message(`Änderungen konnten nicht vollständig abgeschlossen werden. Der Entwurf bleibt erhalten und kann erneut gespeichert werden: ${error.message}`, "err");
     } finally {
@@ -1616,29 +1627,27 @@
     finally { setBusy(button, false); }
   }
 
-  async function eventSync() {
+  async function eventSync(endpointIds = null) {
     if (hasEditorSession()) return message("Beende zuerst die Gerätebearbeitung, bevor du synchronisierst.", "warn");
-    const button = document.getElementById("btn-event-sync"); setBusy(button, true, "Synchronisiere…");
+    const button = document.getElementById("btn-event-sync");
+    setBusy(button, true, "Starte…");
     try {
-      // A name edit may still be saving after its input blur. Persist all queued
-      // edits before reconciliation reads the native configuration from disk.
       await saveConfig();
-      const result = await request("/api/native-export/sync", {method: "POST", body: JSON.stringify({force: true})});
-      if (result.queued) {
-        const grouped = result.normalized_groups || [];
-        const merged = grouped.reduce((total, group) => total + Math.max(0, (group.old_endpoint_count || 0) - (group.endpoint_count || 0)), 0);
-        const note = grouped.length
-          ? `\n${grouped.length} Gerät${grouped.length === 1 ? "" : "e"} nach Standard gruppiert; ${merged} überzählige Alexa-Endpunkt${merged === 1 ? "" : "e"} werden bereinigt.`
-          : "\nKeine bisher ungruppierten Standardgeräte gefunden.";
-        message(`${result.message}${note}`, grouped.length ? "warn" : "ok");
-        return;
-      }
-      message(`Alexa Event Gateway erfolgreich.\nUpdates: ${result.official?.add_or_update_count || 0}\nNative Löschungen: ${result.official?.delete_count || 0}\nAlte v5-Geräte gelöscht: ${result.lifecycle?.legacy_deleted || 0}\nVerbleibende v5-Geräte: ${result.lifecycle?.legacy_remaining ?? "ungeprüft"}`); await load(true);
+      const body = endpointIds ? {endpoint_ids: endpointIds} : {};
+      const result = await request("/api/native-export/sync", {method: "POST", body: JSON.stringify(body)});
+      if (result.queued) reconciliationRunning = true;
+      message(result.message || "Alexa-Abgleich läuft im Hintergrund.");
     } catch (error) {
-      const fallback = error.body?.fallback;
-      message(`Event-Gateway-Abgleich fehlgeschlagen: ${error.message}` + (fallback ? `\nWeb-Fallback entfernt: ${(fallback.deleted_removed || []).length}` : ""), "err");
-      await load(false);
+      message(`Alexa-Abgleich konnte nicht gestartet werden: ${error.message}`, "err");
     } finally { setBusy(button, false); }
+  }
+
+  async function syncOneDevice(deviceId) {
+    const device = (model.devices || []).find(item => String(item.device_id) === deviceId);
+    if (!device) throw new Error("Gerät in der Übersicht nicht gefunden.");
+    const endpointIds = [...new Set((device.entities || []).flatMap(entity => entity.native?.endpoint_ids || []))];
+    if (!endpointIds.length) throw new Error("Für dieses Gerät ist kein Alexa-Endpunkt aktiviert.");
+    await eventSync(endpointIds);
   }
 
   async function groupSync() {
@@ -1875,6 +1884,7 @@
       else if (action === "configure-device-group") openDeviceGroup(button.dataset.device);
       else if (action === "disable-device-export") await disableDeviceExport(button.dataset.device);
       else if (action === "toggle-simple-device") toggleSimpleDevice(button, button.dataset.device);
+      else if (action === "sync-one-device") await syncOneDevice(button.dataset.device);
       else if (action === "suggest-simple-name") {
         const entityId = button.dataset.entity;
         const value = button.dataset.suggestion || "";
@@ -2050,7 +2060,7 @@
   document.getElementById("btn-finish-edit").addEventListener("click", event => finishGlobalEditMode(event.currentTarget));
   document.getElementById("btn-discard-edit").addEventListener("click", () => discardGlobalEditDraft());
   document.getElementById("btn-restart").addEventListener("click", restart);
-  document.getElementById("btn-event-sync").addEventListener("click", eventSync);
+  document.getElementById("btn-event-sync").addEventListener("click", () => eventSync());
   document.getElementById("btn-group-sync").addEventListener("click", groupSync);
   document.getElementById("btn-preview").addEventListener("click", previewYaml);
   document.getElementById("btn-settings").addEventListener("click", openSettings);
@@ -2125,8 +2135,8 @@
         }
         if (document.activeElement?.matches("input, select, textarea") || document.getElementById("settings-dialog").open || document.getElementById("yaml-dialog").open || document.getElementById("device-group-dialog").open) return;
         reconciliationRunning = false;
-        const errors = [status.publish_error, status.legacy_error, status.background_error].filter(Boolean);
-        const completed = `Alexa-Abgleich abgeschlossen. Alte v5-Geräte gelöscht: ${status.legacy_deleted || 0}. Abgewählte v6-Geräte gelöscht: ${status.unselected_native_deleted || 0}. Noch unerwünscht: ${status.selection_remaining ?? "ungeprüft"}. Bestand wird neu geladen.`;
+        const errors = [status.publish_error, status.last_sync_scope === "all" ? status.legacy_error : null, status.background_error].filter(Boolean);
+        const completed = `Alexa-Abgleich abgeschlossen: ${status.last_report_updates || 0} Gerät(e) aktualisiert, ${status.last_report_deletes || 0} Endpunkt(e) zur Entfernung gemeldet. Der Alexa-Bestand wird im Hintergrund aktualisiert.`;
         message(errors.length ? errors.join("\n") : completed, errors.length ? "err" : "ok");
         await load(false);
       }

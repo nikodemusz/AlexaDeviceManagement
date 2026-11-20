@@ -234,6 +234,14 @@ def standard_device_group(ha_device):
     for entity in entities:
         entity_id = entity["entity_id"]
         domain = str(entity.get("domain") or entity_id.split(".", 1)[0])
+        # Fibaro Dimmer 2 FGD-212 has one load output. Z-Wave exposes the
+        # second physical input as another light named "(2)"; it is not a
+        # second controllable load. Explicit manual selection still works.
+        model = str(ha_device.get("model") or "").upper()
+        manufacturer = str(ha_device.get("manufacturer") or "").casefold()
+        if (model == "FGD-212" and ("fibaro" in manufacturer or "fibargroup" in manufacturer)
+                and domain == "light" and str(entity.get("original_name") or "").strip() == "(2)"):
+            continue
         if entity.get("entity_category") or domain not in {
             "light", "switch", "fan", "cover", "climate", "binary_sensor", "sensor"
         }:
@@ -968,10 +976,7 @@ async def autosave(request):
             preferences[key] = copy.deepcopy(body[key])
     preferences["legacy_export_enabled"] = False
     preferences = ha_export.CONFIG_STORE.save(preferences)
-    trigger = request.app.get("native_reconcile_trigger")
-    queued = callable(trigger) and changed
-    if queued:
-        trigger(force=True)
+    queued = False  # Publication is explicitly started by the user.
     return web.json_response({"ok": True, "reconciliation_queued": queued,
                               "configuration": configuration(proposed, preferences)})
 
@@ -1003,10 +1008,7 @@ async def configure_group(request):
     changed = revision(proposed) != body["native_revision"]
     if changed:
         STORE.save(proposed)
-    trigger = request.app.get("native_reconcile_trigger")
-    queued = callable(trigger) and changed
-    if queued and changed:
-        trigger(force=True)
+    queued = False  # Publication is explicitly started by the user.
     return web.json_response({"ok": True, "reconciliation_queued": queued,
                               "configuration": configuration(proposed, ha_export.CONFIG_STORE.load())})
 
@@ -1037,10 +1039,7 @@ async def configure_virtual_group(request):
     changed = revision(proposed) != body["native_revision"]
     if changed:
         STORE.save(proposed)
-    trigger = request.app.get("native_reconcile_trigger")
-    queued = callable(trigger) and changed
-    if queued:
-        trigger(force=True)
+    queued = False  # Publication is explicitly started by the user.
     return web.json_response({"ok": True, "reconciliation_queued": queued,
                               "configuration": configuration(proposed, ha_export.CONFIG_STORE.load())})
 
@@ -1092,10 +1091,7 @@ async def auto_group(request):
         if revision(STORE.load()) != body["native_revision"]:
             return web.json_response({"error": "v6-Konfiguration wurde zwischenzeitlich geändert."}, status=409)
         STORE.save(proposed)
-    trigger = request.app.get("native_reconcile_trigger")
-    queued = callable(trigger) and changed
-    if queued and changed:
-        trigger(force=True)
+    queued = False  # Publication is explicitly started by the user.
     return web.json_response({"ok": True, "configured": configured, "skipped": skipped,
                               "reconciliation_queued": queued,
                               "configuration": configuration(proposed, ha_export.CONFIG_STORE.load())})
@@ -1226,10 +1222,7 @@ async def save_yaml(request):
         return web.json_response({"error": "v6-Konfiguration wurde zwischenzeitlich geändert."}, status=409)
     if changed:
         STORE.save(proposed)
-    trigger = request.app.get("native_reconcile_trigger")
-    queued = callable(trigger) and changed
-    if queued:
-        trigger(force=True)
+    queued = False  # Publication is explicitly started by the user.
     return web.json_response({"ok": True, "reconciliation_queued": queued,
                               "configuration": configuration(proposed, ha_export.CONFIG_STORE.load())})
 

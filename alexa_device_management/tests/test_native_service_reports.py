@@ -90,6 +90,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["add_or_update_count"], 162)
         self.assertEqual(self.hass.session.post.await_count, 4)
+        self.assertEqual(sum(len(item["endpoint_ids"]) for item in result["native_reports"]), 162)
         all_ids = []
         for args in self.hass.session.post.call_args_list:
             self.assertEqual(args.kwargs["headers"]["Authorization"], "Bearer dummy-lwa")
@@ -100,6 +101,17 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(all_ids), {f"native:{i}" for i in range(162)})
         self.assertNotIn("must_not_be_returned", json.dumps(result))
         self.assertNotIn("dummy-lwa", json.dumps(result))
+
+    async def test_network_error_preserves_previously_accepted_batch_ids(self):
+        response = Mock(status=202)
+        response.text = AsyncMock(return_value="")
+        self.hass.session.post.side_effect = [response, TimeoutError("private details")]
+        native = [{"endpointId": f"native:{i}"} for i in range(51)]
+        result = await self.call({"native_endpoints": native})
+        self.assertFalse(result["ok"])
+        self.assertEqual(len(result["native_reports"]), 1)
+        self.assertEqual(len(result["native_reports"][0]["endpoint_ids"]), 50)
+        self.assertNotIn("private details", json.dumps(result))
 
     async def test_legacy_additions_are_rejected_without_sending_anything(self):
         result = await self.call({"add_or_update": ["light.old"]})

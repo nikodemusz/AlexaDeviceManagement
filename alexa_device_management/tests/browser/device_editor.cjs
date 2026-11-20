@@ -61,6 +61,9 @@ const server = http.createServer(async(req,res)=>{
     assert.equal(configuration.entities['switch.relay_a'].name,'Leselicht');
     assert.equal(configuration.entities['switch.relay_a'].display_category,'LIGHT');
     assert.equal(configuration.entities['switch.relay_a'].read_only,true);
+    await page.locator('[data-action="sync-one-device"][data-device="relay"]').click();
+    const syncWrite=writes.find(w=>w.path==='/api/native-export/sync');
+    assert.deepEqual(syncWrite.body.endpoint_ids,['native:relay']);
     await page.reload();await page.locator('#btn-start-edit').click();
     assert.equal(await name.inputValue(),'Leselicht');
     assert.equal(await page.locator('.export-category[data-entity="switch.relay_a"]').inputValue(),'LIGHT');

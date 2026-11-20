@@ -10,9 +10,9 @@ CSS = (STATIC / "device_overview.css").read_text(encoding="utf-8")
 def test_event_gateway_button_has_clear_description():
     assert "Änderungen an Alexa senden" in HTML
     assert '"btn-event-sync"' in SCRIPT
-    assert "AddOrUpdateReport" in SCRIPT
-    assert "DeleteReport" in SCRIPT
-    assert "Schreibt keine alexa.yaml" in SCRIPT
+    assert "Sendet gespeicherte Änderungen manuell" in SCRIPT
+    assert "Unveränderte Alexa-Geräte werden nicht erneut gemeldet" in SCRIPT
+    assert '"sync-one-device"' in SCRIPT
 
 
 def test_readable_tooltips_cover_dynamic_actions_and_keyboard_focus():

@@ -312,6 +312,25 @@ class DeviceOverviewTests(unittest.TestCase):
         self.assertTrue(device["entities"][1]["hidden_directly"])
 
 
+    def test_identifier_extraction_scales_with_alexa_records_not_ha_entities(self):
+        inventory = {"devices": [{"device_id": "d", "name": "Test", "entities": [
+            {"entity_id": f"light.item_{n}", "domain": "light", "name": str(n)}
+            for n in range(200)]}]}
+        alexa = [alexa_device(f"id-{n}", f"light.item_{n}") for n in range(25)]
+        with patch.object(device_overview, "_device_identifiers", wraps=device_overview._device_identifiers) as extract:
+            result = build_overview(inventory, alexa, [], {"entities": {}})
+        self.assertLessEqual(extract.call_count, len(alexa) * 2)
+        self.assertEqual(result["summary"]["ha_entities"], 200)
+        self.assertEqual(result["devices"][0]["entities"][0]["alexa"]["count"], 1)
+
+    def test_disabled_capability_does_not_count_as_native_export(self):
+        native = {"enabled": True, "devices": {"living": {"capabilities": [
+            {"entity_id": "light.wohnzimmer", "interface": "Alexa.PowerController", "enabled": False},
+        ]}}}
+        result = build_overview(ha_inventory(), [], [], {"entities": {}, "export_mode": "native"}, native)
+        self.assertFalse(result["devices"][0]["entities"][0]["native"]["enabled"])
+        self.assertEqual(result["summary"]["native_selected"], 0)
+
     def test_connected_via_falls_back_to_amazon_skill_description(self):
         self.assertEqual(
             device_overview._connected_via({
@@ -417,6 +436,27 @@ class DeviceOverviewRouteTests(unittest.IsolatedAsyncioTestCase):
         groups.assert_not_awaited()
         self.assertTrue(body["source_cache_loading"])
         self.assertEqual(body["devices"], [])
+
+    async def test_forced_refresh_returns_cache_and_only_schedules_remote_reads(self):
+        server = Mock()
+        server.is_configured.return_value = True
+        server._DEVICES_CACHE = {"updated_at": time.time(), "devices": []}
+        store = Mock()
+        store.load.return_value = {"entities": {}}
+        request = Mock()
+        request.app = {"device_overview_server": server, "device_overview_store": store}
+        request.rel_url.query = {"refresh": "1"}
+        device_overview._OVERVIEW_SOURCE_CACHE.update({"ha_inventory": ha_inventory(), "groups": [],
+                                                       "alexa_configured": True, "ha_updated_at": time.time(),
+                                                       "groups_updated_at": time.time()})
+        with patch.object(device_overview, "_schedule_overview_refresh") as source, \
+             patch.object(device_overview, "_schedule_alexa_device_refresh") as devices, \
+             patch.object(device_overview, "NativeSkillConfigStore") as native_store:
+            native_store.return_value.load.return_value = {"enabled": False, "devices": {}}
+            body = json.loads((await device_overview.overview(request)).text)
+        self.assertEqual(body["summary"]["ha_entities"], 2)
+        source.assert_called_once_with(request.app, server, force=True)
+        devices.assert_called_once_with(request.app, server, force=True)
 
     async def test_background_refresh_updates_and_persists_source_snapshots(self):
         server = Mock()

@@ -284,15 +284,45 @@ async def cleanup_legacy(server, native=None):
                             legacy_verified=not fresh_warnings and not legacy)
 
 
-async def publish_native(force=False):
+def _endpoint_fingerprints(items):
+    return {item["endpointId"]: hashlib.sha256(
+        json.dumps(item, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()
+    ).hexdigest() for item in items}
+
+
+async def publish_native(force=False, endpoint_ids=None):
+    """Send only changed endpoints; an explicit scoped request can resend one."""
     async with _REPORT_LOCK:
         native = selection_config()
         status = read_status()
-        # Disabled endpoints may predate published_ids; their IDs still belong
-        # to this configuration. Observed orphan IDs require provider evidence.
         current, active_ids, deleted, fingerprint = _publication_fingerprint(native, status)
-        if not force and status.get("published_revision") == fingerprint:
-            return status
+        hashes = _endpoint_fingerprints(current)
+        saved = status.get("published_endpoint_hashes")
+        if not isinstance(saved, dict):
+            # A matching old all-endpoint fingerprint is proof that these exact
+            # descriptors were accepted; bootstrap without a duplicate report.
+            if status.get("published_revision") == fingerprint:
+                saved = dict(hashes)
+                sent_deletes = set(deleted)
+            else:
+                saved = {}
+                sent_deletes = set()
+        else:
+            saved = dict(saved)
+            sent_deletes = set(status.get("published_deleted_ids") or []) & deleted
+        scoped = endpoint_ids is not None
+        selected = set(endpoint_ids or []) if scoped else active_ids
+        if scoped and (not selected or not selected <= active_ids):
+            raise ValueError("Nur aktive native Endpunkte können einzeln aktualisiert werden.")
+        updates = [item for item in current if item["endpointId"] in selected
+                   and (force or saved.get(item["endpointId"]) != hashes[item["endpointId"]])]
+        removals = set() if scoped else deleted - sent_deletes
+        if not updates and not removals:
+            values = {"published_endpoint_hashes": saved, "published_deleted_ids": sorted(sent_deletes),
+                      "publish_error": None, "last_report_updates": 0, "last_report_deletes": 0}
+            if not scoped:
+                values.update(published_revision=fingerprint, published_ids=sorted(active_ids))
+            return write_status(**values)
         settings = support._event_settings(ha_export.CONFIG_STORE.load())
         if not settings["enabled"]:
             return write_status(publish_error="Alexa Event Gateway ist deaktiviert; v6-Anmeldung steht aus.")
@@ -304,48 +334,91 @@ async def publish_native(force=False):
             return write_status(publish_error="HA-Abgleichsdienst fehlt. In den Einstellungen Alexa-Abgleich aktivieren und speichern; danach HA neu starten.")
         try:
             http, body = await support._call_sync_service({
-                "native_endpoints": current,
-                "delete_endpoint_ids": sorted(deleted),
+                "native_endpoints": updates, "delete_endpoint_ids": sorted(removals),
                 "add_or_update": [], "delete": [], "entity_config": {},
             })
             result = support._service_response(body)
         except Exception:
-            return write_status(publish_error="HA-/Alexa-Abgleich nicht erreichbar; Anmeldung wird wiederholt.")
+            return write_status(publish_error="HA-/Alexa-Abgleich nicht erreichbar; bitte manuell erneut versuchen.")
         if http != 200 or not result.get("ok"):
+            # Persist accepted batches even when another batch failed. A retry
+            # then sends only the rejected endpoints. Older HA components do
+            # not report endpoint_ids; those batches remain pending safely.
+            accepted_updates, accepted_deletes = set(), set()
+            for batch in result.get("native_reports", []):
+                if not isinstance(batch, dict) or batch.get("accepted") is not True:
+                    continue
+                ids = set(x for x in batch.get("endpoint_ids", []) if isinstance(x, str))
+                if batch.get("name") == "AddOrUpdateReport":
+                    accepted_updates |= ids & {item["endpointId"] for item in updates}
+                elif batch.get("name") == "DeleteReport":
+                    accepted_deletes |= ids & removals
+            for endpoint_id in accepted_updates:
+                saved[endpoint_id] = hashes[endpoint_id]
+            for endpoint_id in accepted_deletes:
+                saved.pop(endpoint_id, None)
+            if accepted_updates or accepted_deletes:
+                write_status(published_endpoint_hashes=saved,
+                             published_deleted_ids=sorted(sent_deletes | accepted_deletes))
             if http == 400:
                 return write_status(publish_error="v6-Abgleichsdienst ist noch nicht geladen. HA neu starten.", restart_required=True)
-            return write_status(publish_error=result.get("error") or "Alexa hat den v6-Report nicht angenommen.",
+            rejected = [str(report.get("status")) for report in result.get("native_reports", [])
+                        if isinstance(report, dict) and report.get("accepted") is False
+                        and isinstance(report.get("status"), int)]
+            failed_ids = [endpoint_id for report in result.get("native_reports", [])
+                          if isinstance(report, dict) and report.get("accepted") is False
+                          for endpoint_id in report.get("endpoint_ids", []) if isinstance(endpoint_id, str)]
+            detail = f" (HTTP {', '.join(rejected)})" if rejected else ""
+            if failed_ids:
+                detail += " Betroffene Endpunkte: " + ", ".join(failed_ids[:5])
+                if len(failed_ids) > 5:
+                    detail += f" und {len(failed_ids) - 5} weitere"
+            return write_status(publish_error=(result.get("error") or "Alexa hat den v6-Report nicht angenommen") + detail,
                                 publish_result=result, restart_required=bool(result.get("restart_required")))
-        return write_status(publish_error=None, publish_result=result,
-                            published_revision=fingerprint, published_ids=sorted(active_ids),
-                            published_at=int(time.time()), restart_required=False)
+        for item in updates:
+            saved[item["endpointId"]] = hashes[item["endpointId"]]
+        for endpoint_id in removals:
+            saved.pop(endpoint_id, None)
+        values = dict(publish_error=None, publish_result=result,
+                      published_endpoint_hashes=saved,
+                      published_deleted_ids=sorted(sent_deletes | removals),
+                      last_report_updates=len(updates), last_report_deletes=len(removals),
+                      published_at=int(time.time()), restart_required=False)
+        if not scoped:
+            values.update(published_revision=fingerprint, published_ids=sorted(active_ids))
+        return write_status(**values)
 
 
-async def reconcile(server, force=False):
-    # Cleanup and publication have independent failure handling and credentials.
+async def reconcile(server, force=False, endpoint_ids=None):
+    # A device-only action must never clean up unrelated endpoints.
+    if endpoint_ids is None:
+        try:
+            # Migrate the old aggregate fingerprint before a fresh inventory
+            # can change the set of observed orphan IDs.
+            native = selection_config()
+            old_status = read_status()
+            old_items, _ids, old_deleted, old_revision = _publication_fingerprint(native, old_status)
+            if (not isinstance(old_status.get("published_endpoint_hashes"), dict)
+                    and old_status.get("published_revision") == old_revision):
+                write_status(published_endpoint_hashes=_endpoint_fingerprints(old_items),
+                             published_deleted_ids=sorted(old_deleted))
+            await cleanup_legacy(server, native)
+        except Exception:
+            write_status(inventory_verified=False, selection_verified=False, legacy_verified=False,
+                         legacy_error="Auswahl/Bereinigung nicht prüfbar; keine weitere Löschung.")
     try:
-        await cleanup_legacy(server, selection_config())
-    except Exception:
-        write_status(inventory_verified=False, selection_verified=False, legacy_verified=False,
-                     legacy_error="Auswahl/Bereinigung nicht prüfbar; keine weitere Löschung, erneuter Versuch folgt.")
-    try:
-        # HTTP 202 does not prove presence. Record missing IDs for the UI, but
-        # do not resend an unchanged discovery report on every timer tick.
-        # A changed config or an explicit manual sync publishes again; a failed
-        # report keeps its previous revision and is retried by this timer.
         status = read_status()
         if server.is_configured() and status.get("inventory_verified"):
-            expected = {item["endpointId"] for item in endpoints(NativeSkillConfigStore().load())}
+            expected = {item["endpointId"] for item in endpoints(selection_config())}
             observed = set().union(*(identifiers(item) for item in server._DEVICES_CACHE.get("devices", [])))
-            missing = expected - observed
-            write_status(native_observed=len(expected & observed), native_pending=len(missing))
-        await publish_native(force)
+            write_status(native_observed=len(expected & observed), native_pending=len(expected - observed))
+        await publish_native(force, endpoint_ids)
         if server.is_configured() and not read_status().get("publish_error"):
             fresh, warnings = await server._fetch_devices_from_alexa(server.session_data())
             if not warnings:
                 server._DEVICES_CACHE.update(devices=fresh, updated_at=time.time(), warnings=[])
                 server._persist_devices_cache()
-                expected = {item["endpointId"] for item in endpoints(NativeSkillConfigStore().load())}
+                expected = {item["endpointId"] for item in endpoints(selection_config())}
                 observed = set().union(*(identifiers(item) for item in fresh))
                 write_status(native_observed=len(expected & observed), native_pending=len(expected - observed))
     except Exception:
@@ -354,36 +427,10 @@ async def reconcile(server, force=False):
 
 
 def install(app, server):
-    state = {"job": None, "rerun": False, "pending_force": False, "edit_pauses": {}}
-    def start_job(force=False):
-        if _active_edit_pauses(state):
-            if force:
-                state["pending_force"] = True
-            return
-        next_force = bool(force or state["pending_force"])
-        task = state["job"]
-        if task and not task.done():
-            state["rerun"] = state["rerun"] or next_force
-            state["pending_force"] = False
-            return
-        state["pending_force"] = False
-        async def run():
-            run_force = next_force
-            while True:
-                await reconcile(server, run_force)
-                if _active_edit_pauses(state):
-                    if state["rerun"]:
-                        state["pending_force"] = True
-                    state["rerun"] = False
-                    break
-                if not state["rerun"]:
-                    break
-                state["rerun"] = False
-                run_force = True
-        state["job"] = asyncio.create_task(run())
+    state = {"job": None, "edit_pauses": {}}
 
     async def pause_for_edit(request):
-        """Pause periodic reconciliation while a device's entities are edited."""
+        """Enter edit mode immediately; a running explicit sync may finish."""
         try:
             body = await request.json()
         except (ValueError, TypeError):
@@ -391,25 +438,11 @@ def install(app, server):
         client_id = body.get("client_id") if isinstance(body, dict) else None
         if not isinstance(client_id, str) or not client_id.strip() or len(client_id) > 120:
             return web.json_response({"error": "Ungültige Bearbeitungssitzung."}, status=400)
-
-        pauses = _active_edit_pauses(state)
-        already_paused = client_id in pauses
-        pauses[client_id] = time.time() + EDIT_PAUSE_LEASE_SECONDS
+        _active_edit_pauses(state)[client_id] = time.time() + EDIT_PAUSE_LEASE_SECONDS
         task = state["job"]
-        if not already_paused and task and not task.done():
-            # Finish the current request cycle before enabling edits. The run
-            # loop observes the lease and will not start a queued second pass.
-            while not task.done():
-                pauses[client_id] = time.time() + EDIT_PAUSE_LEASE_SECONDS
-                await asyncio.wait({task}, timeout=60)
-            await asyncio.gather(asyncio.shield(task), return_exceptions=True)
-        return web.json_response({
-            "paused": bool(_active_edit_pauses(state)),
-            "running": bool((task := state["job"]) and not task.done()),
-        })
+        return web.json_response({"paused": True, "running": bool(task and not task.done())})
 
     async def resume_after_edit(request):
-        """Release one browser's edit lease and run any deferred explicit sync."""
         try:
             body = await request.json()
         except (ValueError, TypeError):
@@ -417,42 +450,11 @@ def install(app, server):
         client_id = body.get("client_id") if isinstance(body, dict) else None
         if not isinstance(client_id, str) or not client_id.strip() or len(client_id) > 120:
             return web.json_response({"error": "Ungültige Bearbeitungssitzung."}, status=400)
-
         pauses = _active_edit_pauses(state)
         pauses.pop(client_id, None)
-        queued = not pauses and state["pending_force"]
-        if queued:
-            state["pending_force"] = False
-            start_job(force=True)
-        return web.json_response({"paused": bool(pauses), "queued": bool(queued)})
+        return web.json_response({"paused": bool(pauses), "queued": False})
 
-    # Let selection-save routes queue reconciliation immediately. The regular
-    # timer remains a fallback for retries and external Alexa changes.
-    app["native_reconcile_trigger"] = start_job
-    async def periodic():
-        await asyncio.sleep(1)
-        while True:
-            status = read_status()
-            try:
-                _native, _ids, _deleted, fingerprint = _publication_fingerprint(
-                    selection_config(), status
-                )
-            except Exception:
-                fingerprint = None
-            if (fingerprint != status.get("published_revision")
-                    or status.get("publish_error") or status.get("legacy_error")):
-                start_job()
-            await asyncio.sleep(600)
-    async def startup(app):
-        app["native_reconcile_task"] = asyncio.create_task(periodic())
     async def shutdown(app):
-        task = app.get("native_reconcile_task")
-        if task:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
         job = state["job"]
         if job:
             job.cancel()
@@ -460,36 +462,44 @@ def install(app, server):
                 await job
             except asyncio.CancelledError:
                 pass
+
     async def status(request):
         job = state["job"]
         failed = bool(job and job.done() and not job.cancelled() and job.exception())
         return web.json_response({"ok": True, **read_status(), "running": bool(job and not job.done()),
                                  "sync_paused": bool(_active_edit_pauses(state)),
                                  "background_error": "Alexa-Abgleich konnte nicht abgeschlossen werden." if failed else None})
+
     async def sync(request):
-        # Older v6 versions exported each enabled HA entity as its own Alexa
-        # endpoint. On an explicit sync, apply today's standard grouping to
-        # those default mappings before publishing. Disabled entities stay
-        # disabled, while a saved combined/separate/custom choice is preserved.
+        """Queue an explicit full-delta or selected-endpoint publication."""
         try:
-            inventory = await ha_export._inventory()
-            current = native_export.STORE.load()
-            proposed, normalized_groups = native_export.normalize_active_device_groups(
-                current, inventory
-            )
-            if native_export.revision(proposed) != native_export.revision(current):
-                native_export.STORE.save(proposed)
-        except Exception:
-            return web.json_response({
-                "error": "Home-Assistant-Geräte konnten nicht sicher gelesen werden. Der Alexa-Abgleich wurde nicht gestartet."
-            }, status=502)
-        start_job(force=True)
+            body = await request.json()
+        except (ValueError, TypeError):
+            return web.json_response({"error": "Ungültige JSON-Daten."}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"error": "Ungültige JSON-Daten."}, status=400)
+        if _active_edit_pauses(state):
+            return web.json_response({"error": "Bitte zuerst die Bearbeitung abschließen."}, status=409)
+        job = state["job"]
+        if job and not job.done():
+            return web.json_response({"error": "Ein Alexa-Abgleich läuft bereits."}, status=409)
+        requested = body.get("endpoint_ids")
+        if requested is not None:
+            if (not isinstance(requested, list) or not requested or len(requested) > 300
+                    or any(not isinstance(value, str) or not value.startswith("native:") for value in requested)):
+                return web.json_response({"error": "Ungültige Alexa-Endpunkte."}, status=400)
+            try:
+                valid_ids = {item["endpointId"] for item in endpoints(selection_config())}
+            except Exception:
+                return web.json_response({"error": "v6-Konfiguration ist nicht lesbar."}, status=400)
+            if not set(requested) <= valid_ids:
+                return web.json_response({"error": "Nur aktive Alexa-Geräte können einzeln aktualisiert werden."}, status=400)
+        write_status(last_sync_scope="device" if requested is not None else "all",
+                     last_report_updates=0, last_report_deletes=0)
+        state["job"] = asyncio.create_task(reconcile(server, force=requested is not None, endpoint_ids=requested))
         return web.json_response({"ok": True, "queued": True,
-                                 "normalized_groups": normalized_groups,
-                                 "message": (f"{len(normalized_groups)} Standardgruppen aktualisiert; "
-                                             "ausgewählte v6-Geräte werden veröffentlicht, "
-                                             "alte v5-Kopien und abgewählte v6-Geräte bereinigt.")}, status=202)
-    app.on_startup.append(startup)
+                                  "message": "Alexa-Abgleich läuft im Hintergrund."}, status=202)
+
     app.on_cleanup.append(shutdown)
     app.router.add_get("/api/native-export/lifecycle", status)
     app.router.add_post("/api/native-export/lifecycle/pause", pause_for_edit)

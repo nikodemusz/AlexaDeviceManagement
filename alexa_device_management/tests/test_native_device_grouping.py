@@ -39,6 +39,15 @@ class NativeDeviceGroupingTests(unittest.TestCase):
         self.native["enabled"] = True
         self.inventory = relay_inventory()
 
+    def test_fibaro_single_output_excludes_second_input_by_default(self):
+        device = {"name": "Dimmer", "model": "FGD-212", "manufacturer": "Fibargroup", "entities": [
+            {"entity_id": "light.output", "domain": "light", "original_name": ""},
+            {"entity_id": "light.button2", "domain": "light", "original_name": "(2)", "name": "Rolladen"},
+        ]}
+        self.assertEqual(standard_device_group(device)["entity_ids"], ["light.output"])
+        device["model"] = "different"
+        self.assertEqual(set(standard_device_group(device)["entity_ids"]), {"light.output", "light.button2"})
+
     def test_automatic_standard_keeps_a_multi_switch_device_as_one_named_alexa_device(self):
         result = standard_device_group(self.inventory["devices"][0])
 

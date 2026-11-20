@@ -141,6 +141,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             if add_or_update:
                 return {"ok": False, "error": "v5-AddOrUpdateReport ist dauerhaft abgeschaltet."}
 
+            native_results = []
             try:
                 token = await gateway.async_get_access_token()
                 if not token:
@@ -158,7 +159,6 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                     "delete_count": len(delete),
                     "api_version": 6,
                 }
-                native_results = []
                 for report in reports(native, endpoint_deletes, token):
                     report["event"]["payload"]["scope"]["token"] = token
                     response = await async_get_clientsession(hass).post(
@@ -177,7 +177,11 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                                 headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"}, timeout=30,
                             )
                             details = await _response_details(response)
-                    native_results.append({"name": report["event"]["header"]["name"], **details})
+                    native_results.append({
+                        "name": report["event"]["header"]["name"],
+                        "endpoint_ids": [item["endpointId"] for item in report["event"]["payload"]["endpoints"]],
+                        **details,
+                    })
                     result["ok"] = result["ok"] and details["accepted"]
                 result["native_reports"] = native_results
                 result["add_or_update_count"] = len(native)
@@ -192,7 +196,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                     result["error"] = "Alexa Event Gateway hat mindestens einen Report nicht mit HTTP 202 akzeptiert."
                 return result
             except Exception as exc:
-                return {"ok": False, "error": f"Alexa-Abgleich fehlgeschlagen ({type(exc).__name__})."}
+                return {"ok": False, "error": f"Alexa-Abgleich fehlgeschlagen ({type(exc).__name__}).",
+                        "native_reports": native_results}
 
     hass.services.async_register(
         DOMAIN,
