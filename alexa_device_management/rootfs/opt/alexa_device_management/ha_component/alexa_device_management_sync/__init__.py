@@ -177,7 +177,11 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                                 headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"}, timeout=30,
                             )
                             details = await _response_details(response)
-                    native_results.append({"name": report["event"]["header"]["name"], **details})
+                    native_results.append({
+                        "name": report["event"]["header"]["name"],
+                        "endpoint_ids": [item["endpointId"] for item in report["event"]["payload"]["endpoints"]],
+                        **details,
+                    })
                     result["ok"] = result["ok"] and details["accepted"]
                 result["native_reports"] = native_results
                 result["add_or_update_count"] = len(native)

@@ -90,6 +90,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["add_or_update_count"], 162)
         self.assertEqual(self.hass.session.post.await_count, 4)
+        self.assertEqual(sum(len(item["endpoint_ids"]) for item in result["native_reports"]), 162)
         all_ids = []
         for args in self.hass.session.post.call_args_list:
             self.assertEqual(args.kwargs["headers"]["Authorization"], "Bearer dummy-lwa")

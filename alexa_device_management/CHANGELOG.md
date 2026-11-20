@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.14.0
+
+- Der Alexa-Geräteabgleich startet nur noch manuell. Gespeicherte Änderungen werden beim zentralen Abgleich gezielt gesendet; einzelne aktive Geräte können separat aktualisiert werden. Der Bestandsabruf bleibt asynchron.
+- Die Geräteübersicht indexiert Alexa-Kennungen einmal pro Bestandsabruf und lädt auch nach „Aktualisieren“ sofort aus dem Cache. Der Bearbeitungsmodus wartet nicht mehr auf einen laufenden manuellen Abgleich.
+- Das Standardprofil aktiviert den zweiten Taster eindeutig erkannter Fibaro FGD-212 Dimmer nicht als eigene Alexa-Lampe.
+- Ein gespeicherter Abgleichstand verhindert wiederholte Meldungen unveränderter Endpunkte. Fehler zeigen verfügbare Alexa-HTTP-Statuscodes; alte Stände ohne Einzelprüfsummen können beim ersten Abgleich einen vollständigen Bericht benötigen.
+
 ## 3.13.0
 
 - „Bearbeiten“, Speichern und Verwerfen bleiben gemeinsam im Sticky-Kopf erreichbar, auch auf dem Handy. Alexa-Namen, verständlich benannte Gerätetypen und Zugriff stehen direkt an jeder Entity.

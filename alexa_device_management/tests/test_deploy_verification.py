@@ -33,7 +33,7 @@ def test_entity_alexa_names_are_staged_and_committed_with_global_editor():
 
 
 def test_alexa_sync_waits_for_pending_entity_name_save():
-    sync = SCRIPT.split("async function eventSync()", 1)[1].split("async function groupSync()", 1)[0]
+    sync = SCRIPT.split("async function eventSync(endpointIds = null)", 1)[1].split("async function groupSync()", 1)[0]
     assert sync.index("await saveConfig();") < sync.index('request("/api/native-export/sync"')
 
 

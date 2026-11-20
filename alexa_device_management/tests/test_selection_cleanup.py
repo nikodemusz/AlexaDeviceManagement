@@ -224,6 +224,83 @@ class SelectionCleanupTests(unittest.IsolatedAsyncioTestCase):
             await lifecycle.publish_native()
             self.assertEqual(report.await_count, 1)
 
+    async def test_only_changed_descriptor_is_sent_and_failed_report_remains_pending(self):
+        self.native["devices"]["second"] = {"name": "Second", "capabilities": [
+            {"interface": "Alexa.PowerController", "entity_id": "light.second"}]}
+        preferences = Mock()
+        preferences.load.return_value = {"event_gateway": {"enabled": True}}
+        accepted = (200, {"service_response": {"ok": True}})
+        rejected = (200, {"service_response": {"ok": False, "error": "Alexa abgelehnt",
+                                                "native_reports": [{"status": 429, "accepted": False}]}})
+        with patch.object(lifecycle.ha_export, "CONFIG_STORE", preferences), \
+             patch.object(lifecycle.support, "deploy_component", return_value={"restart_required": False}), \
+             patch.object(lifecycle.support, "_service_available", AsyncMock(return_value=True)), \
+             patch.object(lifecycle.support, "_call_sync_service", AsyncMock(side_effect=[accepted, rejected, accepted])) as report:
+            await lifecycle.publish_native()
+            self.native["devices"]["desk"]["name"] = "Changed"
+            failed = await lifecycle.publish_native()
+            self.assertIn("429", failed["publish_error"])
+            await lifecycle.publish_native()
+            self.assertEqual(report.await_count, 3)
+            for call in report.await_args_list[1:]:
+                payload = call.args[0]
+                self.assertEqual([x["endpointId"] for x in payload["native_endpoints"]], ["native:desk"])
+                self.assertEqual(payload["delete_endpoint_ids"], [])
+            await lifecycle.publish_native()
+            self.assertEqual(report.await_count, 3)
+
+    async def test_partial_batch_success_is_not_resent_on_manual_retry(self):
+        self.native["devices"]["second"] = {"name": "Second", "capabilities": [
+            {"interface": "Alexa.PowerController", "entity_id": "light.second"}]}
+        preferences = Mock()
+        preferences.load.return_value = {"event_gateway": {"enabled": True}}
+        partial = (200, {"service_response": {"ok": False, "error": "Rejected", "native_reports": [
+            {"name": "AddOrUpdateReport", "endpoint_ids": ["native:desk"], "status": 202, "accepted": True},
+            {"name": "AddOrUpdateReport", "endpoint_ids": ["native:second"], "status": 429, "accepted": False},
+            {"name": "DeleteReport", "endpoint_ids": ["native:fritz"], "status": 202, "accepted": True},
+        ]}})
+        accepted = (200, {"service_response": {"ok": True}})
+        with patch.object(lifecycle.ha_export, "CONFIG_STORE", preferences), \
+             patch.object(lifecycle.support, "deploy_component", return_value={"restart_required": False}), \
+             patch.object(lifecycle.support, "_service_available", AsyncMock(return_value=True)), \
+             patch.object(lifecycle.support, "_call_sync_service", AsyncMock(side_effect=[partial, accepted])) as report:
+            await lifecycle.publish_native()
+            await lifecycle.publish_native()
+        retry = report.await_args_list[1].args[0]
+        self.assertEqual([item["endpointId"] for item in retry["native_endpoints"]], ["native:second"])
+        self.assertEqual(retry["delete_endpoint_ids"], [])
+
+    async def test_scoped_publication_cannot_delete_or_update_other_devices(self):
+        self.native["devices"]["second"] = {"name": "Second", "capabilities": [
+            {"interface": "Alexa.PowerController", "entity_id": "light.second"}]}
+        preferences = Mock()
+        preferences.load.return_value = {"event_gateway": {"enabled": True}}
+        with patch.object(lifecycle.ha_export, "CONFIG_STORE", preferences), \
+             patch.object(lifecycle.support, "deploy_component", return_value={"restart_required": False}), \
+             patch.object(lifecycle.support, "_service_available", AsyncMock(return_value=True)), \
+             patch.object(lifecycle.support, "_call_sync_service", AsyncMock(return_value=(200, {"service_response": {"ok": True}}))) as report:
+            await lifecycle.publish_native(force=True, endpoint_ids=["native:desk"])
+            payload = report.call_args.args[0]
+            self.assertEqual([x["endpointId"] for x in payload["native_endpoints"]], ["native:desk"])
+            self.assertEqual(payload["delete_endpoint_ids"], [])
+            with self.assertRaises(ValueError):
+                await lifecycle.publish_native(force=True, endpoint_ids=["native:fritz"])
+
+    async def test_old_matching_revision_seeds_hashes_without_republishing(self):
+        _items, ids, _deleted, fingerprint = lifecycle._publication_fingerprint(self.native, {})
+        lifecycle.write_status(published_revision=fingerprint, published_ids=sorted(ids))
+        with patch.object(lifecycle.support, "_call_sync_service", AsyncMock()) as report:
+            result = await lifecycle.publish_native()
+        report.assert_not_awaited()
+        self.assertIn("native:desk", result["published_endpoint_hashes"])
+
+    async def test_scoped_reconcile_does_not_delete_unrelated_endpoints(self):
+        with patch.object(lifecycle, "cleanup_legacy", AsyncMock()) as cleanup, \
+             patch.object(lifecycle, "publish_native", AsyncMock()):
+            self.server.is_configured.return_value = False
+            await lifecycle.reconcile(self.server, True, ["native:desk"])
+        cleanup.assert_not_awaited()
+
 
 class DebugPageTests(unittest.IsolatedAsyncioTestCase):
     async def test_page_shows_current_v5_and_v6_status_routes_without_delete_button(self):
