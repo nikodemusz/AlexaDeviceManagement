@@ -67,6 +67,14 @@ controllers can be switched between read-only and writable access. Sensors and
 non-cover numeric ranges remain read-only, and playback Stop requires write
 access. Read-only controls reject directives in both Lambda and the gateway.
 
+The global editor actions stay in the sticky page header. Selecting entities
+for combination is independent of their Alexa enabled flags. A contextual
+action opens a preview populated with exactly those entities; additional
+members can be searched or revealed. The selection is restored with the local
+draft and cleared on successful staging, save or discard. HTML is served with
+no-store, and JS/CSS URLs use a shared content hash so app upgrades also refresh
+the browser's cached editor assets.
+
 The native file remains disabled by default on new installations. Existing
 native files retain their global and individual activation settings. Selection
 is explicit; unsupported new types fail rather than falling back to v5.

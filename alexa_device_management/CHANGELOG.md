@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.13.0
+
+- „Bearbeiten“, Speichern und Verwerfen bleiben gemeinsam im Sticky-Kopf erreichbar, auch auf dem Handy. Alexa-Namen, verständlich benannte Gerätetypen und Zugriff stehen direkt an jeder Entity.
+- Entities lassen sich direkt in der Liste zum Zusammenfassen auswählen. Erst bei einer Auswahl erscheint die Aktion „Als ein Alexa-Gerät“ mit vorausgefüllten Namen und Funktionen. Ein separater Anlegen-Button entfällt; zusätzliche Funktionen lassen sich gezielt ergänzen.
+- Neue Gruppen werden nicht länger fälschlich als bereits zur Auflösung vorgemerkt abgewiesen. Der gemeinsame Alexa-Name erscheint pro Gerät nur einmal; Funktionsnamen bleiben einzeln änderbar.
+- Die Oberfläche verwendet automatisch aus dem Dateiinhalt abgeleitete Asset-Kennungen. Das verhindert, dass nach einem App-Update weiterhin die alten JavaScript-/CSS-Dateien unter der bisherigen Kennung 3.11.2 geladen werden.
+
 ## 3.12.1
 
 - Die bereits in AWS eingesetzten Lambda-Verbesserungen sind jetzt auch im mitgelieferten Adapter enthalten: gemeinsames Antwortzeitbudget, Behandlung von Netzwerk-Timeouts und Gateway-Fehlern, relative Helligkeitsänderungen über den vorhandenen Gateway-Aufruf sowie Protokollierung von Ergebnis und Laufzeit ohne Zugangstokens. Die Nur-Lese-Funktionen aus 3.12.0 bleiben erhalten. Regressionstests sichern das Verhalten ab; dieses Update führt keine automatische AWS-Bereitstellung aus.

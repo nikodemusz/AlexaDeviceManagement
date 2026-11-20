@@ -44,8 +44,8 @@ class AlexaBulkDeleteUiTests(unittest.TestCase):
     def test_failed_bulk_delete_targets_remain_selected_and_versioned_assets_refresh(self):
         self.assertIn("Fehlgeschlagene Geräte bleiben in der Auswahl.", SCRIPT)
         self.assertIn("selectedAlexaKeys.delete(item.key)", SCRIPT)
-        self.assertIn("device_overview.js?v=3.11.2", HTML)
-        self.assertIn("device_overview.css?v=3.11.2", HTML)
+        self.assertIn("device_overview.js?v={{OVERVIEW_ASSET_VERSION}}", HTML)
+        self.assertIn("device_overview.css?v={{OVERVIEW_ASSET_VERSION}}", HTML)
 
     def test_summary_counters_filter_and_expand_their_matching_entities(self):
         self.assertIn('data-summary-filter="${status}"', SCRIPT)
@@ -61,7 +61,7 @@ class AlexaBulkDeleteUiTests(unittest.TestCase):
         self.assertIn("const expandedSimpleDevices = new Set();", SCRIPT)
         self.assertIn('id="btn-start-edit"', HTML)
         self.assertEqual(HTML.count('id="btn-start-edit"'), 1)
-        self.assertLess(HTML.index('id="summary"'), HTML.index('id="device-edit-toolbar"'))
+        self.assertLess(HTML.index('id="device-edit-toolbar"'), HTML.index('</header>'))
         self.assertLess(HTML.index('id="device-edit-toolbar"'), HTML.index('id="content"'))
         self.assertEqual(HTML.count('class="device-edit-toolbar"'), 1)
         self.assertIn('id="btn-finish-edit"', HTML)
@@ -90,7 +90,11 @@ class AlexaBulkDeleteUiTests(unittest.TestCase):
         self.assertNotIn("btn-disable-visible", HTML)
 
     def test_virtual_alexa_groups_can_be_built_from_entities_across_devices(self):
-        self.assertIn('id="btn-create-virtual-group"', HTML)
+        self.assertNotIn('id="btn-create-virtual-group"', HTML)
+        self.assertIn('id="btn-combine-selection"', HTML)
+        self.assertIn('data-combine-entity=', SCRIPT)
+        self.assertIn('selected_entity_ids: [...selectedEntityIds]', SCRIPT)
+        self.assertIn('openVirtualGroupDialog(null, [...selectedEntityIds])', SCRIPT)
         self.assertIn('id="virtual-group-dialog"', HTML)
         self.assertIn("function renderVirtualGroupEntities(spec)", SCRIPT)
         self.assertIn("function stageVirtualGroupFromDialog()", SCRIPT)
