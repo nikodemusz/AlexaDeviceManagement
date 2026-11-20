@@ -141,6 +141,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             if add_or_update:
                 return {"ok": False, "error": "v5-AddOrUpdateReport ist dauerhaft abgeschaltet."}
 
+            native_results = []
             try:
                 token = await gateway.async_get_access_token()
                 if not token:
@@ -158,7 +159,6 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                     "delete_count": len(delete),
                     "api_version": 6,
                 }
-                native_results = []
                 for report in reports(native, endpoint_deletes, token):
                     report["event"]["payload"]["scope"]["token"] = token
                     response = await async_get_clientsession(hass).post(
@@ -196,7 +196,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                     result["error"] = "Alexa Event Gateway hat mindestens einen Report nicht mit HTTP 202 akzeptiert."
                 return result
             except Exception as exc:
-                return {"ok": False, "error": f"Alexa-Abgleich fehlgeschlagen ({type(exc).__name__})."}
+                return {"ok": False, "error": f"Alexa-Abgleich fehlgeschlagen ({type(exc).__name__}).",
+                        "native_reports": native_results}
 
     hass.services.async_register(
         DOMAIN,
