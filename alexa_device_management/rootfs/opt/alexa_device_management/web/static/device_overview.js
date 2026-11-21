@@ -18,6 +18,8 @@
   const renderedAreaItems = new Map();
   let includeHiddenSummaryMatches = false;
   const AREA_PAGE_SIZE = 25;
+  const ENTITY_PAGE_SIZE = 30;
+  const visibleEntityCounts = new Map();
   const ALEXA_PAGE_SIZE = 25;
   const VIRTUAL_PAGE_SIZE = 50;
   let visibleAlexaCount = ALEXA_PAGE_SIZE;
@@ -63,6 +65,7 @@
   const ACTION_TOOLTIPS = {
     "toggle-area": "Öffnet oder schließt diesen Raum.",
     "more-area": "Zeigt den nächsten Block von Geräten in diesem Raum.",
+    "more-entities": "Zeigt weitere Entitäten dieses Geräts.",
     "more-alexa": "Zeigt weitere Alexa-Geräte.",
     "toggle-device": "Öffnet oder schließt die Entitäten dieses Geräts.",
     "toggle-simple-device": "Öffnet oder schließt die Entitäten dieses Geräts.",
@@ -417,6 +420,7 @@
         selected_entity_ids: [...selectedEntityIds],
         active_virtual_group_id: activeVirtualGroupId,
         visible_area_counts: [...visibleAreaCounts.entries()],
+        visible_entity_counts: [...visibleEntityCounts.entries()],
         scroll_y: window.scrollY,
         filters: {
           query: document.getElementById("search")?.value || "",
@@ -486,6 +490,10 @@
     visibleAreaCounts.clear();
     for (const pair of Array.isArray(ui.visible_area_counts) ? ui.visible_area_counts : []) {
       if (Array.isArray(pair) && pair.length === 2) visibleAreaCounts.set(String(pair[0]), Number(pair[1]) || AREA_PAGE_SIZE);
+    }
+    visibleEntityCounts.clear();
+    for (const pair of Array.isArray(ui.visible_entity_counts) ? ui.visible_entity_counts : []) {
+      if (Array.isArray(pair) && pair.length === 2) visibleEntityCounts.set(String(pair[0]), Number(pair[1]) || ENTITY_PAGE_SIZE);
     }
     draftRestoreFilters = ui.filters && typeof ui.filters === "object" ? ui.filters : null;
     draftRestoreScrollY = Number.isFinite(Number(ui.scroll_y)) ? Number(ui.scroll_y) : null;
@@ -902,7 +910,9 @@
     const list = document.createElement("div");
     list.className = `simple-entity-list${isEditing ? " editing" : ""}`;
     const shownEndpointNames = new Set();
-    for (const entity of device.entities || []) {
+    const entities = device.entities || [];
+    const visibleCount = visibleEntityCounts.get(String(device.device_id)) || ENTITY_PAGE_SIZE;
+    for (const entity of entities.slice(0, visibleCount)) {
       const entityRow = document.createElement("div");
       entityRow.className = "simple-entity-row";
       const settings = entityConfig(entity.entity_id);
@@ -967,6 +977,15 @@
         entityRow.classList.toggle("selected-for-combining", selectedEntityIds.has(entity.entity_id));
       }
       list.append(entityRow);
+    }
+    if (visibleCount < entities.length) {
+      const more = document.createElement("button");
+      more.type = "button";
+      more.className = "button secondary small";
+      more.dataset.action = "more-entities";
+      more.dataset.device = String(device.device_id);
+      more.textContent = `Weitere ${Math.min(ENTITY_PAGE_SIZE, entities.length - visibleCount)} Entitäten anzeigen`;
+      list.append(more);
     }
     row.append(list);
   }
@@ -1914,6 +1933,11 @@
         renderArea(button, id);
       }
       else if (action === "more-alexa") { visibleAlexaCount += ALEXA_PAGE_SIZE; render(); }
+      else if (action === "more-entities") {
+        const id = button.dataset.device;
+        visibleEntityCounts.set(id, (visibleEntityCounts.get(id) || ENTITY_PAGE_SIZE) + ENTITY_PAGE_SIZE);
+        renderSimpleDeviceRowFrom(button);
+      }
       else if (action === "more-area") {
         const id = button.dataset.area;
         const count = Math.min((visibleAreaCounts.get(id) || AREA_PAGE_SIZE) + AREA_PAGE_SIZE,

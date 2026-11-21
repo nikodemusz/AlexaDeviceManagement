@@ -20,6 +20,7 @@ for (const [index,e] of entities.entries()) configuration.entities[e.entity_id] 
   capability_mode:'standard',capabilities:[index<2?'Alexa.PowerController':'Alexa.TemperatureSensor']};
 const devices = [{device_id:'relay',name:'Doppelrelais',area_id:'living',area_name:'Wohnzimmer',entities:entities.slice(0,2)},
   {device_id:'sensor',name:'Raumsensor',area_id:'living',area_name:'Wohnzimmer',entities:entities.slice(2)}];
+devices.push({device_id:'giant',name:'Viele Entitäten',area_id:'living',area_name:'Wohnzimmer',entities:Array.from({length:500},(_,j)=>({entity_id:`switch.giant_${j}`,domain:'switch',name:`Ausgang ${j}`}))});
 for(let i=0;i<28;i++) devices.push({device_id:`d${i}`,name:`Weiteres Gerät ${i+1}`,area_id:'living',area_name:'Wohnzimmer',entities:[{entity_id:`switch.extra_${i}`,domain:'switch',name:`Ausgang ${i+1}`} ]});
 for(let i=0;i<200;i++) devices.push({device_id:`basement${i}`,name:`Keller ${i}`,area_id:'basement',area_name:'Keller',entities:Array.from({length:12},(_,j)=>({entity_id:`switch.basement_${i}_${j}`,domain:'switch',name:`Ausgang ${i}-${j}`}))});
 const alexaOnly=Array.from({length:125},(_,i)=>({key:`smart_home:other${i}`,serial:`other${i}`,name:`Alexa ${i}`,source:'smart_home',status:'unmatched',groups:[]}));
@@ -78,7 +79,11 @@ const server = http.createServer(async(req,res)=>{
     assert.equal(detailReads[0].device_ids.length,25);
     assert.equal(detailReads[0].device_ids.some(id=>id.startsWith('basement')),false);
     await page.locator('#btn-start-edit').click();
+    await page.locator('[data-device-row="giant"] .simple-entity-row').first().waitFor();
     assert((await page.locator('.simple-entity-row').count()) < 100);
+    assert.equal(await page.locator('[data-device-row="giant"] .simple-entity-row').count(),30);
+    await page.locator('[data-device-row="giant"] button[data-action="more-entities"]').click();
+    assert.equal(await page.locator('[data-device-row="giant"] .simple-entity-row').count(),60);
     const name=page.locator('.export-name[data-entity="switch.relay_a"]');
     await name.fill('Leselicht');
     const existingNameInput = await name.elementHandle();
@@ -108,12 +113,14 @@ const server = http.createServer(async(req,res)=>{
     await page.locator('#btn-start-edit').click();
     assert.equal(await name.inputValue(),'Leselicht');
     assert.equal(await page.locator('.export-category[data-entity="switch.relay_a"]').inputValue(),'LIGHT');
+    await page.locator('[data-device-row="giant"] button[data-action="more-entities"]').click();
     for (const id of ['switch.relay_a','switch.relay_b'])await page.locator(`[data-combine-entity="${id}"]`).check();
     await page.locator('#search').fill('Raumsensor');
     assert.match(await page.locator('#entity-selection-count').textContent(),/2 Entities/);
     await page.locator('#search').fill('');
     await page.reload();
     await page.locator('#btn-combine-selection').waitFor({state:'visible'});
+    await page.waitForFunction(() => document.querySelectorAll('[data-device-row="giant"] .simple-entity-row').length === 60);
     assert.match(await page.locator('#entity-selection-count').textContent(),/2 Entities/);
     await page.evaluate(()=>window.scrollTo(0,document.body.scrollHeight));
     const sticky=await page.locator('#btn-finish-edit').boundingBox();assert(sticky.y>=0&&sticky.y<200);
