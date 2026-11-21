@@ -18,6 +18,13 @@
   const renderedAreaItems = new Map();
   let includeHiddenSummaryMatches = false;
   const AREA_PAGE_SIZE = 25;
+  const ENTITY_PAGE_SIZE = 30;
+  const visibleEntityCounts = new Map();
+  const ALEXA_PAGE_SIZE = 25;
+  const VIRTUAL_PAGE_SIZE = 50;
+  let visibleAlexaCount = ALEXA_PAGE_SIZE;
+  let virtualVisibleCount = VIRTUAL_PAGE_SIZE;
+  const detailRequests = new Map();
   const EDIT_DRAFT_KEY = "alexa_device_management_edit_draft_v1";
   const EDITABLE_ENTITY_FIELDS = ["enabled", "name", "description", "display_category", "display_category_mode", "alexa_group", "capability_mode", "capabilities", "logical_device_name", "read_only"];
   let globalEditMode = false;
@@ -58,6 +65,8 @@
   const ACTION_TOOLTIPS = {
     "toggle-area": "Öffnet oder schließt diesen Raum.",
     "more-area": "Zeigt den nächsten Block von Geräten in diesem Raum.",
+    "more-entities": "Zeigt weitere Entitäten dieses Geräts.",
+    "more-alexa": "Zeigt weitere Alexa-Geräte.",
     "toggle-device": "Öffnet oder schließt die Entitäten dieses Geräts.",
     "toggle-simple-device": "Öffnet oder schließt die Entitäten dieses Geräts.",
     "sync-one-device": "Aktualisiert nur die Alexa-Endpunkte dieses Geräts.",
@@ -411,6 +420,7 @@
         selected_entity_ids: [...selectedEntityIds],
         active_virtual_group_id: activeVirtualGroupId,
         visible_area_counts: [...visibleAreaCounts.entries()],
+        visible_entity_counts: [...visibleEntityCounts.entries()],
         scroll_y: window.scrollY,
         filters: {
           query: document.getElementById("search")?.value || "",
@@ -480,6 +490,10 @@
     visibleAreaCounts.clear();
     for (const pair of Array.isArray(ui.visible_area_counts) ? ui.visible_area_counts : []) {
       if (Array.isArray(pair) && pair.length === 2) visibleAreaCounts.set(String(pair[0]), Number(pair[1]) || AREA_PAGE_SIZE);
+    }
+    visibleEntityCounts.clear();
+    for (const pair of Array.isArray(ui.visible_entity_counts) ? ui.visible_entity_counts : []) {
+      if (Array.isArray(pair) && pair.length === 2) visibleEntityCounts.set(String(pair[0]), Number(pair[1]) || ENTITY_PAGE_SIZE);
     }
     draftRestoreFilters = ui.filters && typeof ui.filters === "object" ? ui.filters : null;
     draftRestoreScrollY = Number.isFinite(Number(ui.scroll_y)) ? Number(ui.scroll_y) : null;
@@ -654,20 +668,11 @@
   }
 
   function expandSummaryMatches() {
+    // Keep results grouped by room; do not create hundreds of forms at once.
     expandedAreas.clear();
     expandedSimpleDevices.clear();
     visibleAreaCounts.clear();
-    if (filters().status === "alexa_only") return;
-    const deviceCountsByArea = new Map();
-    for (const device of model.devices || []) {
-      const entities = (device.entities || []).filter(entity => entityMatchesFilter(entity, device, filters()));
-      if (!entities.length) continue;
-      const areaKey = device.area_id || device.area_name || "Ohne Bereich";
-      expandedAreas.add(areaKey);
-      if (filters().status !== "ha_devices") expandedSimpleDevices.add(device.device_id);
-      deviceCountsByArea.set(areaKey, (deviceCountsByArea.get(areaKey) || 0) + 1);
-    }
-    for (const [areaKey, count] of deviceCountsByArea) visibleAreaCounts.set(areaKey, count);
+    visibleAlexaCount = ALEXA_PAGE_SIZE;
   }
 
   function renderFilters() {
@@ -768,6 +773,49 @@
     return items;
   }
 
+  async function loadDeviceDetails(areaKey, items, count) {
+    const snapshot = model?.overview_snapshot;
+    if (!snapshot || detailRequests.has(areaKey)) return;
+    const missing = items.slice(0, count).map(item => item.device)
+      .filter(device => !device.details_loaded).slice(0, AREA_PAGE_SIZE);
+    if (!missing.length) return;
+    const work = request("/api/device-overview/device-details", {
+      method: "POST", body: JSON.stringify({snapshot, device_ids: missing.map(device => String(device.device_id))})
+    });
+    detailRequests.set(areaKey, work);
+    try {
+      const result = await work;
+      if (model?.overview_snapshot !== snapshot) return;
+      const byId = new Map((result.devices || []).map(device => [String(device.device_id), device]));
+      const current = new Map((model.devices || []).map(device => [String(device.device_id), device]));
+      for (const device of missing) {
+        const full = byId.get(String(device.device_id));
+        if (!full) throw new Error("Ein Gerät ist nicht mehr im gespeicherten Bestand vorhanden.");
+        const target = current.get(String(device.device_id));
+        if (target) Object.assign(target, full, {details_loaded: true});
+      }
+      syncEntityModelFromConfig();
+    } catch (error) {
+      if (model?.overview_snapshot === snapshot) {
+        const area = document.querySelector(`button[data-action="toggle-area"][data-area="${CSS.escape(areaKey)}"]`);
+        const container = area?.closest("section.area")?.querySelector(".area-devices");
+        if (container) container.textContent = `Geräte konnten nicht geladen werden: ${error.message}`;
+      }
+      return;
+    } finally {
+      if (detailRequests.get(areaKey) === work) detailRequests.delete(areaKey);
+      if (model?.overview_snapshot !== snapshot && expandedAreas.has(areaKey)) queueMicrotask(() => renderLoadedArea(areaKey));
+    }
+    if (model?.overview_snapshot === snapshot && expandedAreas.has(areaKey)) renderLoadedArea(areaKey);
+  }
+
+  function renderLoadedArea(areaKey) {
+    const button = document.querySelector(`button[data-action="toggle-area"][data-area="${CSS.escape(areaKey)}"]`);
+    if (!button || !expandedAreas.has(areaKey)) return;
+    renderedAreaItems.set(areaKey, areaItems(areaKey));
+    renderArea(button, areaKey);
+  }
+
   function renderArea(button, areaKey) {
     const section = button.closest("section.area");
     const container = section?.querySelector(".area-devices");
@@ -783,6 +831,11 @@
     }
     const items = renderedAreaItems.get(areaKey) || [];
     const visibleCount = Math.min(visibleAreaCounts.get(areaKey) || AREA_PAGE_SIZE, items.length);
+    if (model.overview_snapshot && items.slice(0, visibleCount).some(item => !item.device.details_loaded)) {
+      container.textContent = "Geräte und Entitäten werden geladen…";
+      loadDeviceDetails(areaKey, items, visibleCount);
+      return;
+    }
     const list = document.createElement("div");
     list.className = "simple-device-list";
     for (const item of items.slice(0, visibleCount)) {
@@ -857,7 +910,9 @@
     const list = document.createElement("div");
     list.className = `simple-entity-list${isEditing ? " editing" : ""}`;
     const shownEndpointNames = new Set();
-    for (const entity of device.entities || []) {
+    const entities = device.entities || [];
+    const visibleCount = visibleEntityCounts.get(String(device.device_id)) || ENTITY_PAGE_SIZE;
+    for (const entity of entities.slice(0, visibleCount)) {
       const entityRow = document.createElement("div");
       entityRow.className = "simple-entity-row";
       const settings = entityConfig(entity.entity_id);
@@ -922,6 +977,15 @@
         entityRow.classList.toggle("selected-for-combining", selectedEntityIds.has(entity.entity_id));
       }
       list.append(entityRow);
+    }
+    if (visibleCount < entities.length) {
+      const more = document.createElement("button");
+      more.type = "button";
+      more.className = "button secondary small";
+      more.dataset.action = "more-entities";
+      more.dataset.device = String(device.device_id);
+      more.textContent = `Weitere ${Math.min(ENTITY_PAGE_SIZE, entities.length - visibleCount)} Entitäten anzeigen`;
+      list.append(more);
     }
     row.append(list);
   }
@@ -1042,8 +1106,18 @@
     const profiles = spec.profiles || {};
     const existing = (config?.virtual_groups || []).find(group => group.group_id === spec.group_id);
     const rows = [];
-    for (const device of model?.devices || []) {
-      for (const entity of device.entities || []) {
+    const candidates = [];
+    const query = document.getElementById("virtual-group-search")?.value.trim().toLocaleLowerCase() || "";
+    const showAll = document.getElementById("virtual-group-show-all").checked;
+    for (const device of model?.devices || []) for (const entity of device.entities || []) {
+      const isSelected = selected.has(entity.entity_id);
+      const text = `${device.name || ""} ${device.area_name || ""} ${entity.name || ""} ${entity.entity_id}`.toLocaleLowerCase();
+      const supported = virtualProfileOptions(entity, isSelected || existing?.members?.includes(entity.entity_id)).length;
+      if (supported && (isSelected || ((showAll || query) && (!query || text.includes(query))))) candidates.push({device, entity, isSelected});
+    }
+    const selectedRows = candidates.filter(item => item.isSelected);
+    const otherRows = candidates.filter(item => !item.isSelected);
+    for (const {device, entity} of [...selectedRows, ...otherRows.slice(0, virtualVisibleCount)]) {
         const keepExisting = existing?.members?.includes(entity.entity_id) || selected.has(entity.entity_id);
         const options = virtualProfileOptions(entity, keepExisting);
         if (!options.length) continue;
@@ -1080,9 +1154,9 @@
           <div class="virtual-member-settings"><label class="virtual-member-name">Name dieser Funktion<input data-vgroup-name="${attr(entity.entity_id)}" value="${attr(name)}" maxlength="128"></label>
             <select class="virtual-profile-select" data-vgroup-profile="${attr(entity.entity_id)}" aria-label="Alexa-Funktion für ${attr(entity.name || entity.entity_id)}">${profileOptions}</select>${numericSettings}</div>
         </article>`);
-      }
     }
-    container.innerHTML = rows.length ? rows.join("") : '<div class="empty">Keine unterstützten oder numerischen Entities gefunden.</div>';
+    if (otherRows.length > virtualVisibleCount) rows.push(`<button type="button" class="button secondary" data-vgroup-more>Weitere ${Math.min(VIRTUAL_PAGE_SIZE, otherRows.length - virtualVisibleCount)} Entities anzeigen</button>`);
+    container.innerHTML = rows.length ? rows.join("") : '<div class="empty">Keine passenden Entities gefunden.</div>';
     filterVirtualGroupEntities();
   }
 
@@ -1184,6 +1258,7 @@
       }
     }
     activeVirtualGroupId = spec.group_id;
+    virtualVisibleCount = VIRTUAL_PAGE_SIZE;
     document.getElementById("virtual-group-title").textContent = existing ? `Funktionen von „${existing.name}“` : "Als ein Alexa-Gerät zusammenfassen";
     document.getElementById("virtual-group-name").value = spec.name || "";
     document.getElementById("virtual-group-search").value = "";
@@ -1263,7 +1338,8 @@
       html.push('<h2 class="alexa-only-title">Alexa-Geräte ohne Home-Assistant-Zuordnung</h2>');
       html.push('<div class="alexa-selection-toolbar"><label><input id="select-visible-alexa" type="checkbox"> Alle sichtbaren auswählen</label><span id="alexa-selection-count">0 ausgewählt</span><button id="btn-delete-selected-alexa" class="button danger" data-action="delete-selected-alexa" disabled>Ausgewählte löschen</button></div>');
       html.push('<div class="alexa-only-grid">');
-      html.push(...alexaOnly.map(alexaOnlyHtml)); html.push("</div>");
+      html.push(...alexaOnly.slice(0, visibleAlexaCount).map(alexaOnlyHtml)); html.push("</div>");
+      if (visibleAlexaCount < alexaOnly.length) html.push(`<button type="button" class="button secondary area-more" data-action="more-alexa">Weitere ${Math.min(ALEXA_PAGE_SIZE, alexaOnly.length - visibleAlexaCount)} Alexa-Geräte anzeigen</button>`);
     }
     document.getElementById("content").innerHTML = html.length ? html.join("") : '<div class="empty">Keine Geräte entsprechen dem aktuellen Filter.</div>';
     for (const areaKey of expandedAreas) {
@@ -1273,7 +1349,7 @@
     document.getElementById("btn-login").classList.toggle("hidden", model.alexa_connected);
     document.getElementById("btn-logout").classList.toggle("hidden", !model.alexa_connected);
     document.getElementById("v5-disabled").classList.toggle("hidden", config.native_enabled);
-    updateAlexaSelectionUi(alexaOnly);
+    updateAlexaSelectionUi(alexaOnly.slice(0, visibleAlexaCount));
     renderVirtualGroups();
     updateSyncEditStatus();
     if (globalEditMode || pendingGlobalEdit) persistEditDraft();
@@ -1291,7 +1367,7 @@
     }
     clearMessage();
     try {
-      model = await request(`/api/device-overview${force ? "?refresh=1" : ""}`);
+      model = await request(`/api/device-overview?compact=1${force ? "&refresh=1" : ""}`);
       if (!model || !model.configuration || typeof model.configuration.native_enabled !== "boolean") {
         throw new Error("Die Geräteübersicht-API liefert keine v6-Konfiguration. Add-on und Oberfläche haben unterschiedliche Versionen; Add-on aktualisieren und Seite neu laden.");
       }
@@ -1493,6 +1569,7 @@
 
   function expandVisibleDeviceLists() {
     for (const [areaKey, items] of renderedAreaItems) {
+      if (!expandedAreas.has(areaKey)) continue;
       const visibleCount = Math.min(visibleAreaCounts.get(areaKey) || AREA_PAGE_SIZE, items.length);
       expandedAreas.add(areaKey);
       visibleAreaCounts.set(areaKey, visibleCount);
@@ -1855,6 +1932,12 @@
         else { expandedAreas.add(id); visibleAreaCounts.set(id, AREA_PAGE_SIZE); }
         renderArea(button, id);
       }
+      else if (action === "more-alexa") { visibleAlexaCount += ALEXA_PAGE_SIZE; render(); }
+      else if (action === "more-entities") {
+        const id = button.dataset.device;
+        visibleEntityCounts.set(id, (visibleEntityCounts.get(id) || ENTITY_PAGE_SIZE) + ENTITY_PAGE_SIZE);
+        renderSimpleDeviceRowFrom(button);
+      }
       else if (action === "more-area") {
         const id = button.dataset.area;
         const count = Math.min((visibleAreaCounts.get(id) || AREA_PAGE_SIZE) + AREA_PAGE_SIZE,
@@ -1907,12 +1990,12 @@
     if (target.matches("input[data-alexa-select]")) {
       if (target.checked) selectedAlexaKeys.add(target.dataset.alexaSelect);
       else selectedAlexaKeys.delete(target.dataset.alexaSelect);
-      const visible = (model?.alexa_only || []).filter(item => alexaOnlyMatchesFilter(item, filters()));
+      const visible = (model?.alexa_only || []).filter(item => alexaOnlyMatchesFilter(item, filters())).slice(0, visibleAlexaCount);
       updateAlexaSelectionUi(visible);
       return;
     }
     if (target.id === "select-visible-alexa") {
-      const visible = (model?.alexa_only || []).filter(item => alexaOnlyMatchesFilter(item, filters()));
+      const visible = (model?.alexa_only || []).filter(item => alexaOnlyMatchesFilter(item, filters())).slice(0, visibleAlexaCount);
       for (const item of visible) target.checked ? selectedAlexaKeys.add(item.key) : selectedAlexaKeys.delete(item.key);
       render();
     }
@@ -2023,7 +2106,18 @@
     updateEntitySelectionUi();
     persistEditDraft();
   });
-  document.getElementById("virtual-group-show-all").addEventListener("change", filterVirtualGroupEntities);
+  function refreshVirtualGroupResults(reset = true) {
+    if (!activeVirtualGroupId) return;
+    const spec = persistVirtualGroupDialog(false);
+    if (reset) virtualVisibleCount = VIRTUAL_PAGE_SIZE;
+    if (spec) renderVirtualGroupEntities(spec);
+  }
+  document.getElementById("virtual-group-show-all").addEventListener("change", () => refreshVirtualGroupResults());
+  document.getElementById("virtual-group-entities").addEventListener("click", event => {
+    if (!event.target.closest("[data-vgroup-more]")) return;
+    virtualVisibleCount += VIRTUAL_PAGE_SIZE;
+    refreshVirtualGroupResults(false);
+  });
   document.getElementById("virtual-group-list").addEventListener("click", event => {
     const button = event.target.closest("button[data-virtual-action]");
     if (!button) return;
@@ -2040,7 +2134,7 @@
     renderVirtualGroups();
   });
   document.getElementById("virtual-group-dialog").addEventListener("input", event => {
-    if (event.target.id === "virtual-group-search") return filterVirtualGroupEntities();
+    if (event.target.id === "virtual-group-search") return refreshVirtualGroupResults();
     persistVirtualGroupDialog(false);
   });
   document.getElementById("virtual-group-dialog").addEventListener("change", event => {

@@ -20,9 +20,12 @@ for (const [index,e] of entities.entries()) configuration.entities[e.entity_id] 
   capability_mode:'standard',capabilities:[index<2?'Alexa.PowerController':'Alexa.TemperatureSensor']};
 const devices = [{device_id:'relay',name:'Doppelrelais',area_id:'living',area_name:'Wohnzimmer',entities:entities.slice(0,2)},
   {device_id:'sensor',name:'Raumsensor',area_id:'living',area_name:'Wohnzimmer',entities:entities.slice(2)}];
+devices.push({device_id:'giant',name:'Viele Entitäten',area_id:'living',area_name:'Wohnzimmer',entities:Array.from({length:500},(_,j)=>({entity_id:`switch.giant_${j}`,domain:'switch',name:`Ausgang ${j}`}))});
 for(let i=0;i<28;i++) devices.push({device_id:`d${i}`,name:`Weiteres Gerät ${i+1}`,area_id:'living',area_name:'Wohnzimmer',entities:[{entity_id:`switch.extra_${i}`,domain:'switch',name:`Ausgang ${i+1}`} ]});
-function overview(){return {configuration:structuredClone(configuration),alexa_connected:true,display_categories:['SWITCH','LIGHT','SMARTPLUG'],areas:[{area_id:'living',name:'Wohnzimmer'}],groups:[],alexa_only:[],summary:{ha_devices:30,ha_entities:31,selected:3},devices:devices.map(d=>({...d,entities:d.entities.map(e=>({...e,status:'synced',export:configuration.entities[e.entity_id]||{enabled:false},native:{enabled:true,endpoint_ids:configuration.entities[e.entity_id]?.native_endpoint_ids||[]}}))}))};}
-const writes=[];
+for(let i=0;i<200;i++) devices.push({device_id:`basement${i}`,name:`Keller ${i}`,area_id:'basement',area_name:'Keller',entities:Array.from({length:12},(_,j)=>({entity_id:`switch.basement_${i}_${j}`,domain:'switch',name:`Ausgang ${i}-${j}`}))});
+const alexaOnly=Array.from({length:125},(_,i)=>({key:`smart_home:other${i}`,serial:`other${i}`,name:`Alexa ${i}`,source:'smart_home',status:'unmatched',groups:[]}));
+function overview(){return {configuration:structuredClone(configuration),alexa_connected:true,display_categories:['SWITCH','LIGHT','SMARTPLUG'],areas:[{area_id:'living',name:'Wohnzimmer'}],groups:[],alexa_only:alexaOnly,summary:{ha_devices:30,ha_entities:31,selected:3},devices:devices.map(d=>({...d,entities:d.entities.map(e=>({...e,status:'synced',export:configuration.entities[e.entity_id]||{enabled:false},native:{enabled:true,endpoint_ids:configuration.entities[e.entity_id]?.native_endpoint_ids||[]}}))}))};}
+const writes=[]; const detailReads=[];
 const server = http.createServer(async(req,res)=>{
   const url=new URL(req.url,'http://localhost');
   if(url.pathname.startsWith('/api/')) {
@@ -30,7 +33,17 @@ const server = http.createServer(async(req,res)=>{
     const body=input?JSON.parse(input):{};
     if(req.method==='POST')writes.push({path:url.pathname,body});
     let result={};
-    if(url.pathname==='/api/device-overview')result=overview();
+    if(url.pathname==='/api/device-overview'){
+      result=overview();
+      if(url.searchParams.get('compact')==='1') {
+        result.overview_snapshot='test-snapshot';
+        result.devices=result.devices.map(d=>({...d,details_loaded:false}));
+      }
+    }
+    if(url.pathname==='/api/device-overview/device-details') {
+      detailReads.push(body);
+      result={devices:overview().devices.filter(d=>body.device_ids.includes(d.device_id))};
+    }
     if(url.pathname==='/api/ha-export/autosave'){configuration=structuredClone(body);configuration.native_revision=String(Date.now());result={configuration};}
     if(url.pathname==='/api/native-export/virtual-group')result={configuration};
     res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(result));return;
@@ -48,9 +61,36 @@ const server = http.createServer(async(req,res)=>{
     const page=await browser.newPage({viewport:{width:1440,height:1000}});
     const errors=[];page.on('pageerror',e=>errors.push(e.message));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
+    await page.locator('button[data-action="toggle-area"][data-area="living"]').waitFor();
+    assert.equal(detailReads.length,0);
+    assert.equal(await page.locator('.alexa-card').count(),25);
+    await page.locator('button[data-action="more-alexa"]').click();
+    assert.equal(await page.locator('.alexa-card').count(),50);
+    await page.locator('#select-visible-alexa').check();
+    assert.match(await page.locator('#alexa-selection-count').textContent(),/50 ausgewählt/);
+    await page.locator('#select-visible-alexa').uncheck();
+    await page.locator('#search').fill('Keller 190');
+    await page.locator('button[data-action="toggle-area"][data-area="basement"]').waitFor();
+    assert.equal(detailReads.length,0);
+    await page.locator('#search').fill('');
+    await page.locator('button[data-action="toggle-area"][data-area="living"]').click();
+    await page.locator('[data-device-row="relay"]').waitFor();
+    assert.equal(detailReads.length,1);
+    assert.equal(detailReads[0].device_ids.length,25);
+    assert.equal(detailReads[0].device_ids.some(id=>id.startsWith('basement')),false);
     await page.locator('#btn-start-edit').click();
+    await page.locator('[data-device-row="giant"] .simple-entity-row').first().waitFor();
+    assert((await page.locator('.simple-entity-row').count()) < 100);
+    assert.equal(await page.locator('[data-device-row="giant"] .simple-entity-row').count(),30);
+    await page.locator('[data-device-row="giant"] button[data-action="more-entities"]').click();
+    assert.equal(await page.locator('[data-device-row="giant"] .simple-entity-row').count(),60);
     const name=page.locator('.export-name[data-entity="switch.relay_a"]');
     await name.fill('Leselicht');
+    const existingNameInput = await name.elementHandle();
+    await page.locator('button[data-action="toggle-area"][data-area="basement"]').click();
+    await page.locator('[data-device-row="basement0"]').waitFor();
+    assert.equal(await existingNameInput.evaluate(element => element.isConnected), true);
+    assert.equal(await name.inputValue(), 'Leselicht');
     await page.locator('.export-device-name[data-entity="switch.relay_a"]').fill('Wohnzimmerbeleuchtung');
     await page.locator('.export-category[data-entity="switch.relay_a"]').selectOption('LIGHT');
     await page.locator('.export-access[data-entity="switch.relay_a"]').selectOption('read');
@@ -61,24 +101,42 @@ const server = http.createServer(async(req,res)=>{
     assert.equal(configuration.entities['switch.relay_a'].name,'Leselicht');
     assert.equal(configuration.entities['switch.relay_a'].display_category,'LIGHT');
     assert.equal(configuration.entities['switch.relay_a'].read_only,true);
-    await page.locator('[data-action="sync-one-device"][data-device="relay"]').click();
+    await Promise.all([
+      page.waitForResponse(response => response.url().includes('/api/native-export/sync') && response.request().method() === 'POST'),
+      page.locator('[data-action="sync-one-device"][data-device="relay"]').click(),
+    ]);
     const syncWrite=writes.find(w=>w.path==='/api/native-export/sync');
     assert.deepEqual(syncWrite.body.endpoint_ids,['native:relay']);
-    await page.reload();await page.locator('#btn-start-edit').click();
+    await page.reload();
+    await page.locator('button[data-action="toggle-area"][data-area="living"]').click();
+    await page.locator('[data-device-row="relay"]').waitFor();
+    await page.locator('#btn-start-edit').click();
     assert.equal(await name.inputValue(),'Leselicht');
     assert.equal(await page.locator('.export-category[data-entity="switch.relay_a"]').inputValue(),'LIGHT');
+    await page.locator('[data-device-row="giant"] button[data-action="more-entities"]').click();
     for (const id of ['switch.relay_a','switch.relay_b'])await page.locator(`[data-combine-entity="${id}"]`).check();
     await page.locator('#search').fill('Raumsensor');
     assert.match(await page.locator('#entity-selection-count').textContent(),/2 Entities/);
     await page.locator('#search').fill('');
     await page.reload();
     await page.locator('#btn-combine-selection').waitFor({state:'visible'});
+    await page.waitForFunction(() => document.querySelectorAll('[data-device-row="giant"] .simple-entity-row').length === 60);
     assert.match(await page.locator('#entity-selection-count').textContent(),/2 Entities/);
     await page.evaluate(()=>window.scrollTo(0,document.body.scrollHeight));
     const sticky=await page.locator('#btn-finish-edit').boundingBox();assert(sticky.y>=0&&sticky.y<200);
     await page.locator('#btn-combine-selection').click();
     assert.equal(await page.locator('#virtual-group-dialog input[data-vgroup-entity]:checked').count(),2);
+    assert.equal(await page.locator('#virtual-group-dialog input[data-vgroup-entity]').count(),2);
     assert.equal(await page.locator('.virtual-group-entity:visible').count(),2);
+    await page.locator('#virtual-group-search').fill('Keller 190');
+    await page.locator('input[data-vgroup-entity="switch.basement_190_0"]').check();
+    assert.equal(await page.locator('#virtual-group-dialog input[data-vgroup-entity]:checked').count(),3);
+    await page.locator('input[data-vgroup-entity="switch.basement_190_0"]').uncheck();
+    await page.locator('#virtual-group-search').fill('');
+    assert.equal(await page.locator('#virtual-group-dialog input[data-vgroup-entity]:checked').count(),2);
+    await page.locator('#virtual-group-show-all').check();
+    assert((await page.locator('#virtual-group-dialog input[data-vgroup-entity]').count()) <= 52);
+    await page.locator('#virtual-group-show-all').uncheck();
     await page.locator('#virtual-group-name').fill('Gemeinsame Beleuchtung');
     await page.locator('#btn-stage-virtual-group').click();
     assert.equal(await page.locator('#entity-selection-actions').isVisible(),false);

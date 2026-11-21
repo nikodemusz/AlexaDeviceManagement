@@ -731,6 +731,46 @@ def build_overview(
     }
 
 
+def compact_overview(result: dict[str, Any]) -> dict[str, Any]:
+    """Keep a compact global search index; full device records are fetched on demand."""
+    index = dict(result)
+    index["devices"] = []
+    for device in result.get("devices", []):
+        row = {key: value for key, value in device.items() if key not in ("entities", "grouping_suggestion")}
+        row["entities"] = []
+        for entity in device.get("entities", []):
+            # HA metadata supports global search, technical filters and the
+            # cross-room grouping picker even when the room is still closed.
+            item = {key: value for key, value in entity.items() if key not in ("export", "alexa")}
+            item["export"] = {"enabled": bool(entity.get("export", {}).get("enabled"))}
+            item["alexa"] = {"matches": [
+                {key: match.get(key) for key in ("key", "name", "room", "groups", "serial", "appliance_id", "source")}
+                for match in entity.get("alexa", {}).get("matches", [])
+            ]}
+            row["entities"].append(item)
+        row["details_loaded"] = False
+        index["devices"].append(row)
+    return index
+
+
+async def lazy_details(request: web.Request) -> web.Response:
+    """Read bounded device batches from the caller's overview snapshot."""
+    try:
+        body = await request.json()
+    except (ValueError, TypeError):
+        return web.json_response({"error": "Ungültige JSON-Daten."}, status=400)
+    ids = body.get("device_ids") if isinstance(body, dict) else None
+    snapshot_id = body.get("snapshot") if isinstance(body, dict) else None
+    if not isinstance(ids, list) or not ids or len(ids) > 25 or any(not isinstance(item, str) for item in ids):
+        return web.json_response({"error": "Bitte höchstens 25 Geräte auswählen."}, status=400)
+    snapshots = request.app.get("overview_lazy_snapshots", {})
+    snapshot = snapshots.get(snapshot_id)
+    if snapshot is None:
+        return web.json_response({"error": "Geräteliste wurde aktualisiert. Bitte Ansicht neu laden."}, status=409)
+    devices = snapshot["devices"]
+    return web.json_response({"devices": [devices[item] for item in dict.fromkeys(ids) if item in devices]})
+
+
 async def page(request: web.Request) -> web.Response:
     text = (STATIC_DIR / "device_overview.html").read_text(encoding="utf-8")
     asset_version = hashlib.sha256(b"".join(
@@ -817,6 +857,21 @@ async def overview(request: web.Request) -> web.Response:
             "generated_at": int(time.time()),
             "native_lifecycle": lifecycle,
         })
+        if request.rel_url.query.get("compact") == "1":
+            snapshots = request.app.setdefault("overview_lazy_snapshots", {})
+            # Reuse unchanged snapshots so frequent background polling does
+            # not evict a different browser's open edit session.
+            snapshot_id = hashlib.sha256(json.dumps(
+                result["devices"], sort_keys=True, ensure_ascii=False, separators=(",", ":")
+            ).encode()).hexdigest()[:24]
+            if snapshot_id not in snapshots:
+                snapshots[snapshot_id] = {"devices": {str(device.get("device_id")): device
+                                                       for device in result["devices"]}}
+            # Existing tabs can finish loading after another tab refreshes.
+            while len(snapshots) > 8:
+                snapshots.pop(next(iter(snapshots)))
+            result = compact_overview(result)
+            result["overview_snapshot"] = snapshot_id
         return web.json_response(result)
     except Exception as exc:
         return web.json_response({"ok": False, "error": str(exc)}, status=500)
@@ -944,5 +999,6 @@ def register_routes(app: web.Application, server: Any, store: Any) -> None:
     app.on_cleanup.append(_stop_overview_refresh)
     app.router.add_get("/devices", page)
     app.router.add_get("/api/device-overview", overview)
+    app.router.add_post("/api/device-overview/device-details", lazy_details)
     app.router.add_post("/api/device-overview/alexa-details", alexa_device_details)
     app.router.add_post("/api/device-overview/visibility", visibility)
