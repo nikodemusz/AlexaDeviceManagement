@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.15.0
+
+- Die Geräteübersicht lädt zunächst nur einen kompakten Suchindex. Vollständige Geräte- und Entitätsdaten werden beim Öffnen eines Bereichs in Paketen zu höchstens 25 Geräten nachgeladen.
+- Der zentrale Bearbeitungsmodus öffnet nur bereits aufgeklappte Bereiche. Alexa-Geräte ohne Zuordnung und die Entity-Auswahl für virtuelle Gruppen werden schrittweise angezeigt, damit große Bestände den Browser nicht blockieren.
+- Suchfilter und Entwürfe bleiben bereichsübergreifend nutzbar; beim Nachladen wird nur der betroffene Bereich aktualisiert.
+
 ## 3.14.0
 
 - Der Alexa-Geräteabgleich startet nur noch manuell. Gespeicherte Änderungen werden beim zentralen Abgleich gezielt gesendet; einzelne aktive Geräte können separat aktualisiert werden. Der Bestandsabruf bleibt asynchron.

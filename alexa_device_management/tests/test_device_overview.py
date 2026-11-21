@@ -458,6 +458,37 @@ class DeviceOverviewRouteTests(unittest.IsolatedAsyncioTestCase):
         source.assert_called_once_with(request.app, server, force=True)
         devices.assert_called_once_with(request.app, server, force=True)
 
+    async def test_compact_overview_loads_details_only_for_requested_devices(self):
+        now = time.time()
+        device_overview._OVERVIEW_SOURCE_CACHE.update({
+            "ha_inventory": ha_inventory(), "ha_updated_at": now, "groups": [],
+            "groups_updated_at": now, "alexa_configured": True, "last_attempt_at": now,
+        })
+        server = Mock()
+        server.is_configured.return_value = True
+        server._DEVICES_CACHE = {"updated_at": now, "devices": []}
+        store = Mock()
+        store.load.return_value = {"entities": {}}
+        request = Mock()
+        request.app = {"device_overview_server": server, "device_overview_store": store}
+        request.rel_url.query = {"compact": "1"}
+        with patch.object(device_overview, "NativeSkillConfigStore") as native_store:
+            native_store.return_value.load.return_value = {"enabled": False, "devices": {}}
+            index = json.loads((await device_overview.overview(request)).text)
+        self.assertFalse(index["devices"][0]["details_loaded"])
+        self.assertNotIn("grouping_suggestion", index["devices"][0])
+        self.assertEqual(index["devices"][0]["entities"][0]["entity_id"], "light.wohnzimmer")
+        details_request = Mock()
+        details_request.app = request.app
+        details_request.json = AsyncMock(return_value={"snapshot": index["overview_snapshot"], "device_ids": ["device-1"]})
+        details = json.loads((await device_overview.lazy_details(details_request)).text)
+        self.assertEqual(details["devices"][0]["device_id"], "device-1")
+        self.assertIn("grouping_suggestion", details["devices"][0])
+        details_request.json = AsyncMock(return_value={"snapshot": "old", "device_ids": ["device-1"]})
+        self.assertEqual((await device_overview.lazy_details(details_request)).status, 409)
+        details_request.json = AsyncMock(return_value={"snapshot": index["overview_snapshot"], "device_ids": [str(n) for n in range(26)]})
+        self.assertEqual((await device_overview.lazy_details(details_request)).status, 400)
+
     async def test_background_refresh_updates_and_persists_source_snapshots(self):
         server = Mock()
         server.is_configured.return_value = True
